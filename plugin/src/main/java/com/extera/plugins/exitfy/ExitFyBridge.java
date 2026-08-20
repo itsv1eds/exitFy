@@ -16,7 +16,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 @SuppressLint({"ObsoleteSdkInt", "UnsafeDynamicallyLoadedCode"})
 public final class ExitFyBridge {
     static final String DEX_KEEPER_PREFIX = "exitfy-dex-keeper:exitFy_v2:";
-    static final String DEX_KEEPER_NAME = DEX_KEEPER_PREFIX + "4.0.0-beta.24";
+    static final String DEX_KEEPER_NAME = DEX_KEEPER_PREFIX + "4.0.0-beta.25";
     private static final String PROCESS_OWNER_KEY =
             "com.extera.plugins.exitfy.dex_owner";
     private static final String PROCESS_OWNER_TOKEN = UUID.randomUUID().toString();

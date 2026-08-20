@@ -11,8 +11,12 @@ Android core builds it downloads at runtime.
 The two parts are released independently. Cores are published as
 `xray-v<upstream>-w<N>` and `sb-v<upstream>-w<N>` releases and are downloaded
 by the plugin at runtime; they are never bundled into the plugin artifact, and
-the plugin loads them through `dlopen`. The installable plugin artifact is
-generated at the repository root as `exitfy.plugin`.
+the plugin loads them through `dlopen`.
+
+The installable plugin artifact is a build output. `plugin/`'s pipeline writes
+it to the repository root as `exitfy.plugin`; it is not tracked here, because a
+stale copy would send installs to whichever core repository it was built
+against. Rebuild it from the current sources before handing it to a tester.
 
 Each directory documents its own build and verification pipeline. Run those
 pipelines from inside the directory they belong to.

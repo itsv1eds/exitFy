@@ -1,11 +1,11 @@
-# exitFy 4.0.0-beta.24 device checklist
+# exitFy 4.0.0-beta.25 device checklist
 
 Device testing is performed by the beta tester after receiving
 `exitfy.plugin`. Use real `arm64-v8a` hardware only:
 
 - One Android 10/API 29 arm64 device and one current Android arm64 device.
 - exteraGram 12.5.1 (`e17f1bde…`) and 12.8.1 (`ab284232…`).
-- Confirm the plugin is `exitFy_v2`, version `4.0.0-beta.24`, schema 6, and an
+- Confirm the plugin is `exitFy_v2`, version `4.0.0-beta.25`, schema 6, and an
   upgrade preserves settings, subscriptions and nodes. Legacy string, numeric
   and malformed `core_policy` values must become the inert `auto` tombstone;
   no core policy may reach DEX or appear in UI.
@@ -72,8 +72,8 @@ Device testing is performed by the beta tester after receiving
 
 - On a fresh install, confirm only
   [itsv1eds/exitFy](https://github.com/itsv1eds/exitFy) is contacted.
-  The verified handoff releases are `sb-v1.13.14-w2011` and
-  `xray-v26.7.11-w2011`; a newer stable compatible `wN` may be selected.
+  The verified handoff releases are `sb-v1.13.19-w1006` and
+  `xray-v26.7.28-w2010`; a newer stable compatible `wN` may be selected.
 - Confirm every accepted manifest is schema 3, core API 2, config contract 1,
   `minAndroidApi=29`, and contains exactly one `arm64-v8a` ELF64 asset.
 - Start with old schema-2/API-26 active, pending and backup core files. None may
