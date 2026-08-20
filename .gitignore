@@ -1,0 +1,18 @@
+.DS_Store
+__pycache__/
+*.pyc
+
+# cores build outputs
+dist/
+dist-repro/
+*.h
+
+# plugin build outputs and local configuration
+plugin/build/
+plugin/.gradle/
+plugin/.cxx/
+plugin/local.properties
+java_pid*.hprof
+
+# maintainer-only private endpoints, never packaged
+plugin/providers.private.json

@@ -1,0 +1,24 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+def telegramSourceRoot = providers.gradleProperty("telegramSourceDir")
+        .orElse(providers.environmentVariable("EXTERAGRAM_SOURCE_DIR"))
+        .getOrElse("${System.getProperty("user.home")}/work/exteraGram-Dev")
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        maven {
+            url = uri("${telegramSourceRoot}/Tools/maven")
+        }
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "ExitFy"

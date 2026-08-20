@@ -1,0 +1,579 @@
+import base64
+import hashlib
+import json
+import os
+import zlib
+
+from base_plugin import AppEvent, BasePlugin, MenuItemData, MenuItemType
+from android_utils import run_on_ui_thread
+from client_utils import get_last_fragment
+from ui.bulletin import BulletinHelper
+from ui.settings import Text
+
+from java import jclass
+from org.telegram.messenger import ApplicationLoader
+
+__id__ = "exitFy_v2"
+__name__ = "exitFy"
+__description__ = "Adaptive DEX-first Telegram proxy. Android 10+ arm64-v8a."
+__author__ = "@exteraPluginsSup"
+__version__ = "4.0.0-beta.24"
+__icon__ = "exitFy/1"
+__app_version__ = ">=12.5.1"
+__sdk_version__ = ">=1.4.3.8"
+
+ENTRY_CLASS = "com.extera.plugins.exitfy.ExitFyBridge"
+DEX_KEEPER_PREFIX = "exitfy-dex-keeper:exitFy_v2:"
+DEX_KEEPER_NAME = DEX_KEEPER_PREFIX + __version__
+SETTINGS_SCHEMA = 6
+PROVIDER_CATALOG_VERSION = 2
+CUSTOM_PROVIDER_ID = 2
+LEGACY_TRANSIENT_SETTING_KEYS = (
+    "ui_add_node", "ui_add_subscription", "ui_hwid_entry", "ui_node_query",
+)
+DEX_BEGIN = "__DEX_BEGIN__"
+DEX_END = "__DEX_END__"
+NATIVE_BEGIN = "__NATIVE_BEGIN__"
+NATIVE_END = "__NATIVE_END__"
+SUPPORTED_ABIS = ("arm64-v8a",)
+ELF_MACHINES = {"arm64-v8a": 183}
+
+Build = jclass("android.os.Build")
+BuildVersion = jclass("android.os.Build$VERSION")
+Process = jclass("android.os.Process")
+LocaleController = jclass("org.telegram.messenger.LocaleController")
+
+_TRANSLATIONS = {
+    "runtime_not_started": ("exitFy не запущен: ", "exitFy did not start: "),
+    "runtime_unavailable": ("Runtime exitFy недоступен", "exitFy runtime is unavailable"),
+    "menu_settings": ("Настройки exitFy", "exitFy settings"),
+    "settings_open_failed": (
+        "Не удалось открыть exitFy",
+        "Could not open exitFy",
+    ),
+}
+
+
+def _is_russian():
+    try:
+        info = LocaleController.getInstance().getCurrentLocaleInfo()
+        code = str(info.shortName or "") if info is not None else ""
+        if code:
+            return code.lower().startswith("ru")
+    except Exception:
+        pass
+    try:
+        Locale = jclass("java.util.Locale")
+        return str(Locale.getDefault().getLanguage() or "").lower() == "ru"
+    except Exception:
+        return False
+
+
+def _t(key):
+    value = _TRANSLATIONS.get(key, (key, key))
+    return value[0] if _is_russian() else value[1]
+
+
+def _ui_error(message):
+    try:
+        run_on_ui_thread(lambda: BulletinHelper.show_error(str(message)))
+    except Exception:
+        pass
+
+
+def _read_payload(begin_name, end_name):
+    try:
+        with open(__file__, "r", encoding="utf-8") as source:
+            text = source.read()
+        block = text.split("# " + begin_name, 1)[1].split("# " + end_name, 1)[0]
+        payload = "".join(
+            line.strip()[1:].strip()
+            for line in block.splitlines()
+            if line.strip().startswith("#")
+        )
+        if not payload:
+            raise RuntimeError("payload is empty")
+        return zlib.decompress(base64.b64decode(payload))
+    except Exception as exc:
+        raise RuntimeError("embedded payload decode failed: " + str(exc))
+
+
+def _require_supported_platform():
+    # Reject unsupported devices before reading DEX/JNI payloads or creating
+    # exitFy's private runtime directory.
+    if int(BuildVersion.SDK_INT) < 29:
+        raise RuntimeError("exitFy requires Android 10 / API 29+")
+    try:
+        if not bool(Process.is64Bit()):
+            raise RuntimeError("exitFy requires a 64-bit arm64-v8a process")
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError("could not verify the Android process bitness: " + str(exc))
+    try:
+        abis = Build.SUPPORTED_ABIS
+        if abis is None or len(abis) < 1:
+            raise RuntimeError("Android primary ABI is unavailable")
+        value = str(abis[0])
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError("could not verify the Android primary ABI: " + str(exc))
+    if value != "arm64-v8a":
+        raise RuntimeError("exitFy supports only an arm64-v8a process")
+    return value
+
+
+def _current_abi():
+    return _require_supported_platform()
+
+
+def _matches_file_digest(path, expected_size, expected_sha):
+    try:
+        if int(os.path.getsize(path)) != int(expected_size):
+            return False
+        digest = hashlib.sha256()
+        with open(path, "rb") as source:
+            while True:
+                chunk = source.read(32 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest() == expected_sha
+    except Exception:
+        return False
+
+
+def _extract_native_bridge():
+    abi = _require_supported_platform()
+    bundle = json.loads(_read_payload(NATIVE_BEGIN, NATIVE_END).decode("utf-8"))
+    item = (bundle.get("libs") or {}).get(abi)
+    if not isinstance(item, dict):
+        raise RuntimeError("native bridge is missing for " + abi)
+    raw = base64.b64decode(str(item.get("data") or ""))
+    expected_size = int(item.get("size") or 0)
+    expected_sha = str(item.get("sha256") or "").lower()
+    if len(raw) != expected_size or hashlib.sha256(raw).hexdigest() != expected_sha:
+        raise RuntimeError("native bridge digest mismatch")
+    if len(raw) < 20 or raw[:4] != b"\x7fELF":
+        raise RuntimeError("native bridge has an invalid ELF header")
+    machine = int(raw[18]) | (int(raw[19]) << 8)
+    if machine != ELF_MACHINES[abi]:
+        raise RuntimeError("native bridge ABI mismatch")
+
+    context = ApplicationLoader.applicationContext
+    root = str(context.getDir("exitFy_v2", 0).getAbsolutePath())
+    bridge_dir = os.path.join(root, "bridge", abi)
+    os.makedirs(bridge_dir, exist_ok=True)
+    target = os.path.join(bridge_dir, "libexitfy_bridge.so")
+    valid_existing = _matches_file_digest(target, expected_size, expected_sha)
+    if not valid_existing:
+        staged = target + ".tmp"
+        try:
+            with open(staged, "wb") as output:
+                output.write(raw)
+                output.flush()
+                os.fsync(output.fileno())
+            os.chmod(staged, 0o700)
+            os.replace(staged, target)
+        except Exception:
+            try:
+                os.unlink(staged)
+            except Exception:
+                pass
+            raise
+    return root, target, abi
+
+
+class DexRuntime:
+    def __init__(self):
+        self.clazz = None
+        self.class_loader = None
+        self.loaded = False
+
+    def prepare(self):
+        _require_supported_platform()
+        if self.clazz is not None:
+            return
+        retained = self._find_retained_dex()
+        if retained is not None:
+            self.class_loader, self.clazz = retained
+            return
+        context = ApplicationLoader.applicationContext
+        if context is None:
+            raise RuntimeError("application context is not ready")
+        ByteBuffer = jclass("java.nio.ByteBuffer")
+        InMemoryDexClassLoader = jclass("dalvik.system.InMemoryDexClassLoader")
+        self.class_loader = InMemoryDexClassLoader(
+            ByteBuffer.wrap(_read_payload(DEX_BEGIN, DEX_END)),
+            context.getClassLoader(),
+        )
+        self.clazz = self.class_loader.loadClass(ENTRY_CLASS)
+
+    @staticmethod
+    def _find_retained_dex():
+        try:
+            Thread = jclass("java.lang.Thread")
+            threads = Thread.getAllStackTraces().keySet().toArray()
+        except Exception as exc:
+            raise RuntimeError("could not inspect retained exitFy DEX: " + str(exc))
+
+        matching = []
+        incompatible = []
+        for thread in threads:
+            try:
+                name = str(thread.getName() or "")
+            except Exception:
+                continue
+            if not name.startswith(DEX_KEEPER_PREFIX):
+                continue
+            if name == DEX_KEEPER_NAME:
+                matching.append(thread)
+            else:
+                incompatible.append(name)
+
+        if incompatible:
+            raise RuntimeError("another exitFy DEX version is retained; restart exteraGram")
+        if not matching:
+            return None
+        if len(matching) != 1:
+            raise RuntimeError("ambiguous retained exitFy DEX; restart exteraGram")
+        try:
+            loader = matching[0].getContextClassLoader()
+            if loader is None:
+                raise RuntimeError("retained exitFy DEX has no class loader; restart exteraGram")
+            return loader, loader.loadClass(ENTRY_CLASS)
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            raise RuntimeError("retained exitFy DEX is unusable; restart exteraGram: " + str(exc))
+
+    def invoke(self, method_name, *args):
+        self.prepare()
+        matches = []
+        for method in self.clazz.getDeclaredMethods():
+            if str(method.getName()) == method_name \
+                    and len(method.getParameterTypes()) == len(args):
+                method.setAccessible(True)
+                matches.append(method)
+        if len(matches) != 1:
+            raise RuntimeError("invalid bridge method: %s/%d" % (method_name, len(args)))
+        try:
+            return matches[0].invoke(None, *args)
+        except Exception as exc:
+            cause = None
+            try:
+                cause = exc.getCause()
+            except Exception:
+                pass
+            if cause is not None:
+                try:
+                    raise RuntimeError(str(cause.getMessage() or cause))
+                except RuntimeError:
+                    raise
+                except Exception:
+                    raise RuntimeError(str(cause))
+            raise
+
+    def start(self, bootstrap_json, settings_json):
+        self.invoke("configure", bootstrap_json)
+        try:
+            self.invoke("load")
+            self.invoke("updateSettings", settings_json)
+            self.loaded = True
+        except Exception:
+            try:
+                self.invoke("unload")
+            except Exception:
+                pass
+            self.loaded = False
+            raise
+
+    def stop(self):
+        if self.clazz is None or not self.loaded:
+            return
+        try:
+            self.invoke("unload")
+        finally:
+            # The Class and ClassLoader stay reachable through the DEX keeper.
+            self.loaded = False
+
+    def call(self, method_name, *args):
+        if self.clazz is None or not self.loaded:
+            raise RuntimeError("exitFy runtime is not loaded")
+        return self.invoke(method_name, *args)
+
+
+_DEX_RUNTIME = DexRuntime()
+
+
+class ExitFyPlugin(BasePlugin):
+    def __init__(self):
+        super().__init__()
+        self._menu_ids = []
+        self._runtime_ready = False
+        self._provider_migration_value = None
+
+    def on_plugin_load(self):
+        try:
+            self._clear_legacy_transient_settings()
+            self._migrate_provider_catalog()
+            self._normalize_runtime_setting_storage()
+            data_dir, bridge_path, abi = _extract_native_bridge()
+            bootstrap = {
+                "pluginId": __id__,
+                "pluginVersion": __version__,
+                "settingsSchema": SETTINGS_SCHEMA,
+                "dataDir": data_dir,
+                "nativeBridgePath": bridge_path,
+                "nativeAbi": abi,
+            }
+            _DEX_RUNTIME.start(
+                json.dumps(bootstrap, separators=(",", ":")),
+                self._settings_json(),
+            )
+            self._runtime_ready = True
+            try:
+                self.set_setting("schema_version", SETTINGS_SCHEMA, reload_settings=False)
+            except Exception as exc:
+                self.log("exitFy schema marker persistence failed: " + str(exc))
+            self._register_menu()
+        except Exception as exc:
+            self._remove_menu_items()
+            try:
+                _DEX_RUNTIME.stop()
+            except Exception as cleanup_error:
+                self.log("exitFy failed-load cleanup failed: " + str(cleanup_error))
+            self._runtime_ready = False
+            self.log("exitFy DEX load failed: " + str(exc))
+            _ui_error(_t("runtime_not_started") + str(exc))
+            raise
+
+    def on_plugin_unload(self):
+        self._remove_menu_items()
+        try:
+            _DEX_RUNTIME.stop()
+        except Exception as exc:
+            self.log("exitFy unload failed: " + str(exc))
+        self._runtime_ready = False
+
+    def on_app_event(self, event_type):
+        if event_type != AppEvent.RESUME or not self._runtime_ready:
+            return
+        try:
+            _DEX_RUNTIME.call("onAppResume")
+        except Exception as exc:
+            self.log("exitFy resume failed: " + str(exc))
+
+    @staticmethod
+    def _as_bool(value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "on")
+        return bool(value)
+
+    @staticmethod
+    def _bounded_index(value, maximum):
+        try:
+            result = int(value)
+        except Exception:
+            result = 0
+        return min(max(result, 0), maximum)
+
+    def _settings_dict(self):
+        raw_hwid = self.get_setting("custom_hwid", "")
+        normalized_hwid = self._normalize_hwid(raw_hwid)
+        if raw_hwid != normalized_hwid:
+            try:
+                self.set_setting("custom_hwid", normalized_hwid, reload_settings=False)
+            except Exception as exc:
+                self.log("exitFy HWID normalization failed: " + str(exc))
+        provider_value = self._provider_migration_value
+        if provider_value is None:
+            provider_value = self.get_setting("provider_id", 0)
+        return {
+            "enabled": self._as_bool(self.get_setting("enabled", False)),
+            "provider_id": self._bounded_index(provider_value, CUSTOM_PROVIDER_ID),
+            "custom_hwid": normalized_hwid,
+            "ping_type": self._ping_type_value(),
+            "schema_version": SETTINGS_SCHEMA,
+        }
+
+    def _migrate_provider_catalog(self):
+        try:
+            version = int(self.get_setting("provider_catalog_version", 0) or 0)
+        except Exception:
+            version = 0
+        if version >= PROVIDER_CATALOG_VERSION:
+            self._provider_migration_value = None
+            return
+        try:
+            saved_legacy = self.get_setting("provider_catalog_legacy_id", None)
+        except Exception:
+            saved_legacy = None
+        try:
+            source_id = int(saved_legacy) if saved_legacy is not None else int(
+                self.get_setting("provider_id", 0) or 0
+            )
+        except Exception:
+            source_id = 0
+        source_id = self._bounded_index(source_id, 3)
+        migrated_id = CUSTOM_PROVIDER_ID if source_id == 3 else (0 if source_id == 2 else source_id)
+        self._provider_migration_value = migrated_id
+        try:
+            if saved_legacy is None:
+                self.set_setting("provider_catalog_legacy_id", source_id, reload_settings=False)
+            self.set_setting("provider_id", migrated_id, reload_settings=False)
+            self.set_setting(
+                "provider_catalog_version", PROVIDER_CATALOG_VERSION, reload_settings=False
+            )
+            self._provider_migration_value = None
+        except Exception as exc:
+            self.log("exitFy provider catalog migration failed: " + str(exc))
+
+    def _clear_legacy_transient_settings(self):
+        """Remove obsolete dialog/filter scratch values which may contain secrets."""
+        for key in LEGACY_TRANSIENT_SETTING_KEYS:
+            try:
+                value = self.get_setting(key, "")
+                if value not in (None, ""):
+                    self.set_setting(key, "", reload_settings=False)
+            except Exception as exc:
+                self.log("exitFy transient setting cleanup failed: " + str(exc))
+
+    @staticmethod
+    def _normalize_hwid(value):
+        try:
+            source = value if isinstance(value, str) else str(value or "")
+        except Exception:
+            source = ""
+        raw_end = 0
+        raw_code_points = 0
+        while raw_end < len(source) and raw_code_points < 4096:
+            code = ord(source[raw_end])
+            raw_end += 1
+            if 0xD800 <= code <= 0xDBFF and raw_end < len(source) \
+                    and 0xDC00 <= ord(source[raw_end]) <= 0xDFFF:
+                raw_end += 1
+            raw_code_points += 1
+        source = source[:raw_end]
+        start = 0
+        end = len(source)
+        while start < end and ord(source[start]) <= 0x20:
+            start += 1
+        while end > start and ord(source[end - 1]) <= 0x20:
+            end -= 1
+        output = []
+        byte_count = 0
+        index = start
+        while index < end and len(output) < 256:
+            code = ord(source[index])
+            index += 1
+            if 0xD800 <= code <= 0xDBFF:
+                if index < end and 0xDC00 <= ord(source[index]) <= 0xDFFF:
+                    code = 0x10000 + ((code - 0xD800) << 10) \
+                        + (ord(source[index]) - 0xDC00)
+                    index += 1
+                else:
+                    code = 0xFFFD
+            elif 0xDC00 <= code <= 0xDFFF:
+                code = 0xFFFD
+            if code <= 0x1F or 0x7F <= code <= 0x9F:
+                continue
+            char = chr(code)
+            encoded = char.encode("utf-8")
+            if byte_count + len(encoded) > 1024:
+                break
+            output.append(char)
+            byte_count += len(encoded)
+        return "".join(output)
+
+    def _ping_type_value(self):
+        value = self.get_setting("ping_type", "proxy_get")
+        if isinstance(value, (int, float)):
+            return ("proxy_get", "tcp")[self._bounded_index(value, 1)]
+        value = str(value or "proxy_get").strip().lower()
+        return value if value in ("proxy_get", "tcp") else "proxy_get"
+
+    def _normalize_runtime_setting_storage(self):
+        try:
+            legacy_core_policy = self.get_setting("core_policy", None)
+            if not isinstance(legacy_core_policy, str) or legacy_core_policy != "auto":
+                self.set_setting("core_policy", "auto", reload_settings=False)
+        except Exception as exc:
+            self.log("exitFy core policy tombstone migration failed: " + str(exc))
+        values = {"ping_type": self._ping_type_value()}
+        for key, normalized in values.items():
+            raw = self.get_setting(key, normalized)
+            if not isinstance(raw, str) or raw != normalized:
+                try:
+                    self.set_setting(key, normalized, reload_settings=False)
+                except Exception as exc:
+                    self.log("exitFy setting normalization failed for %s: %s" % (key, exc))
+
+    def _settings_json(self):
+        return json.dumps(self._settings_dict(), separators=(",", ":"))
+
+    def create_settings(self):
+        return [Text(text="@exteraPluginsSup")]
+
+    def _register_menu(self):
+        entries = (
+            (MenuItemType.DRAWER_MENU, "exitFy_v2_settings_drawer"),
+            (MenuItemType.CHAT_ACTION_MENU, "exitFy_v2_settings_chat"),
+        )
+        for menu_type, stable_id in entries:
+            try:
+                self.remove_menu_item(stable_id)
+            except Exception:
+                pass
+            try:
+                item_id = self.add_menu_item(MenuItemData(
+                    menu_type=menu_type,
+                    text=_t("menu_settings"),
+                    on_click=self._open_dashboard,
+                    item_id=stable_id,
+                    icon="msg_settings",
+                    priority=1,
+                ))
+                self._menu_ids.append(str(item_id or stable_id))
+            except Exception as exc:
+                self.log("exitFy menu registration failed: " + str(exc))
+
+    def _remove_menu_items(self):
+        for item_id in list(self._menu_ids):
+            try:
+                self.remove_menu_item(item_id)
+            except Exception:
+                pass
+        self._menu_ids = []
+
+    def _open_dashboard(self, _context=None):
+        def open_on_ui():
+            try:
+                if not self._runtime_ready:
+                    raise RuntimeError(_t("runtime_unavailable"))
+                dashboard = _DEX_RUNTIME.call("createDashboardFragment")
+                fragment = get_last_fragment()
+                if dashboard is None or fragment is None:
+                    raise RuntimeError(_t("settings_open_failed"))
+                dashboard.setCurrentAccount(fragment.getCurrentAccount())
+                if not fragment.presentFragment(dashboard):
+                    raise RuntimeError(_t("settings_open_failed"))
+            except Exception as exc:
+                self.log("exitFy dashboard open failed: " + str(exc))
+                _ui_error(_t("settings_open_failed"))
+
+        try:
+            run_on_ui_thread(open_on_ui)
+        except Exception as exc:
+            self.log("exitFy dashboard scheduling failed: " + str(exc))
+            _ui_error(_t("settings_open_failed"))
+
+
+# __DEX_BEGIN__
+# __DEX_END__
+
+# __NATIVE_BEGIN__
+# __NATIVE_END__

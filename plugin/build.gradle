@@ -1,0 +1,2357 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
+import java.net.URLClassLoader
+import java.net.URI
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.zip.Deflater
+import java.util.zip.DeflaterOutputStream
+import java.util.zip.InflaterInputStream
+import java.util.zip.ZipFile
+
+plugins {
+    id 'com.android.library' version '9.1.1'
+}
+
+def telegramSourceOverride = findProperty("telegramSourceDir") ?: System.getenv("EXTERAGRAM_SOURCE_DIR")
+def telegramSourceDir = file(telegramSourceOverride ?: "${System.getProperty("user.home")}/work/exteraGram-Dev")
+Properties localSdkProperties = new Properties()
+File localSdkPropertiesFile = file("local.properties")
+if (localSdkPropertiesFile.exists()) {
+    localSdkPropertiesFile.withInputStream { localSdkProperties.load(it) }
+}
+def androidSdkOverride = findProperty("androidSdkDir") ?: System.getenv("ANDROID_SDK_ROOT") ?:
+        System.getenv("ANDROID_HOME") ?: localSdkProperties.getProperty("sdk.dir")
+def androidSdkDir = file(androidSdkOverride ?: "${System.getProperty("user.home")}/Library/Android/sdk")
+def hostVariant = findProperty("telegramHostVariant") ?: "fullAfatDebug"
+def hostApplicationId = findProperty("telegramHostApplicationId") ?: "com.exteragram.messenger"
+def hostBundleTask = "bundle${hostVariant.capitalize()}ClassesToCompileJar"
+def hostClassesJar = file("${telegramSourceDir}/TMessagesProj/build/intermediates/compile_app_classes_jar/${hostVariant}/${hostBundleTask}/classes.jar")
+def hostContractSources = files(
+        "${telegramSourceDir}/TMessagesProj/src/full/java/com/exteragram/messenger/plugins/Plugin.kt",
+        "${telegramSourceDir}/TMessagesProj/src/full/java/com/exteragram/messenger/plugins/PluginsController.kt",
+        "${telegramSourceDir}/TMessagesProj/src/full/java/com/exteragram/messenger/plugins/PythonPluginsEngine.kt",
+        "${telegramSourceDir}/TMessagesProj/src/main/java/org/telegram/messenger/AndroidUtilities.java",
+        "${telegramSourceDir}/TMessagesProj/src/main/java/org/telegram/messenger/ApplicationLoader.java",
+        "${telegramSourceDir}/TMessagesProj/src/main/java/org/telegram/messenger/LocaleController.java",
+        "${telegramSourceDir}/TMessagesProj/src/main/java/org/telegram/messenger/MessagesController.java",
+        "${telegramSourceDir}/TMessagesProj/src/main/java/org/telegram/messenger/NotificationCenter.java",
+        "${telegramSourceDir}/TMessagesProj/src/main/java/org/telegram/messenger/SharedConfig.java",
+        "${telegramSourceDir}/TMessagesProj/src/main/java/org/telegram/tgnet/ConnectionsManager.java",
+        "${telegramSourceDir}/TMessagesProj/src/main/java/org/telegram/ui/ActionBar/ActionBar.java",
+        "${telegramSourceDir}/TMessagesProj/src/main/java/org/telegram/ui/ActionBar/AlertDialog.java",
+        "${telegramSourceDir}/TMessagesProj/src/main/java/org/telegram/ui/ActionBar/BaseFragment.java",
+        "${telegramSourceDir}/TMessagesProj/src/main/java/org/telegram/ui/ActionBar/Theme.java",
+)
+def pluginTemplateFile = file("ExitFy.template.plugin")
+def proguardFile = file("proguard-rules.pro")
+def outputPlugin = file(findProperty("pluginOutputFile") ?: "${projectDir.parent}/exitfy.plugin")
+def outputAarName = "${rootProject.name}-plugin.aar"
+def pluginId = "exitFy_v2"
+def pluginVersion = "4.0.0-beta.24"
+def settingsSchema = 6
+def pluginAuthor = "@exteraPluginsSup"
+def pluginIcon = "exitFy/1"
+def dexEntryClass = "com.extera.plugins.exitfy.ExitFyBridge"
+def bootstrapConfigFile = file("src/main/java/com/extera/plugins/exitfy/BootstrapConfig.java")
+def providerPrivateFile = file("providers.private.json")
+def providerGeneratorFile = file("tools/generate_provider_catalog.py")
+def providerCatalogFiles = [
+        file("src/main/java/com/extera/plugins/exitfy/ProviderCatalogData.java"),
+        file("src/main/java/com/extera/plugins/exitfy/CatalogMaterialA.java"),
+        file("src/main/java/com/extera/plugins/exitfy/CatalogMaterialB.java"),
+]
+def compileSdkApi = 36
+def minAndroidApi = 29
+def ndkRevision = "27.2.12479018"
+def androidNdkOverride = findProperty("androidNdkDir") ?: System.getenv("ANDROID_NDK_HOME") ?:
+        System.getenv("ANDROID_NDK_ROOT") ?: localSdkProperties.getProperty("ndk.dir")
+def androidNdkDir = file(androidNdkOverride ?: "${androidSdkDir}/ndk/${ndkRevision}")
+def supportedAbis = ["arm64-v8a"]
+def dexBeginMarker = "# __DEX_BEGIN__"
+def dexEndMarker = "# __DEX_END__"
+def nativeBeginMarker = "# __NATIVE_BEGIN__"
+def nativeEndMarker = "# __NATIVE_END__"
+def forbiddenResetTokens = [
+        ["clear", "Plugin", "Settings", "Preferences"].join(""),
+        ["clear", "Plugin", "Settings"].join(""),
+        ["reset", "Schema"].join(""),
+        ["Schema", "Migration"].join(""),
+        ["runtime", "-v4"].join(""),
+        ["exitfy", "_prefs"].join(""),
+        ["exitfy", "_modules"].join(""),
+        ["_migrate", "_settings"].join(""),
+]
+def forbiddenThirdPartyCoreTokens = [
+        ["its", "v1eds"].join(""),
+        ["lib", "_singbox"].join(""),
+        ["libvless", "-"].join(""),
+]
+def forbiddenRemovedProviderTokens = [
+        ["swork", "le"].join(""),
+        ["s3.too", "step.top/sub/exitfy"].join(""),
+]
+def forbiddenSensitiveSubscriptionTokens = [
+        ["panel", ".elix", ".rip"].join(""),
+        ["mvr", "yyn9u5xs8auap"].join(""),
+        ["charity", ".invisible", "shrimp", ".su"].join(""),
+        ["dgc4_", "hkxvz0phvvw"].join(""),
+]
+def forbiddenDiagnosticsTokens = [
+        "diagnostic",
+        "copy_log",
+        "clear_log",
+        "logcount",
+        "importdiagnostics",
+        "safelog",
+]
+def forbiddenNodeSelectionTokens = [
+        ["auto", "_switch"].join(""),
+        ["auto", "switch"].join(""),
+        ["automatic", "switch"].join(""),
+        ["auto", "-switch"].join(""),
+        ["automatic node ", "switching"].join(""),
+        ["авто", "переключ"].join(""),
+]
+def forbiddenLocalArtifactTokens = [
+        "/users/",
+        "/home/",
+        "\\users\\",
+        "tmessagesproj/src/",
+        "exteragram-dev",
+]
+def forbiddenAndroidRuntimeAbiTokens = [
+        "armeabi-v7a",
+        "x86_64",
+        "libexitfy-sb-x86",
+        "libxray-x86",
+]
+
+android {
+    namespace = 'com.extera.plugins.exitfy'
+    compileSdk = compileSdkApi
+    ndkVersion = ndkRevision
+
+    defaultConfig {
+        minSdk = minAndroidApi
+        ndk {
+            abiFilters.addAll(supportedAbis)
+        }
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_static", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+            }
+        }
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        debug {
+            externalNativeBuild {
+                cmake {
+                    arguments "-DEXITFY_BUILD_FAKE_CORES=ON"
+                }
+            }
+        }
+        release {
+            minifyEnabled = false
+            externalNativeBuild {
+                cmake {
+                    arguments "-DEXITFY_BUILD_FAKE_CORES=OFF"
+                }
+            }
+        }
+        plugin {
+            initWith release
+            matchingFallbacks = ['debug']
+            minifyEnabled = true
+            // The stock optimized rules globally enable access relaxation,
+            // which would expand the reflected bridge ABI. This DEX has no
+            // Android component entry points, so use the plugin's scoped rules.
+            proguardFiles proguardFile
+            externalNativeBuild {
+                cmake {
+                    arguments "-DEXITFY_BUILD_FAKE_CORES=OFF"
+                }
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+
+    lint {
+        abortOnError = true
+        checkReleaseBuilds = true
+    }
+}
+
+dependencies {
+    compileOnly files(hostClassesJar)
+    // Keep R8's view of Telegram UI classes aligned with the host dependency
+    // graph. This remains host-provided and is never packaged into the plugin.
+    compileOnly("androidx.core:core:1.18.0") {
+        transitive = false
+    }
+    compileOnly("androidx.work:work-runtime:2.11.2") {
+        transitive = false
+    }
+    // exteraGram supplies this Xposed-compatible ABI at runtime.
+    compileOnly("dev.exterahook:exterahook:0.2.2") {
+        transitive = false
+    }
+    testImplementation "junit:junit:4.13.2"
+    testImplementation "org.json:json:20250517"
+    testRuntimeOnly files(hostClassesJar)
+    androidTestImplementation "androidx.test.ext:junit:1.2.1"
+    androidTestImplementation "androidx.test:runner:1.6.2"
+}
+
+// AGP can leave native model directories from an older ABI matrix when its
+// configuration hash changes. A clean arm64-only build must not retain those
+// generated Android-ABI caches beside the current arm64-only model.
+tasks.named("clean").configure {
+    delete file(".cxx")
+    delete file("__pycache__"), file("tests/__pycache__"), file("tools/__pycache__")
+    delete fileTree(projectDir).matching {
+        include "java_pid*.hprof", "**/__pycache__/**"
+    }
+    doLast {
+        // Gradle/Ant default excludes hide .DS_Store from a normal fileTree.
+        ant.delete(quiet: true) {
+            fileset(dir: projectDir, defaultexcludes: false) {
+                include(name: "**/.DS_Store")
+            }
+        }
+    }
+}
+
+def resolveBuildToolsExe = { String exeName ->
+    def btDir = file("${androidSdkDir}/build-tools")
+    if (!btDir.exists()) {
+        throw new GradleException("Android build-tools not found in SDK: ${btDir}")
+    }
+    def candidates = btDir.listFiles().findAll { it.isDirectory() && new File(it, exeName).exists() }
+    if (!candidates) {
+        throw new GradleException("${exeName} not found in build-tools")
+    }
+    candidates.sort { a, b ->
+        def av = a.name.tokenize('.').collect { it.isInteger() ? it as int : 0 }
+        def bv = b.name.tokenize('.').collect { it.isInteger() ? it as int : 0 }
+        for (int i = 0; i < Math.max(av.size(), bv.size()); i++) {
+            int ai = i < av.size() ? av[i] : 0
+            int bi = i < bv.size() ? bv[i] : 0
+            if (ai != bi) return ai <=> bi
+        }
+        0
+    }
+    new File(candidates.last(), exeName).absolutePath
+}
+
+def resolveNdkTool = { String toolName ->
+    String executable = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("windows") ?
+            "${toolName}.exe" : toolName
+    File prebuiltRoot = new File(androidNdkDir, "toolchains/llvm/prebuilt")
+    if (!prebuiltRoot.isDirectory()) {
+        throw new GradleException("Android NDK ${ndkRevision} not found: ${androidNdkDir}")
+    }
+    def candidates = prebuiltRoot.listFiles()
+            .findAll { it.isDirectory() }
+            .collect { new File(it, "bin/${executable}") }
+            .findAll { it.isFile() }
+            .sort { it.absolutePath }
+    if (!candidates) {
+        throw new GradleException("${toolName} not found in Android NDK: ${androidNdkDir}")
+    }
+    candidates.first().absolutePath
+}
+
+def resolveJadx = {
+    boolean windows = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("windows")
+    String executable = windows ? "jadx.bat" : "jadx"
+    List<File> candidates = []
+    String configured = findProperty("jadxPath") ?: System.getenv("JADX")
+    if (configured) candidates.add(file(configured))
+    String jadxHome = System.getenv("JADX_HOME")
+    if (jadxHome) candidates.add(new File(jadxHome, "bin/${executable}"))
+    String path = System.getenv("PATH")
+    if (path) {
+        path.split(java.util.regex.Pattern.quote(File.pathSeparator)).each { entry ->
+            if (entry) candidates.add(new File(entry, executable))
+        }
+    }
+    if (!windows) {
+        candidates.add(file("/opt/homebrew/bin/jadx"))
+        candidates.add(file("/usr/local/bin/jadx"))
+    }
+    File resolved = candidates.find { it.isFile() }
+    if (resolved == null) {
+        throw new GradleException(
+                "jadx is required for artifact audit; set -PjadxPath, JADX, JADX_HOME, or PATH")
+    }
+    resolved.absolutePath
+}
+
+def captureCommand = { List<String> command ->
+    Process process
+    ByteArrayOutputStream output = new ByteArrayOutputStream()
+    try {
+        process = new ProcessBuilder(command)
+                .redirectErrorStream(true)
+                .start()
+        InputStream stream = process.inputStream
+        try {
+            byte[] buffer = new byte[8192]
+            int count
+            while ((count = stream.read(buffer)) >= 0) {
+                if (count > 0) output.write(buffer, 0, count)
+            }
+        } finally {
+            stream.close()
+        }
+        int exitCode = process.waitFor()
+        String captured = output.toString(StandardCharsets.UTF_8.name())
+        if (exitCode != 0) {
+            throw new GradleException(
+                    "Command failed (${exitCode}): ${command.join(' ')}\n${captured}")
+        }
+        captured
+    } catch (InterruptedException interrupted) {
+        if (process != null) process.destroyForcibly()
+        Thread.currentThread().interrupt()
+        throw new GradleException("Command interrupted: ${command.join(' ')}", interrupted)
+    }
+}
+
+def deflate = { byte[] input ->
+    ByteArrayOutputStream compressed = new ByteArrayOutputStream()
+    Deflater deflater = new Deflater(9)
+    DeflaterOutputStream stream = new DeflaterOutputStream(compressed, deflater)
+    stream.write(input)
+    stream.close()
+    deflater.end()
+    compressed.toByteArray()
+}
+
+def inflate = { byte[] input ->
+    InflaterInputStream stream = new InflaterInputStream(new ByteArrayInputStream(input))
+    ByteArrayOutputStream output = new ByteArrayOutputStream()
+    byte[] buffer = new byte[8192]
+    int count
+    while ((count = stream.read(buffer)) >= 0) {
+        if (count > 0) output.write(buffer, 0, count)
+    }
+    stream.close()
+    output.toByteArray()
+}
+
+def sha256 = { byte[] input ->
+    MessageDigest.getInstance("SHA-256").digest(input).encodeHex().toString()
+}
+
+def privateProviderUrls = {
+    if (!providerPrivateFile.isFile()) return []
+    if (providerPrivateFile.length() > 32 * 1024) {
+        throw new GradleException("providers.private.json exceeds 32 KiB")
+    }
+    Object parsed = new JsonSlurper().parse(providerPrivateFile)
+    if (!(parsed instanceof Map) || parsed.schema != 1 || !(parsed.providers instanceof Map)) {
+        throw new GradleException("providers.private.json contract is invalid")
+    }
+    Map providers = (Map) parsed.providers
+    if (!(providers.keySet() as Set).every { it in ["elix", "shrimp"] }) {
+        throw new GradleException("providers.private.json contains an unknown provider")
+    }
+    ["elix", "shrimp"].collect { providers[it] }.findAll { it instanceof String }
+}
+
+def providerSecretNeedles = { Collection<String> urls ->
+    Set<String> needles = new LinkedHashSet<>()
+    urls.each { value ->
+        String lower = value.toLowerCase(Locale.ROOT)
+        if (!lower.isEmpty()) needles.add(lower)
+        try {
+            URI parsed = new URI(value)
+            if (parsed.host != null && !parsed.host.isEmpty()) {
+                needles.add(parsed.host.toLowerCase(Locale.ROOT))
+            }
+            String material = [parsed.rawPath, parsed.rawQuery]
+                    .findAll { it != null }.join("&")
+            material.split("[/=?&#]").each { part ->
+                String token = part.toLowerCase(Locale.ROOT)
+                if (token.length() >= 12) needles.add(token)
+            }
+        } catch (Exception error) {
+            throw new GradleException("Private provider URL contract is invalid", error)
+        }
+    }
+    needles
+}
+
+def assertNoProviderPlaintext = { Collection<File> candidates,
+                                  Collection<String> needles,
+                                  String surface ->
+    if (needles.isEmpty()) return
+    candidates.each { candidate ->
+        if (!candidate.isFile()) return
+        String lower = candidate.getText("UTF-8").toLowerCase(Locale.ROOT)
+        needles.each { needle ->
+            if (lower.contains(needle)) {
+                throw new GradleException(
+                        "Plaintext private provider material remains in ${surface}: ${candidate}")
+            }
+        }
+    }
+}
+
+def payloadFromBlock = { String text, String beginMarker, String endMarker ->
+    int begin = text.indexOf(beginMarker)
+    int end = text.indexOf(endMarker)
+    if (begin < 0 || end < 0 || end <= begin) {
+        throw new GradleException("Missing payload markers ${beginMarker}/${endMarker}")
+    }
+    String block = text.substring(begin + beginMarker.length(), end)
+    block.readLines()
+            .findAll { it.trim().startsWith("#") }
+            .collect { it.trim().substring(1).trim() }
+            .join("")
+}
+
+def replacePayloadBlock = { String text, String beginMarker, String endMarker, String payload ->
+    int begin = text.indexOf(beginMarker)
+    int end = text.indexOf(endMarker)
+    if (begin < 0 || end < 0 || end <= begin) {
+        throw new GradleException("Missing payload markers ${beginMarker}/${endMarker}")
+    }
+    String lineSep = System.lineSeparator()
+    StringBuilder block = new StringBuilder(beginMarker).append(lineSep)
+    List<String> forbiddenPayloadTokens = [
+            ["tg", "ws"].join(""),
+            ["tg", "-ws"].join(""),
+    ]
+    int cursor = 0
+    while (cursor < payload.length()) {
+        int take = Math.min(120, payload.length() - cursor)
+        String candidate = payload.substring(cursor, cursor + take)
+        String lower = candidate.toLowerCase(Locale.ROOT)
+        int safeTake = take
+        forbiddenPayloadTokens.each { token ->
+            int found = lower.indexOf(token)
+            if (found >= 0) safeTake = Math.min(safeTake, Math.max(1, found + 2))
+        }
+        block.append("# ").append(payload, cursor, cursor + safeTake).append(lineSep)
+        cursor += safeTake
+    }
+    block.append(endMarker)
+    text.substring(0, begin) + block + text.substring(end + endMarker.length())
+}
+
+def readNativeBundleFromAar = { File aarFile ->
+    Map<String, Object> libs = new LinkedHashMap<>()
+    ZipFile zip = new ZipFile(aarFile)
+    try {
+        Set<String> expectedNativeEntries = supportedAbis.collect {
+            "jni/${it}/libexitfy_bridge.so"
+        } as Set
+        Set<String> actualNativeEntries = zip.entries().findAll { entry ->
+            entry.name.startsWith("jni/") && entry.name.endsWith(".so")
+        }.collect { it.name } as Set
+        if (actualNativeEntries != expectedNativeEntries) {
+            throw new GradleException("Plugin AAR native set mismatch. Expected "
+                    + expectedNativeEntries + ", got " + actualNativeEntries)
+        }
+        supportedAbis.each { abi ->
+            String name = "jni/${abi}/libexitfy_bridge.so"
+            def entry = zip.getEntry(name)
+            if (entry == null) {
+                throw new GradleException("Native bridge missing from AAR: ${name}")
+            }
+            byte[] bytes = zip.getInputStream(entry).bytes
+            libs[abi] = [
+                    size  : bytes.length,
+                    sha256: sha256(bytes),
+                    data  : bytes.encodeBase64().toString(),
+            ]
+        }
+    } finally {
+        zip.close()
+    }
+    byte[] json = JsonOutput.toJson([format: 1, version: pluginVersion, libs: libs])
+            .getBytes(StandardCharsets.UTF_8)
+    deflate(json).encodeBase64().toString()
+}
+
+def lexJavaContract = { String source ->
+    List<String> tokens = new ArrayList<>()
+    int index = 0
+    while (index < source.length()) {
+        char value = source.charAt(index)
+        if (Character.isWhitespace(value)) {
+            index++
+            continue
+        }
+        if (value == '/' && index + 1 < source.length()) {
+            char next = source.charAt(index + 1)
+            if (next == '/') {
+                index += 2
+                while (index < source.length()
+                        && source.charAt(index) != '\n'
+                        && source.charAt(index) != '\r') {
+                    index++
+                }
+                continue
+            }
+            if (next == '*') {
+                int end = source.indexOf('*/', index + 2)
+                if (end < 0) throw new GradleException("Unterminated Java block comment")
+                index = end + 2
+                continue
+            }
+        }
+        if (value == '"' || value == '\'') {
+            char quote = value
+            StringBuilder literal = new StringBuilder()
+            boolean closed = false
+            index++
+            while (index < source.length()) {
+                char part = source.charAt(index++)
+                if (part == '\\') {
+                    if (index >= source.length()) {
+                        throw new GradleException("Unterminated Java escape sequence")
+                    }
+                    literal.append(part).append(source.charAt(index++))
+                } else if (part == quote) {
+                    closed = true
+                    break
+                } else {
+                    if (part == '\n' || part == '\r') {
+                        throw new GradleException("Unterminated Java literal")
+                    }
+                    literal.append(part)
+                }
+            }
+            if (!closed) throw new GradleException("Unterminated Java literal")
+            tokens.add((quote == '"' ? "STRING:" : "CHAR:") + literal)
+            continue
+        }
+        if (Character.isJavaIdentifierStart(value)) {
+            int begin = index++
+            while (index < source.length()
+                    && Character.isJavaIdentifierPart(source.charAt(index))) {
+                index++
+            }
+            tokens.add(source.substring(begin, index))
+            continue
+        }
+        if (Character.isDigit(value)) {
+            int begin = index++
+            while (index < source.length() && Character.isDigit(source.charAt(index))) index++
+            tokens.add(source.substring(begin, index))
+            continue
+        }
+        if (index + 1 < source.length()) {
+            String pair = source.substring(index, index + 2)
+            if (["!=", "==", "<=", ">=", "&&", "||", "++", "--",
+                 "+=", "-=", "*=", "/=", "%="].contains(pair)) {
+                tokens.add(pair)
+                index += 2
+                continue
+            }
+        }
+        tokens.add(String.valueOf(value))
+        index++
+    }
+    tokens
+}
+
+def countTokenSequence = { List<String> tokens, List<String> expected ->
+    int matches = 0
+    for (int start = 0; start + expected.size() <= tokens.size(); start++) {
+        boolean same = true
+        for (int offset = 0; offset < expected.size(); offset++) {
+            if (tokens[start + offset] != expected[offset]) {
+                same = false
+                break
+            }
+        }
+        if (same) matches++
+    }
+    matches
+}
+
+def countTokenPattern = { List<String> tokens, List<Object> pattern ->
+    int matches = 0
+    for (int start = 0; start + pattern.size() <= tokens.size(); start++) {
+        boolean same = true
+        for (int offset = 0; offset < pattern.size(); offset++) {
+            Object expected = pattern[offset]
+            if (expected != null && tokens[start + offset] != expected) {
+                same = false
+                break
+            }
+        }
+        if (same) matches++
+    }
+    matches
+}
+
+def validateBootstrapContract = { String source, String expectedVersion,
+                                  int expectedSchema, String expectedPluginId ->
+    // JLS 3.3 translates raw Unicode escapes before comments, strings, and
+    // ordinary tokenization. This deliberately conservative source contract
+    // forbids every backslash + lowercase-u introducer, including multiple-u
+    // forms, so the small lexer below can never see a different program than
+    // javac. BootstrapConfig has no legitimate need for raw Unicode escapes.
+    for (int index = 0; index + 1 < source.length(); index++) {
+        if (source.charAt(index) == (char) 0x5c && source.charAt(index + 1) == 'u') {
+            throw new GradleException(
+                    "BootstrapConfig raw Java Unicode escapes are forbidden")
+        }
+    }
+    List<String> tokens = lexJavaContract(source)
+    String expectedVersionToken = "STRING:${expectedVersion}"
+    String expectedPluginIdToken = "STRING:${expectedPluginId}"
+    Map<String, List<String>> required = [
+            "plugin version declaration": [
+                    "private", "static", "final", "String", "PLUGIN_VERSION", "=",
+                    expectedVersionToken, ";"],
+            "settings schema declaration": [
+                    "private", "static", "final", "int", "SETTINGS_SCHEMA", "=",
+                    String.valueOf(expectedSchema), ";"],
+            "plugin id default": [
+                    "String", "pluginId", "=", "value", ".", "optString", "(",
+                    "STRING:pluginId", ",", expectedPluginIdToken, ")", ";"],
+            "plugin version validation": [
+                    "if", "(", "!", "PLUGIN_VERSION", ".", "equals", "(",
+                    "pluginVersion", ")", ")"],
+            "settings schema validation": [
+                    "if", "(", "settingsSchema", "!=", "SETTINGS_SCHEMA", ")"],
+            "plugin id validation": [
+                    "if", "(", "!", expectedPluginIdToken, ".", "equals", "(",
+                    "pluginId", ")", ")"],
+    ]
+    required.each { label, sequence ->
+        if (countTokenSequence(tokens, sequence) != 1) {
+            throw new GradleException("BootstrapConfig ${label} is out of sync")
+        }
+    }
+    Map<String, List<Object>> uniqueShapes = [
+            "plugin version declaration shape": [
+                    "private", "static", "final", "String", "PLUGIN_VERSION", "=", null, ";"],
+            "settings schema declaration shape": [
+                    "private", "static", "final", "int", "SETTINGS_SCHEMA", "=", null, ";"],
+            "plugin id default shape": [
+                    "String", "pluginId", "=", "value", ".", "optString", "(",
+                    "STRING:pluginId", ",", null, ")", ";"],
+            "plugin version comparison shape": [
+                    "PLUGIN_VERSION", ".", "equals", "(", null, ")"],
+            "settings schema comparison shape": [
+                    "settingsSchema", null, "SETTINGS_SCHEMA"],
+            "plugin id comparison shape": [
+                    null, ".", "equals", "(", "pluginId", ")"],
+    ]
+    uniqueShapes.each { label, pattern ->
+        if (countTokenPattern(tokens, pattern) != 1) {
+            throw new GradleException("BootstrapConfig ${label} is ambiguous")
+        }
+    }
+}
+
+def expectBootstrapContractFailure = { String label, String source,
+                                       String expectedVersion, int expectedSchema,
+                                       String expectedPluginId ->
+    boolean rejected = false
+    try {
+        validateBootstrapContract(source, expectedVersion, expectedSchema, expectedPluginId)
+    } catch (GradleException expected) {
+        rejected = true
+    }
+    if (!rejected) {
+        throw new GradleException("Bootstrap contract regression was not rejected: ${label}")
+    }
+}
+
+def generateProviderCatalogTask = tasks.register("generateProviderCatalog") {
+    group = "build setup"
+    description = "Regenerates the encrypted built-in provider catalog from providers.private.json"
+    inputs.file(providerGeneratorFile)
+    if (providerPrivateFile.exists()) inputs.file(providerPrivateFile)
+    outputs.files(providerCatalogFiles)
+
+    doLast {
+        File ignoreFile = file(".gitignore")
+        boolean privateFileIgnored = ignoreFile.isFile() && ignoreFile.readLines("UTF-8")
+                .collect { it.trim() }.any { it == "providers.private.json"
+                        || it == "/providers.private.json" }
+        if (!privateFileIgnored) {
+            throw new GradleException("providers.private.json must be ignored by git")
+        }
+        if (!providerGeneratorFile.isFile()) {
+            throw new GradleException("Provider catalog generator is missing")
+        }
+        if (providerPrivateFile.isFile()) {
+            providers.exec {
+                environment "PYTHONDONTWRITEBYTECODE", "1"
+                commandLine "python3", providerGeneratorFile.absolutePath,
+                        "--input", providerPrivateFile.absolutePath,
+                        "--output-dir", file("src/main/java/com/extera/plugins/exitfy").absolutePath
+            }.result.get().assertNormalExitValue()
+        }
+        providerCatalogFiles.each { generated ->
+            if (!generated.isFile()) {
+                throw new GradleException(
+                        "Encrypted provider catalog is missing; create providers.private.json "
+                                + "from providers.private.example.json and run generateProviderCatalog")
+            }
+        }
+    }
+}
+
+tasks.register("prepareHostClasses") {
+    group = "build setup"
+    description = "Builds full exteraGram host classes when the referenced host contracts change"
+    inputs.files(hostContractSources)
+    outputs.file(hostClassesJar)
+
+    doLast {
+        File wrapperJar = new File(telegramSourceDir, "gradle/wrapper/gradle-wrapper.jar")
+        if (!wrapperJar.exists()) {
+            throw new GradleException("Gradle wrapper not found in Telegram source: ${telegramSourceDir}")
+        }
+        providers.exec {
+            workingDir telegramSourceDir
+            commandLine "java", "-classpath", wrapperJar.absolutePath,
+                    "org.gradle.wrapper.GradleWrapperMain",
+                    "-PAPP_PACKAGE=${hostApplicationId}",
+                    ":TMessagesProj:${hostBundleTask}"
+        }.result.get().assertNormalExitValue()
+        if (!hostClassesJar.exists()) {
+            throw new GradleException("Host classes jar not found after build: ${hostClassesJar}")
+        }
+    }
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn tasks.named("prepareHostClasses")
+}
+
+tasks.configureEach { task ->
+    if (task.name.startsWith("compile") && task.name.endsWith("JavaWithJavac")) {
+        task.dependsOn generateProviderCatalogTask
+    }
+    if (task.name.startsWith("extract") && task.name.endsWith("Annotations")) {
+        task.dependsOn generateProviderCatalogTask
+    }
+}
+
+tasks.register("bootstrapContractRegression") {
+    group = "verification"
+    description = "Proves stale bootstrap version, schema, and plugin ID contracts fail closed"
+    inputs.file(bootstrapConfigFile)
+    doLast {
+        String source = bootstrapConfigFile.getText("UTF-8")
+        validateBootstrapContract(source, pluginVersion, settingsSchema, pluginId)
+
+        String versionDeclaration =
+                "private static final String PLUGIN_VERSION = \"${pluginVersion}\";"
+        String schemaDeclaration =
+                "private static final int SETTINGS_SCHEMA = ${settingsSchema};"
+        String idDefault =
+                "String pluginId = value.optString(\"pluginId\", \"${pluginId}\");"
+        String idValidation = "if (!\"${pluginId}\".equals(pluginId))"
+        String versionValidation = "if (!PLUGIN_VERSION.equals(pluginVersion))"
+        String schemaValidation = "if (settingsSchema != SETTINGS_SCHEMA)"
+        def withStringDecoy = { String base, String decoy ->
+            int classEnd = base.lastIndexOf('}')
+            if (classEnd < 0) throw new GradleException("Bootstrap fixture has no class end")
+            String escaped = decoy.replace('\\', '\\\\').replace('"', '\\"')
+            return base.substring(0, classEnd) +
+                    "\n    private static final String BOOTSTRAP_CONTRACT_DECOY = \"" +
+                    escaped + "\";\n" + base.substring(classEnd)
+        }
+
+        String versionDeclarationDecoy = source.replace(versionDeclaration,
+                "private static final String PLUGIN_VERSION = \"${pluginVersion}-stale\";") +
+                "\n// ${versionDeclaration}\n"
+        expectBootstrapContractFailure("line-comment version declaration decoy",
+                versionDeclarationDecoy,
+                pluginVersion, settingsSchema, pluginId)
+        String schemaDeclarationDecoy = source.replace(schemaDeclaration,
+                "private static final int SETTINGS_SCHEMA = ${settingsSchema + 1};") +
+                "\n/* ${schemaDeclaration} */\n"
+        expectBootstrapContractFailure("block-comment schema declaration decoy",
+                schemaDeclarationDecoy,
+                pluginVersion, settingsSchema, pluginId)
+        expectBootstrapContractFailure("string-literal plugin id default decoy",
+                withStringDecoy(source.replace(idDefault,
+                        "String pluginId = value.optString(\"pluginId\", \"exitfy\");"),
+                        idDefault),
+                pluginVersion, settingsSchema, pluginId)
+        expectBootstrapContractFailure("string-literal plugin id validation decoy",
+                withStringDecoy(source.replace(
+                        idValidation, "if (!\"exitfy\".equals(pluginId))"), idValidation),
+                pluginVersion, settingsSchema, pluginId)
+        String versionValidationDecoy = source.replace(versionValidation,
+                "if (PLUGIN_VERSION.equals(pluginVersion))") +
+                "\n// ${versionValidation}\n"
+        expectBootstrapContractFailure("line-comment version validation decoy",
+                versionValidationDecoy,
+                pluginVersion, settingsSchema, pluginId)
+        String schemaValidationDecoy = source.replace(schemaValidation,
+                "if (settingsSchema == SETTINGS_SCHEMA)") +
+                "\n/* ${schemaValidation} */\n"
+        expectBootstrapContractFailure("block-comment schema validation decoy",
+                schemaValidationDecoy,
+                pluginVersion, settingsSchema, pluginId)
+
+        // Build the raw introducers from character codes: spelling them in
+        // this Gradle source would itself be subject to an implementation's
+        // Unicode-escape preprocessing. Each fixture combines a stale real
+        // contract with a decoy whose lexical role changes under JLS 3.3.
+        String slash = String.valueOf((char) 0x5c)
+        String unicode = slash + "u"
+        String unicodeSlash = unicode + "002f"
+        String unicodeStar = unicode + "002a"
+        String unicodeNewline = unicode + "000a"
+        String unicodeQuote = unicode + "0022"
+        String multipleUnicodeSlash = slash + "uuuu002f"
+
+        String staleUnicodeVersion = source.replace(versionDeclaration,
+                "private static final String PLUGIN_VERSION = \"${pluginVersion}-stale\";")
+        if (staleUnicodeVersion == source) {
+            throw new GradleException("Unicode version regression did not mutate actual code")
+        }
+        expectBootstrapContractFailure("Unicode-formed line comment",
+                staleUnicodeVersion + "\n" + unicodeSlash + unicodeSlash + " "
+                        + versionDeclaration + "\n",
+                pluginVersion, settingsSchema, pluginId)
+
+        String staleUnicodeSchema = source.replace(schemaDeclaration,
+                "private static final int SETTINGS_SCHEMA = ${settingsSchema + 1};")
+        if (staleUnicodeSchema == source) {
+            throw new GradleException("Unicode schema regression did not mutate actual code")
+        }
+        expectBootstrapContractFailure("Unicode-formed block comment",
+                staleUnicodeSchema + "\n" + unicodeSlash + unicodeStar + " "
+                        + schemaDeclaration + " " + unicodeStar + unicodeSlash + "\n",
+                pluginVersion, settingsSchema, pluginId)
+
+        String staleUnicodeVersionCheck = source.replace(versionValidation,
+                "if (PLUGIN_VERSION.equals(pluginVersion))")
+        if (staleUnicodeVersionCheck == source) {
+            throw new GradleException("Unicode check regression did not mutate actual code")
+        }
+        expectBootstrapContractFailure("Unicode-formed newline",
+                staleUnicodeVersionCheck + "\n// hidden" + unicodeNewline
+                        + versionValidation + "\n",
+                pluginVersion, settingsSchema, pluginId)
+
+        String staleUnicodeIdCheck = source.replace(
+                idValidation, "if (!\"exitfy\".equals(pluginId))")
+        if (staleUnicodeIdCheck == source) {
+            throw new GradleException("Unicode ID regression did not mutate actual code")
+        }
+        expectBootstrapContractFailure("Unicode-formed quote",
+                staleUnicodeIdCheck + "\n" + unicodeQuote + idValidation + unicodeQuote + "\n",
+                pluginVersion, settingsSchema, pluginId)
+        expectBootstrapContractFailure("multiple-u Unicode introducer",
+                staleUnicodeVersionCheck + "\n" + multipleUnicodeSlash
+                        + multipleUnicodeSlash + " " + versionValidation + "\n",
+                pluginVersion, settingsSchema, pluginId)
+
+        String betaNineteen = "4.0.0-beta.19"
+        String betaNineteenDeclaration =
+                "private static final String PLUGIN_VERSION = \"${betaNineteen}\";"
+        String betaNineteenSource = source.replace(versionDeclaration, betaNineteenDeclaration)
+        validateBootstrapContract(betaNineteenSource, betaNineteen, settingsSchema, pluginId)
+        expectBootstrapContractFailure("beta.19 metadata with beta.18 bootstrap",
+                betaNineteenSource.replace(betaNineteenDeclaration,
+                        "private static final String PLUGIN_VERSION = \"4.0.0-beta.18\";"),
+                betaNineteen, settingsSchema, pluginId)
+    }
+}
+
+tasks.register("validateEmbeddedDexConfig") {
+    group = "verification"
+    dependsOn tasks.named("bootstrapContractRegression"), generateProviderCatalogTask
+    doLast {
+        String pluginText = pluginTemplateFile.getText("UTF-8")
+        String proguardText = proguardFile.getText("UTF-8")
+        String buildScriptText = file("build.gradle").getText("UTF-8")
+        String settingsScriptText = file("settings.gradle").getText("UTF-8")
+        String readmeText = file("README.md").getText("UTF-8")
+        String deviceChecklistText = file("DEVICE_BETA_CHECKLIST.md")
+                .getText("UTF-8")
+        String bootstrapText = bootstrapConfigFile.getText("UTF-8")
+        String bridgeText = file("src/main/java/com/extera/plugins/exitfy/ExitFyBridge.java")
+                .getText("UTF-8")
+        String runtimeText = file("src/main/java/com/extera/plugins/exitfy/RuntimeCoordinator.java")
+                .getText("UTF-8")
+        String directSettingsHookText = file(
+                "src/main/java/com/extera/plugins/exitfy/DirectSettingsHook.java")
+                .getText("UTF-8")
+        String httpText = file("src/main/java/com/extera/plugins/exitfy/LimitedHttpClient.java")
+                .getText("UTF-8")
+        Map<String, String> required = [
+                "plugin id"          : "__id__ = \"${pluginId}\"",
+                "plugin version"     : "__version__ = \"${pluginVersion}\"",
+                "plugin author"      : "__author__ = \"${pluginAuthor}\"",
+                "plugin icon"        : "__icon__ = \"${pluginIcon}\"",
+                "minimum app"        : "__app_version__ = \">=12.5.1\"",
+                "minimum sdk"        : "__sdk_version__ = \">=1.4.3.8\"",
+                "entry class"        : "ENTRY_CLASS = \"${dexEntryClass}\"",
+                "DEX keeper prefix"  : "DEX_KEEPER_PREFIX = \"exitfy-dex-keeper:exitFy_v2:\"",
+                "DEX keeper reuse"   : "retained = self._find_retained_dex()",
+                "settings schema"    : "SETTINGS_SCHEMA = ${settingsSchema}",
+                "settings registry placeholder": "from ui.settings import Text",
+                "DEX begin marker"   : dexBeginMarker,
+                "DEX end marker"     : dexEndMarker,
+                "native begin marker": nativeBeginMarker,
+                "native end marker"  : nativeEndMarker,
+                "private data root"  : "getDir(\"exitFy_v2\", 0)",
+                "stable bridge path" : "os.path.join(root, \"bridge\", abi)",
+                "single Android ABI" : "SUPPORTED_ABIS = (\"arm64-v8a\",)",
+                "API 29 gate"        : "if int(BuildVersion.SDK_INT) < ${minAndroidApi}:",
+                "64-bit gate"        : "Process.is64Bit()",
+                "primary ABI gate"   : "value = str(abis[0])",
+        ]
+        required.each { label, value ->
+            if (!pluginText.contains(value)) throw new GradleException("${label} is out of sync")
+        }
+        if (!readmeText.contains("# exitFy ${pluginVersion}")
+                || !readmeText.contains("settings schema is ${settingsSchema}")
+                || !deviceChecklistText.contains("# exitFy ${pluginVersion} device checklist")
+                || !deviceChecklistText.contains(
+                "version `${pluginVersion}`, schema ${settingsSchema}")) {
+            throw new GradleException("Release documentation version/schema is out of sync")
+        }
+        validateBootstrapContract(bootstrapText, pluginVersion, settingsSchema, pluginId)
+        if (pluginText.contains("__min_version__")) {
+            throw new GradleException("Legacy __min_version__ metadata is forbidden")
+        }
+        if (pluginText.contains("CPU_ABI") || pluginText.contains("SUPPORTED_32_BIT_ABIS")
+                || pluginText.contains("SUPPORTED_64_BIT_ABIS")) {
+            throw new GradleException("Legacy or secondary ABI fallback remains in loader")
+        }
+        int nativeExtractStart = pluginText.indexOf("def _extract_native_bridge():")
+        int nativePlatformGate = pluginText.indexOf(
+                "abi = _require_supported_platform()", nativeExtractStart)
+        int nativePayloadRead = pluginText.indexOf(
+                "_read_payload(NATIVE_BEGIN, NATIVE_END)", nativeExtractStart)
+        int nativeRuntimeWrite = pluginText.indexOf(
+                "getDir(\"exitFy_v2\", 0)", nativeExtractStart)
+        int dexPrepareStart = pluginText.indexOf("    def prepare(self):")
+        int dexPlatformGate = pluginText.indexOf(
+                "_require_supported_platform()", dexPrepareStart)
+        int dexPayloadRead = pluginText.indexOf(
+                "_read_payload(DEX_BEGIN, DEX_END)", dexPrepareStart)
+        if (nativeExtractStart < 0 || nativePlatformGate < nativeExtractStart
+                || nativePayloadRead < nativePlatformGate
+                || nativeRuntimeWrite < nativePayloadRead
+                || dexPrepareStart < 0 || dexPlatformGate < dexPrepareStart
+                || dexPayloadRead < dexPlatformGate) {
+            throw new GradleException(
+                    "API/ABI gate must precede all DEX/JNI reads and runtime writes")
+        }
+        forbiddenResetTokens.each { removed ->
+            if (pluginText.contains(removed)) {
+                throw new GradleException("Removed settings reset path remains in template: ${removed}")
+            }
+        }
+        forbiddenThirdPartyCoreTokens.each { removed ->
+            if (pluginText.toLowerCase(Locale.ROOT).contains(removed.toLowerCase(Locale.ROOT))) {
+                throw new GradleException("Removed third-party core source remains in template")
+            }
+        }
+        forbiddenRemovedProviderTokens.each { removed ->
+            if (pluginText.toLowerCase(Locale.ROOT).contains(removed)) {
+                throw new GradleException("Removed provider remains in template")
+            }
+        }
+        Collection<File> providerSourceFiles = ([pluginTemplateFile] + fileTree("src").matching {
+            include "**/*.java"
+            include "**/*.c"
+            include "**/*.xml"
+        }.files) as Collection<File>
+        providerSourceFiles.each { candidate ->
+            String lower = candidate.getText("UTF-8").toLowerCase(Locale.ROOT)
+            forbiddenSensitiveSubscriptionTokens.each { token ->
+                if (lower.contains(token)) {
+                    throw new GradleException(
+                            "Plaintext built-in subscription material remains in ${candidate}")
+                }
+            }
+        }
+        assertNoProviderPlaintext(providerSourceFiles,
+                providerSecretNeedles(privateProviderUrls()), "plugin sources")
+        forbiddenDiagnosticsTokens.each { removed ->
+            if (pluginText.toLowerCase(Locale.ROOT).contains(removed)) {
+                throw new GradleException("Removed diagnostics surface remains in template: ${removed}")
+            }
+        }
+        Collection<File> nodeSelectionSources = ([pluginTemplateFile, file("README.md"),
+                file("DEVICE_BETA_CHECKLIST.md")] + fileTree("src").matching {
+            include "**/*.java"
+            include "**/*.c"
+            include "**/*.xml"
+        }.files + fileTree("tests").matching { include "**/*.py" }.files) as Collection<File>
+        nodeSelectionSources.each { candidate ->
+            String lower = candidate.getText("UTF-8").toLowerCase(Locale.ROOT)
+            forbiddenNodeSelectionTokens.each { removed ->
+                if (lower.contains(removed.toLowerCase(Locale.ROOT))) {
+                    throw new GradleException(
+                            "Removed node-selection feature remains in ${candidate.name}")
+                }
+            }
+        }
+        fileTree("src/main/java").matching { include "**/*.java" }.files.each { javaFile ->
+            String sourceText = javaFile.getText("UTF-8").toLowerCase(Locale.ROOT)
+            forbiddenDiagnosticsTokens.each { removed ->
+                if (sourceText.contains(removed)) {
+                    throw new GradleException(
+                            "Removed diagnostics runtime remains in ${javaFile.name}: ${removed}")
+                }
+            }
+        }
+        int settingsStart = pluginText.indexOf("    def create_settings(self):")
+        int settingsEnd = pluginText.indexOf("\n    def _register_menu", settingsStart)
+        if (settingsStart < 0 || settingsEnd < settingsStart) {
+            throw new GradleException("Plugin settings registry placeholder is missing")
+        }
+        String settingsBody = pluginText.substring(settingsStart, settingsEnd)
+        if (!settingsBody.contains('return [Text(text="@exteraPluginsSup")]')) {
+            throw new GradleException("Settings registry must contain only the host placeholder")
+        }
+        if (!pluginText.contains('self.set_setting("core_policy", "auto"')
+                || pluginText.contains('"core_policy": self._core_policy_value()')
+                || pluginText.contains("def _core_policy_value(self):")) {
+            throw new GradleException(
+                    "Legacy core_policy must remain only as an auto tombstone migration")
+        }
+        int settingsDictStart = pluginText.indexOf("    def _settings_dict(self):")
+        int settingsDictEnd = pluginText.indexOf(
+                "\n    def _migrate_provider_catalog", settingsDictStart)
+        if (settingsDictStart < 0 || settingsDictEnd < settingsDictStart
+                || pluginText.substring(settingsDictStart, settingsDictEnd)
+                .contains("\"core_policy\"")) {
+            throw new GradleException(
+                    "Python -> DEX settings JSON must not contain core_policy")
+        }
+        ["Header(", "Switch(", "Selector(", "Custom(", "Divider(",
+         "create_sub_fragment", "AlertDialogBuilder", "UItem.asButton(",
+         "PluginsController.openPluginSettings", "def _open_native_settings",
+         "def _create_native_settings", "def _create_servers_settings"].each { token ->
+            if (pluginText.contains(token)) {
+                throw new GradleException("Removed plugin-settings UI remains: ${token}")
+            }
+        }
+        ["PythonPluginsEngine.class.getDeclaredMethod(",
+         "\"openPluginSettings\", Plugin.class, BaseFragment.class",
+         "XposedBridge.hookMethod(", "AndroidUtilities.runOnUIThread(",
+         "if (presentDashboard(host)) param.setResult(null)",
+         "param.setResult(null)", "installed.unhook()",
+         "PLUGIN_ID = \"exitFy_v2\""].each { token ->
+            if (!directSettingsHookText.contains(token)) {
+                throw new GradleException("Direct settings hook contract is missing: ${token}")
+            }
+        }
+        if (!runtimeText.contains("directSettingsHook.install()")
+                || !runtimeText.contains("directSettingsHook.close()")) {
+            throw new GradleException("Direct settings hook lifecycle is incomplete")
+        }
+        if (!proguardText.contains("beforeHookedMethod(")
+                || !proguardText.contains("afterHookedMethod(")) {
+            throw new GradleException("Xposed hook callbacks are not protected from shrinking")
+        }
+        if (!buildScriptText.contains(
+                'compileOnly("dev.exterahook:exterahook:0.2.2")')
+                || !buildScriptText.contains("exteraHookJar.absolutePath")
+                || !settingsScriptText.contains("/Tools/maven")) {
+            throw new GradleException(
+                    "Host-provided exterahook must be compileOnly and available to D8")
+        }
+        File dashboardFile = file(
+                "src/main/java/com/extera/plugins/exitfy/ExitFyDashboardFragment.java")
+        File subscreenFile = file(
+                "src/main/java/com/extera/plugins/exitfy/ExitFySubscreenFragment.java")
+        File preferencesFile = file(
+                "src/main/java/com/extera/plugins/exitfy/ExitFyPreferencesFragment.java")
+        File serversFile = file(
+                "src/main/java/com/extera/plugins/exitfy/ExitFyServersFragment.java")
+        File commandResultFile = file(
+                "src/main/java/com/extera/plugins/exitfy/ExitFyCommandResult.java")
+        File serverPageFile = file(
+                "src/main/java/com/extera/plugins/exitfy/ExitFyServerPage.java")
+        File dashboardStateFile = file(
+                "src/main/java/com/extera/plugins/exitfy/ExitFyDashboardState.java")
+        File coreInstallProgressFile = file(
+                "src/main/java/com/extera/plugins/exitfy/CoreInstallProgressView.java")
+        File coreInstallSessionFile = file(
+                "src/main/java/com/extera/plugins/exitfy/CoreInstallSession.java")
+        File subscriptionManagerFile = file(
+                "src/main/java/com/extera/plugins/exitfy/SubscriptionManager.java")
+        File settingsModelFile = file(
+                "src/main/java/com/extera/plugins/exitfy/SettingsModel.java")
+        if (![dashboardFile, subscreenFile, preferencesFile, serversFile,
+              commandResultFile, serverPageFile, dashboardStateFile,
+              coreInstallProgressFile, coreInstallSessionFile,
+              subscriptionManagerFile,
+              settingsModelFile].every { it.isFile() }) {
+            throw new GradleException("Telegram-native settings surface is incomplete")
+        }
+        String dashboardText = dashboardFile.getText("UTF-8")
+        if (!bridgeText.contains("static BaseFragment createDashboardFragment()")
+                || !bridgeText.contains("new ExitFyDashboardFragment()")
+                || !bridgeText.contains("WeakReference<Runnable>")
+                || !dashboardText.contains("extends BaseFragment")
+                || !dashboardText.contains("Executors.newSingleThreadExecutor")
+                || !dashboardText.contains("ArrayList<ThemeDescription> getThemeDescriptions()")
+                || !dashboardText.contains("scheduleThemeRefresh()")
+                || !dashboardText.contains("fragmentView = scroll")
+                || !dashboardText.contains("new ExitFyServersFragment()")
+                || !dashboardText.contains("new ExitFyPreferencesFragment()")
+                || !dashboardText.contains("sourceRefreshView.setOnClickListener")
+                || !dashboardText.contains("\"refresh_subscriptions\"")
+                || !dashboardText.contains(
+                "connectionStatusView.setText(state.connectionTitle())")
+                || !dashboardText.contains(
+                "connectionIssueView.setText(showConnectionIssue")
+                || !dashboardText.contains("postToUi(")
+                || !dashboardText.contains("JsonGuard.exceedsUtf8Limit")
+                || !dashboardText.contains(
+                "RuntimeCoordinator.MAX_COMMAND_JSON_UTF8_BYTES")) {
+            throw new GradleException("Dashboard bridge/runtime contract is incomplete")
+        }
+        ["ActionBarMenuItem", "MENU_MORE", "showInfo(", "versionView",
+         "connectionCoreView", "connectionServerView", "connectionSocksView",
+         "connectionDetailView", "ResponsiveQuickActionsLayout",
+         "importClipboard(", "ClipboardManager", "ProxyListActivity",
+         "createCoresCard", "corePolicyView", "showCoreActions",
+         "coreUpdateButton", "singBoxStatusView", "xrayStatusView",
+         "check_core_update", "advancedSummaryView",
+         "advancedSummary()"].each { token ->
+            if (dashboardText.contains(token)) {
+                throw new GradleException(
+                        "Removed dashboard control returned: ${token}")
+            }
+        }
+        [runtimeText, bridgeText].each { uiStateProducer ->
+            [".put(\"detail\"", ".put(\"lastError\"", ".put(\"localPort\"",
+             ".put(\"corePolicy\"", ".put(\"requiredCore\"", ".put(\"loadedCore\"",
+             ".put(\"cores\"", ".put(\"coreUpdate\""].each { token ->
+                if (uiStateProducer.contains(token)) {
+                    throw new GradleException(
+                            "Removed dashboard state returned: ${token}")
+                }
+            }
+        }
+        int activeServerCardIndex = dashboardText.indexOf(
+                "content.addView(createActiveServerCard(context)")
+        int sourceCardIndex = dashboardText.indexOf(
+                "content.addView(createSourceCard(context)")
+        if (activeServerCardIndex < 0 || sourceCardIndex < 0
+                || activeServerCardIndex > sourceCardIndex) {
+            throw new GradleException(
+                    "Active server card must stay above the server source card")
+        }
+        String subscreenText = subscreenFile.getText("UTF-8")
+        String preferencesText = preferencesFile.getText("UTF-8")
+        String serversText = serversFile.getText("UTF-8")
+        String serverPageText = serverPageFile.getText("UTF-8")
+        String dashboardStateText = dashboardStateFile.getText("UTF-8")
+        String coreInstallProgressText = coreInstallProgressFile.getText("UTF-8")
+        String coreInstallSessionText = coreInstallSessionFile.getText("UTF-8")
+        String subscriptionManagerText = subscriptionManagerFile.getText("UTF-8")
+        String settingsModelText = settingsModelFile.getText("UTF-8")
+        ["fragmentView = scroll", "ExitFyBridge.addUiListener(",
+         "ExitFyBridge.removeUiListener(", "ExitFyCommandResult",
+         "RadioColorCell", "EditTextBoldCursor", "showDialog("].each { token ->
+            if (!subscreenText.contains(token)) {
+                throw new GradleException("Native sub-screen contract is missing: ${token}")
+            }
+        }
+        ["ping_type", "custom_hwid", "setSetting(",
+         "Тип пинга", "Ping type", "\"Proxy GET\"", "\"TCP\"",
+         "\"HWID\"", "next.defaultHwid",
+         "\"Сохранить\"", "\"Сбросить\""].each { token ->
+            if (!preferencesText.contains(token)) {
+                throw new GradleException("Native preferences are incomplete: ${token}")
+            }
+        }
+        ["createIntroCard(", "Тонкая настройка", "Fine-tuning",
+         "ПРОВЕРКА", "\"CHECK\"", "ИДЕНТИФИКАТОР", "\"IDENTIFIER\"",
+         "Настройки применяются сразу", "Changes apply immediately",
+         "Проверка задержки", "Latency check",
+         "Выберите проверку", "Choose a proxy request",
+         "Пользовательский HWID", "Custom HWID",
+         "Сохранённое значение скрыто", "saved value is hidden",
+         "Текущее значение намеренно не показывается",
+         "current value is intentionally hidden",
+         "\"Заменить\"", "\"Replace\""].each { token ->
+            if (preferencesText.contains(token)) {
+                throw new GradleException(
+                        "Removed preference copy returned: ${token}")
+            }
+        }
+        if (!preferencesText.contains(
+                "false,\n                value -> setSetting(\"custom_hwid\", value)")
+                || !preferencesText.contains(
+                "next.defaultHwid.isEmpty() ? \"—\" : next.defaultHwid")
+                || !subscreenText.contains("if (showCancel)")
+                || !subscreenText.contains("editText.setText(\"\")")
+                || !subscreenText.contains("if (hasSummary)")) {
+            throw new GradleException(
+                    "Compact preferences/HWID dialog contract is incomplete")
+        }
+        if (dashboardStateText.contains("advancedSummary(")) {
+            throw new GradleException(
+                    "Removed Advanced dashboard summary state returned")
+        }
+        ["core_policy", "CORE_VALUES", "corePolicyRow",
+         "showCorePolicyDialog", "Ядро подключения", "Connection core"].each { token ->
+            if (preferencesText.contains(token)) {
+                throw new GradleException(
+                        "Removed core preference returned: ${token}")
+            }
+        }
+        ["list_nodes", "provider_referral", "provider_id", "select_node",
+         "delete_manual_node", "add_node", "add_subscription",
+         "delete_subscription", "clear_nodes", "ping_nodes", "cancel_ping",
+         "refresh_subscriptions"].each { token ->
+            if (!serversText.contains(token)) {
+                throw new GradleException("Native server browser is incomplete: ${token}")
+            }
+        }
+        ["compatibilityRow", "showCompatibilityDialog", "COMPATIBILITY_VALUES",
+         "supportsSingBox", "supportsXray", "\"compatibility\"",
+         "sing-box", "Xray", "Ядра", "Cores"].each { token ->
+            if (serversText.contains(token)) {
+                throw new GradleException(
+                        "Removed core server UI returned: ${token}")
+            }
+        }
+        [serverPageText, subscriptionManagerText].each { nodeContract ->
+            ["supportsSingBox", "supportsXray", "\"compatibility\""].each { token ->
+                if (nodeContract.contains(token)) {
+                    throw new GradleException(
+                            "Removed list-nodes field returned: ${token}")
+                }
+            }
+        }
+        if (!dashboardStateText.contains("\"tcp_failed_quic\"")
+                || !serversText.contains("\"tcp_failed_quic\"")
+                || !dashboardStateText.contains("\"TCP check not applicable\"")
+                || !serversText.contains("\"TCP check not applicable\"")) {
+            throw new GradleException(
+                    "QUIC-only TCP results must remain informational in every Android view")
+        }
+        ["corePolicy", "requiredCore", "loadedCore", "coreUpdateRunning",
+         "CoreStatus", "\"cores\""].each { token ->
+            if (dashboardStateText.contains(token)) {
+                throw new GradleException(
+                        "Removed dashboard state field returned: ${token}")
+            }
+        }
+        [
+                'if ("install_cores".equals(command))',
+                "if (request.length() != 1)",
+                "if (!coreInstallRequired() && !coreInstallSession.isActive())",
+                "coreInstallSession.request()",
+                "attemptExplicitCoreInstall()",
+                "RuntimePolicy.needsCoreInstall(",
+                "RuntimePolicy.mayRunAutomaticCoreMaintenance(",
+                "isCoreUsable(CoreFamily.SING_BOX)",
+                "isCoreUsable(CoreFamily.XRAY)",
+                'value.put("coreInstall", new JSONObject()',
+                '.put("required", coreInstallRequired())',
+                '.put("state", coreInstall.state.id)',
+                '.put("progress", coreInstall.progress)',
+                '.put("stage", coreInstall.stage.id)',
+                '.put("generation", coreInstall.generation)'
+        ].each { token ->
+            if (!runtimeText.contains(token)) {
+                throw new GradleException(
+                        "Explicit core-install runtime contract is missing: ${token}")
+            }
+        }
+        [
+                'runSimpleCommand("install_cores", false)',
+                "PrimaryAction primaryAction()",
+                "if (coreInstall.active())",
+                "if (coreInstall.required)",
+                "state.primaryAction().label()",
+                "switch (state.primaryAction())",
+                "updateCoreInstallUi(state)",
+                "new CoreInstallProgressView(",
+                "CORE_INSTALL_DIALOG_DELAY_MS = 150L",
+                "CORE_INSTALL_DIALOG_MIN_VISIBLE_MS = 1_000L",
+                "setCanceledOnTouchOutside(false)",
+                "setCancelable(false)",
+                "BulletinFactory.of(this)",
+                "final CoreInstallState coreInstall",
+                'CoreInstallState.parse(value.optJSONObject("coreInstall"))',
+                'value.optBoolean("required", false)',
+                'value.optString("state", "idle")',
+                'value.optInt("progress", 0)',
+                'value.optString("stage", "idle")',
+                'value.optLong("generation", 0L)',
+                "boolean active()",
+                "boolean terminal()",
+                "boolean successful()",
+                "boolean partial()",
+                "Math.max(0, Math.min(100",
+                "final class CoreInstallProgressView",
+                "void setState(ExitFyDashboardState.CoreInstallState state)"
+        ].each { token ->
+            if (!dashboardText.contains(token)
+                    && !dashboardStateText.contains(token)
+                    && !coreInstallProgressText.contains(token)) {
+                throw new GradleException(
+                        "Explicit core-install dashboard contract is missing: ${token}")
+            }
+        }
+        [
+                'IDLE("idle")', 'QUEUED("queued")', 'RUNNING("running")',
+                'SUCCESS("success")', 'ERROR("error")',
+                'PREPARING("preparing")', 'DOWNLOADING("downloading")',
+                'VERIFYING("verifying")', 'DONE("done")',
+                'PARTIAL("partial")', 'FAILED("failed")',
+                "if (active(state)) return new Request(generation, false)",
+                "Math.max(progress, Math.max(0, Math.min(99, nextProgress)))",
+                "if (boundedReady == 2)",
+                "progress = 100",
+                "synchronized void cancel()",
+                "generation++"
+        ].each { token ->
+            if (!coreInstallSessionText.contains(token)) {
+                throw new GradleException(
+                        "Explicit core-install session contract is missing: ${token}")
+            }
+        }
+        [
+                "corePolicy", "requiredCore", "loadedCore", "coreUpdateRunning",
+                "CoreStatus", "\"cores\"", "\"check_core_update\"",
+                "singBoxStatusView", "xrayStatusView"
+        ].each { token ->
+            if (dashboardText.contains(token)
+                    || dashboardStateText.contains(token)
+                    || coreInstallProgressText.contains(token)) {
+                throw new GradleException(
+                        "Removed dashboard core API returned: ${token}")
+            }
+        }
+        String dashboardCoreUiText = (dashboardText + "\n"
+                + dashboardStateText + "\n" + coreInstallProgressText)
+                .toLowerCase(Locale.ROOT)
+        ["corefamily", "singbox", "sing-box", "xray",
+         "coreversion", "versionview"].each { token ->
+            if (dashboardCoreUiText.contains(token)) {
+                throw new GradleException(
+                        "Per-family core detail returned to the dashboard: ${token}")
+            }
+        }
+        if (settingsModelText.contains("corePolicy")
+                || settingsModelText.contains("\"core_policy\"")) {
+            throw new GradleException(
+                    "Removed Java core_policy setting contract returned")
+        }
+        if (!dashboardText.contains('"expected_ping_type"')
+                || !serversText.contains('"expected_ping_type"')
+                || !runtimeText.contains('"expected_ping_type"')) {
+            throw new GradleException(
+                    "Latency-check confirmation must bind the expected ping type")
+        }
+        if (!pluginText.contains(
+                "dashboard.setCurrentAccount(fragment.getCurrentAccount())")) {
+            throw new GradleException("Menu dashboard does not inherit the active account")
+        }
+        if (!runtimeText.contains('value.put("runtimeAvailable", loaded)')
+                || !runtimeText.contains(
+                "if (!coreOperationRunning.compareAndSet(false, true)) return false")) {
+            throw new GradleException("Native settings operation state is incomplete")
+        }
+        if (runtimeText.contains("\"check_core_update\"")
+                || !runtimeText.contains("requestCorePreparation(")
+                || !runtimeText.contains("scheduleCorePreparationRetry(")
+                || !runtimeText.contains("resetCorePreparationBackoff()")
+                || !runtimeText.contains("cancelCorePreparation(true)")
+                || !runtimeText.contains("checkCoreUpdateAndSettle(")
+                || !runtimeText.contains("coreMaintenancePending")
+                || !runtimeText.contains("requestCoreMaintenance()")
+                || !runtimeText.contains(
+                "CORE_MASK_ALL & ~coreOperationCoverageMask")
+                || !runtimeText.contains(
+                "coreMaintenancePendingMask |= mask;")
+                || !runtimeText.contains(
+                "claimedMask &= ~coreMask(preparation.family)")
+                || !runtimeText.contains(
+                "beginCoreUpdateCheck(request.family, !usable)")
+                || !runtimeText.contains("safeCoreExecute(0,")
+                || !runtimeText.contains("safeExecute(this::drainCoreWork)")
+                || !runtimeText.contains(
+                "!corePreparationMatchesSelection(request)")
+                || !runtimeText.contains(
+                "nativeCore.prepareLocalCore(request.family)")
+                || !runtimeText.contains("selectedBeforeRemoval")
+                || !runtimeText.contains(
+                "RuntimePolicy.shouldWaitForCorePreparation(")
+                || !runtimeText.contains(
+                "if (update.connectionSettingsChanged) cancelCorePreparation(true)")
+                || !runtimeText.contains(
+                "if (isCoreUsable(family)) {")) {
+            throw new GradleException(
+                    "Automatic core preparation contract is incomplete")
+        }
+        int loadStart = runtimeText.indexOf("    void load() {")
+        int updateSettingsStart = runtimeText.indexOf(
+                "    void updateSettings(String json)", loadStart)
+        int usableStart = runtimeText.indexOf(
+                "    private boolean isCoreUsable(CoreFamily family)")
+        int readinessMarkerStart = runtimeText.indexOf(
+                "    private void markCoreReadinessVerified(", usableStart)
+        int initialInspectionStart = runtimeText.indexOf(
+                "    private void runInitialCoreInspection()")
+        int explicitInstallStart = runtimeText.indexOf(
+                "    private void attemptExplicitCoreInstall()", initialInspectionStart)
+        int maintenanceStart = runtimeText.indexOf(
+                "    private void requestCoreMaintenance(int requestedMask)")
+        int maintenanceAttemptStart = runtimeText.indexOf(
+                "    private void attemptCoreMaintenance()", maintenanceStart)
+        int drainStart = runtimeText.indexOf("    private void drainCoreWork()")
+        int preparationStart = runtimeText.indexOf(
+                "    private void requestCorePreparation(", drainStart)
+        if (loadStart < 0 || updateSettingsStart <= loadStart
+                || usableStart < 0 || readinessMarkerStart <= usableStart
+                || initialInspectionStart < 0
+                || explicitInstallStart <= initialInspectionStart
+                || maintenanceStart < 0
+                || maintenanceAttemptStart <= maintenanceStart
+                || drainStart < 0 || preparationStart <= drainStart) {
+            throw new GradleException("Initial local core inspection methods are incomplete")
+        }
+        String loadCoreGateText = runtimeText.substring(loadStart, updateSettingsStart)
+        String usableCoreGateText = runtimeText.substring(
+                usableStart, readinessMarkerStart)
+        String initialInspectionText = runtimeText.substring(
+                initialInspectionStart, explicitInstallStart)
+        String maintenanceGateText = runtimeText.substring(
+                maintenanceStart, maintenanceAttemptStart)
+        String drainCoreGateText = runtimeText.substring(drainStart, preparationStart)
+        if (!loadCoreGateText.contains("requestInitialCoreInspection();")
+                || !loadCoreGateText.contains(
+                "safeScheduleWithFixedDelay(this::scheduledCoreCheck")
+                || !usableCoreGateText.contains("initialCoreInspectionComplete")
+                || !usableCoreGateText.contains("verifiedCoreReadinessMask.get()")
+                || !initialInspectionText.contains(
+                "nativeCore.verifyLocalReadiness(CoreFamily.SING_BOX)")
+                || !initialInspectionText.contains(
+                "nativeCore.verifyLocalReadiness(CoreFamily.XRAY)")
+                || !initialInspectionText.contains(
+                "initialCoreInspectionComplete = true")
+                || !maintenanceGateText.contains(
+                "if (!hasAnyUsableCore()) return;")
+                || !drainCoreGateText.contains(
+                "if (!initialCoreInspectionComplete) {")
+                || !drainCoreGateText.contains("requestInitialCoreInspection();")
+                || !runtimeText.contains(
+                "if (!hasAnyUsableCore() && !coreInstallSession.isActive()) return;")) {
+            throw new GradleException(
+                    "Initial local core inspection/network gate contract is incomplete")
+        }
+        String coreSelectorText = file(
+                "src/main/java/com/extera/plugins/exitfy/CoreSelector.java")
+                .getText("UTF-8")
+        String coreInstallBackoffText = file(
+                "src/main/java/com/extera/plugins/exitfy/CoreInstallBackoff.java")
+                .getText("UTF-8")
+        String runtimePolicyText = file(
+                "src/main/java/com/extera/plugins/exitfy/RuntimePolicy.java")
+                .getText("UTF-8")
+        String coreUpdaterText = file(
+                "src/main/java/com/extera/plugins/exitfy/CoreUpdater.java")
+                .getText("UTF-8")
+        if (!runtimePolicyText.contains(
+                "return !singBoxReady || !xrayReady;")
+                || !runtimePolicyText.contains(
+                "return singBoxReady || xrayReady;")) {
+            throw new GradleException(
+                    "0/2 and 1/2 core-install policy contract is incomplete")
+        }
+        [
+                "interface ProgressListener",
+                "void onProgress(long downloadedBytes, long totalBytes)",
+                "ProgressListener progressListener",
+                "notifyProgress(progressListener, 0L, contentLength)",
+                "notifyProgress(progressListener, total, contentLength)"
+        ].each { token ->
+            if (!httpText.contains(token)) {
+                throw new GradleException(
+                        "Streaming download progress contract is incomplete: ${token}")
+            }
+        }
+        [
+                "boolean checkForUpdate(boolean force, UpdateObserver observer)",
+                "notifyStage(observer, UpdateStage.PREPARING)",
+                "notifyStage(observer, UpdateStage.DOWNLOADING)",
+                "notifyStage(observer, UpdateStage.VERIFYING)",
+                "notifyProgress(observer, downloadedBytes, advertisedSize)",
+                "interface UpdateObserver",
+                "enum UpdateStage"
+        ].each { token ->
+            if (!coreUpdaterText.contains(token)) {
+                throw new GradleException(
+                        "Core updater progress contract is incomplete: ${token}")
+            }
+        }
+        if (!coreSelectorText.contains("CoreFamily loadedFamily")
+                || !coreSelectorText.contains("singBoxReady")
+                || !coreSelectorText.contains("xrayReady")
+                || !coreUpdaterText.contains(
+                "(activeSupported && !rollbackRequested)")
+                || !coreInstallBackoffText.contains(
+                "5L, 30L, 2L * 60L, 10L * 60L, 60L * 60L")) {
+            throw new GradleException(
+                    "Adaptive core selection/backoff contract is incomplete")
+        }
+        if (dashboardText.contains("PluginsController.openPluginSettings")
+                || dashboardText.contains("void openSettings(")
+                || dashboardText.contains("MENU_SETTINGS")) {
+            throw new GradleException("Dashboard still links to removed plugin settings")
+        }
+        if (!runtimeText.contains("update = requestSettingsLocked(normalized);")
+                || !runtimeText.contains("finishSettingsUpdate(update);")
+                || !runtimeText.contains("final long revision;")) {
+            throw new GradleException(
+                    "Dashboard settings must derive, revision and persist one atomic update")
+        }
+        File resourceRoot = file("src/main/res")
+        if (resourceRoot.isDirectory()) {
+            def pluginImages = fileTree(resourceRoot).matching {
+                include "**/*.png", "**/*.webp", "**/*.jpg", "**/*.jpeg",
+                        "**/*.gif", "**/*.svg"
+            }.files
+            if (!pluginImages.isEmpty()) {
+                throw new GradleException(
+                        "Dashboard must use host Telegram icons, not plugin image assets")
+            }
+        }
+        ["ExitFyNativeUi.java", "ExitFyUi.java", "ExitFyViews.java", "UiStateEvents.java"].each { name ->
+            if (file("src/main/java/com/extera/plugins/exitfy/${name}").exists()) {
+                throw new GradleException("Obsolete Java UI remains: ${name}")
+            }
+        }
+        fileTree("src/main/java").matching { include "**/*.java" }.files.each { candidate ->
+            String source = candidate.getText("UTF-8")
+            ["UniversalFragment", "org.telegram.ui.Components.UItem",
+             "androidx.compose", "com.google.android.material", "ComposeView"].each { token ->
+                if (source.contains(token)) {
+                    throw new GradleException("Custom UI dependency remains in ${candidate.name}: ${token}")
+                }
+            }
+        }
+        String guardedDexLoad = '''try:
+            self.invoke("load")
+            self.invoke("updateSettings", settings_json)'''
+        if (!pluginText.contains(guardedDexLoad)
+                || !pluginText.contains("self.invoke(\"unload\")")) {
+            throw new GradleException(
+                    "DEX load/updateSettings must share best-effort unload cleanup")
+        }
+        if (!bridgeText.contains("DEX_KEEPER_NAME = DEX_KEEPER_PREFIX + \"${pluginVersion}\"")
+                || !bridgeText.contains("new Thread(new DexKeeper(), DEX_KEEPER_NAME)")
+                || !bridgeText.contains("keeper.setDaemon(true)")
+                || !bridgeText.contains(
+                "keeper.setContextClassLoader(ExitFyBridge.class.getClassLoader())")
+                || !bridgeText.contains("private static boolean dexKeeperStarted")
+                || !bridgeText.contains("static synchronized void ensureDexKeeper()")) {
+            throw new GradleException(
+                    "Process-lifetime DEX keeper is absent or out of sync")
+        }
+        if (!bridgeText.contains("Build.VERSION.SDK_INT < ${minAndroidApi}")
+                || !bridgeText.contains("Process.is64Bit()")
+                || !bridgeText.contains("\"arm64-v8a\".equals(abis[0])")
+                || !bootstrapText.contains("if (!abi.equals(\"arm64-v8a\"))")) {
+            throw new GradleException("Java API 29/arm64 process gate is absent or out of sync")
+        }
+        int ownerClaim = bridgeText.indexOf(
+                "if (!claimProcessOwner(ownerKey, ownerToken))")
+        int keeperEnsureCall = bridgeText.indexOf("ensureDexKeeper();", ownerClaim)
+        int nativeLoadCall = bridgeText.indexOf("loader.load(path);", keeperEnsureCall)
+        int ownerRelease = bridgeText.indexOf(
+                "releaseProcessOwner(ownerKey, ownerToken);", keeperEnsureCall)
+        if (ownerClaim < 0 || keeperEnsureCall < ownerClaim
+                || ownerRelease < keeperEnsureCall || ownerRelease > nativeLoadCall
+                || nativeLoadCall < keeperEnsureCall
+                || bridgeText.contains("\n    static {\n")) {
+            throw new GradleException(
+                    "DEX keeper/native-load ownership ordering is unsafe")
+        }
+        if (bridgeText.contains("properties.put(")) {
+            throw new GradleException(
+                    "DEX/ClassLoader objects must not be retained through System Properties")
+        }
+        if (!runtimeText.contains(
+                "MAX_COMMAND_TOKEN_UTF8_BYTES = LimitedHttpClient.MAX_EXPANDED_BYTES")
+                || !runtimeText.contains(
+                "MAX_COMMAND_JSON_UTF8_BYTES = MAX_COMMAND_TOKEN_UTF8_BYTES * 2 + 1024")
+                || !runtimeText.contains("MAX_COMMAND_TOKEN_UTF8_BYTES, MAX_COMMAND_JSON_UTF8_BYTES")) {
+            throw new GradleException("Java command-envelope limits are absent or out of sync")
+        }
+        if (!runtimeText.contains("DashboardRefreshThrottle.delayNanos(")
+                || !runtimeText.contains("dashboardRefreshFuture = coordinator.schedule(")
+                || !runtimeText.contains("synchronized (dashboardRefreshLock)")
+                || !runtimeText.contains("ExitFyBridge.notifyUiListeners()")
+                || runtimeText.contains("loadPluginSettings(pluginId)")) {
+            throw new GradleException(
+                    "Runtime does not throttle dashboard refreshes safely")
+        }
+        if (!httpText.contains("MAX_EXPANDED_BYTES = 8 * 1024 * 1024")) {
+            throw new GradleException("Java decoded import limit is not 8 MiB")
+        }
+        if (runtimeText.contains("put(\"customHwid\", current.customHwid)")) {
+            throw new GradleException("Full HWID must not be exposed through UI state")
+        }
+        ["subscriptions.selectedUiNodeInfo(current.providerId)",
+         'value.put("defaultHwid", subscriptions.defaultHwid())',
+         'value.put("connectionIssue", connectionIssue)',
+         "requestSubscriptionRefresh(false,\n                                revisionGate.currentToken(), true)",
+         "subscriptions.selected(provider)"].each { token ->
+            if (!runtimeText.contains(token)) {
+                throw new GradleException(
+                        "Selected-server/subscription projection contract is incomplete: ${token}")
+            }
+        }
+        def iconMatch = (pluginText =~ /(?m)^__icon__\s*=\s*"([^"]+)"\s*$/)
+        if (!iconMatch.find() || !(iconMatch.group(1) ==~ /[a-zA-Z][a-zA-Z0-9_]*\/\d+/)) {
+            throw new GradleException("Plugin icon metadata has an invalid format")
+        }
+        [dexBeginMarker, dexEndMarker, nativeBeginMarker, nativeEndMarker].each { marker ->
+            if (pluginText.count(marker) != 1) throw new GradleException("Payload marker is not unique: ${marker}")
+        }
+        [
+                "public static void configure(java.lang.String);",
+                "public static void load();",
+                "public static void unload();",
+                "public static void updateSettings(java.lang.String);",
+                "public static java.lang.String execute(java.lang.String);",
+                "public static java.lang.String getUiState();",
+                "public static void onAppResume();",
+        ].each { rule ->
+            if (!proguardText.contains(rule)) throw new GradleException("Missing bridge keep rule: ${rule}")
+        }
+        if (!proguardText.contains(
+                "static org.telegram.ui.ActionBar.BaseFragment createDashboardFragment();")) {
+            throw new GradleException("Dashboard reflection keep rule is missing")
+        }
+    }
+}
+
+tasks.register("lintPluginTemplate") {
+    group = "verification"
+    dependsOn "validateEmbeddedDexConfig"
+    doLast {
+        providers.exec {
+            commandLine "python3", "-c",
+                    "import ast,sys; ast.parse(open(sys.argv[1],encoding='utf-8').read(), filename=sys.argv[1], feature_version=(3,11))",
+                    pluginTemplateFile.absolutePath
+        }.result.get().assertNormalExitValue()
+    }
+}
+
+tasks.matching { it.name == "lintPlugin" }.configureEach {
+    dependsOn tasks.named("lintPluginTemplate")
+}
+
+tasks.register("pythonTemplateTests") {
+    group = "verification"
+    description = "Runs Python-side loader and command-envelope regression tests"
+    inputs.files(fileTree("tests").matching { include "test_*.py" }, pluginTemplateFile)
+    doLast {
+        providers.exec {
+            environment "PYTHONDONTWRITEBYTECODE", "1"
+            commandLine "python3", "-m", "unittest", "discover",
+                    "-s", file("tests").absolutePath, "-p", "test_*.py"
+        }.result.get().assertNormalExitValue()
+    }
+}
+
+tasks.register("unitTests") {
+    group = "verification"
+    description = "Runs exitFy Java unit tests"
+    dependsOn "testDebugUnitTest", "pythonTemplateTests"
+}
+
+tasks.register("buildDex") {
+    group = "build"
+    dependsOn "lintPlugin", "assemblePlugin", "prepareHostClasses"
+
+    doLast {
+        File androidJar = file("${androidSdkDir}/platforms/android-${compileSdkApi}/android.jar")
+        if (!androidJar.exists()) throw new GradleException("Missing android.jar: ${androidJar}")
+        String d8Name = System.getProperty("os.name").toLowerCase().contains("windows") ? "d8.bat" : "d8"
+        String d8Path = resolveBuildToolsExe(d8Name)
+        File aarFile = layout.buildDirectory.file("outputs/aar/${outputAarName}").get().asFile
+        if (!aarFile.exists()) throw new GradleException("Plugin AAR not found: ${aarFile}")
+
+        File jarDir = layout.buildDirectory.dir("dex-input").get().asFile
+        delete jarDir
+        copy {
+            from zipTree(aarFile)
+            include "classes.jar"
+            into jarDir
+        }
+        File jarFile = new File(jarDir, "classes.jar")
+        File dexDir = layout.buildDirectory.dir("dex").get().asFile
+        delete dexDir
+        dexDir.mkdirs()
+        File exteraHookAar = configurations.pluginCompileClasspath.files.find {
+            it.isFile() && it.name == "exterahook-0.2.2.aar"
+        }
+        if (exteraHookAar == null) {
+            throw new GradleException("exterahook 0.2.2 is missing from the D8 classpath")
+        }
+        File hookClasspathDir = layout.buildDirectory.dir("dex-hook-classpath").get().asFile
+        delete hookClasspathDir
+        copy {
+            from zipTree(exteraHookAar)
+            include "classes.jar"
+            rename { "exterahook-0.2.2.jar" }
+            into hookClasspathDir
+        }
+        File exteraHookJar = new File(hookClasspathDir, "exterahook-0.2.2.jar")
+        if (!exteraHookJar.isFile()) {
+            throw new GradleException("classes.jar is missing from ${exteraHookAar}")
+        }
+        providers.exec {
+            commandLine d8Path,
+                    "--lib", androidJar.absolutePath,
+                    "--classpath", hostClassesJar.absolutePath,
+                    "--classpath", exteraHookJar.absolutePath,
+                    "--release", "--min-api", minAndroidApi.toString(),
+                    "--output", dexDir.absolutePath,
+                    jarFile.absolutePath
+        }.result.get().assertNormalExitValue()
+        File dexFile = new File(dexDir, "classes.dex")
+        if (!dexFile.exists()) throw new GradleException("classes.dex was not produced")
+        def dexOutputs = fileTree(dexDir).matching { include "classes*.dex" }.files
+        if (dexOutputs.size() != 1 || dexOutputs.first().name != "classes.dex") {
+            throw new GradleException("Embedded plugin must produce exactly one classes.dex: "
+                    + dexOutputs.collect { it.name }.sort().join(", "))
+        }
+
+        String generated = pluginTemplateFile.getText("UTF-8")
+        generated = replacePayloadBlock(generated, dexBeginMarker, dexEndMarker,
+                deflate(dexFile.bytes).encodeBase64().toString())
+        generated = replacePayloadBlock(generated, nativeBeginMarker, nativeEndMarker,
+                readNativeBundleFromAar(aarFile))
+
+        outputPlugin.parentFile.mkdirs()
+        File staged = new File(outputPlugin.parentFile, ".${outputPlugin.name}.tmp")
+        staged.setText(generated, "UTF-8")
+        Files.move(staged.toPath(), outputPlugin.toPath(),
+                StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        logger.lifecycle("Wrote ${outputPlugin}")
+    }
+}
+
+tasks.register("auditDexWithJadx") {
+    group = "verification"
+    description = "Decompiles the final DEX and audits the human-readable output"
+    dependsOn "buildDex"
+    doLast {
+        File dexFile = layout.buildDirectory.file("dex/classes.dex").get().asFile
+        if (!dexFile.isFile()) throw new GradleException("classes.dex is missing for JADX audit")
+        File auditDir = layout.buildDirectory.dir("jadx-audit").get().asFile
+        delete auditDir
+        auditDir.mkdirs()
+        providers.exec {
+            commandLine resolveJadx(), "--no-res", "--no-imports",
+                    "--comments-level", "none", "--log-level", "error",
+                    "--decompilation-mode", "fallback",
+                    "-d", auditDir.absolutePath, dexFile.absolutePath
+        }.result.get().assertNormalExitValue()
+
+        File sourceRoot = new File(auditDir, "sources")
+        def sources = sourceRoot.isDirectory()
+                ? fileTree(sourceRoot).matching { include "**/*.java" }.files
+                : [] as Set
+        if (sources.isEmpty()) throw new GradleException("JADX produced no Java sources")
+        File bridgeSource = new File(sourceRoot,
+                "com/extera/plugins/exitfy/ExitFyBridge.java")
+        if (!bridgeSource.isFile()) throw new GradleException("JADX did not recover ExitFyBridge")
+        sources.each { source ->
+            String lower = source.getText("UTF-8").toLowerCase(Locale.ROOT)
+            if (lower.contains("jadx error")) {
+                throw new GradleException("JADX reported broken decompilation in ${source}")
+            }
+            forbiddenLocalArtifactTokens.each { token ->
+                if (lower.contains(token)) {
+                    throw new GradleException("Local source path leaked into JADX output: ${source}")
+                }
+            }
+            forbiddenSensitiveSubscriptionTokens.each { token ->
+                if (lower.contains(token)) {
+                    throw new GradleException(
+                            "Plaintext built-in subscription material remains in JADX output: ${source}")
+                }
+            }
+        }
+        assertNoProviderPlaintext(sources,
+                providerSecretNeedles(privateProviderUrls()), "JADX output")
+        logger.lifecycle("JADX-audited ${sources.size()} exitFy classes")
+    }
+}
+
+tasks.register("verifyPluginArtifact") {
+    group = "verification"
+    dependsOn "buildDex", "auditDexWithJadx", "unitTests", "assembleDebugAndroidTest"
+    doLast {
+        def heapDumps = fileTree(projectDir).matching { include "java_pid*.hprof" }.files
+        if (!heapDumps.isEmpty()) {
+            throw new GradleException("Heap dump must not remain in the plugin project")
+        }
+        String text = outputPlugin.getText("UTF-8")
+        [
+                "__id__ = \"${pluginId}\"",
+                "__version__ = \"${pluginVersion}\"",
+                "__author__ = \"${pluginAuthor}\"",
+                "__icon__ = \"${pluginIcon}\"",
+                "__app_version__ = \">=12.5.1\"",
+                "__sdk_version__ = \">=1.4.3.8\"",
+        ].each { metadata ->
+            if (!text.contains(metadata)) throw new GradleException("Generated metadata is invalid: ${metadata}")
+        }
+        File mergedPluginManifest = file(
+                "build/intermediates/merged_manifest/plugin/processPluginManifest/AndroidManifest.xml")
+        if (!mergedPluginManifest.isFile()
+                || !mergedPluginManifest.getText("UTF-8").contains(
+                "android:minSdkVersion=\"${minAndroidApi}\"")) {
+            throw new GradleException("Plugin manifest minSdk is not API ${minAndroidApi}")
+        }
+        byte[] dex = inflate(payloadFromBlock(text, dexBeginMarker, dexEndMarker).decodeBase64())
+        if (dex.length < 8 || new String(dex, 0, 4, StandardCharsets.US_ASCII) != "dex\n") {
+            throw new GradleException("Embedded DEX magic is invalid")
+        }
+        if (!new String(dex, StandardCharsets.ISO_8859_1).contains("Lcom/extera/plugins/exitfy/ExitFyBridge;")) {
+            throw new GradleException("Embedded DEX entry class is missing")
+        }
+        File builtDex = layout.buildDirectory.file("dex/classes.dex").get().asFile
+        if (!builtDex.isFile() || sha256(dex) != sha256(builtDex.bytes)) {
+            throw new GradleException("Embedded DEX digest does not match the built DEX")
+        }
+        def dexOutputs = fileTree(builtDex.parentFile)
+                .matching { include "classes*.dex" }.files
+        if (dexOutputs.size() != 1 || dexOutputs.first().name != "classes.dex") {
+            throw new GradleException("Unexpected multidex output: "
+                    + dexOutputs.collect { it.name }.sort().join(", "))
+        }
+        String dexdumpName = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("windows") ?
+                "dexdump.exe" : "dexdump"
+        String dexDump = captureCommand([resolveBuildToolsExe(dexdumpName), "-f", builtDex.absolutePath])
+        Set<String> definedClasses = new LinkedHashSet<>()
+        def descriptorMatcher = dexDump =~ /(?m)^\s*Class descriptor\s*:\s*'([^']+)'\s*$/
+        while (descriptorMatcher.find()) {
+            definedClasses.add(descriptorMatcher.group(1))
+        }
+        if (definedClasses.isEmpty()) {
+            throw new GradleException("dexdump did not report any defined classes")
+        }
+        def foreignClasses = definedClasses.findAll {
+            !it.startsWith("Lcom/extera/plugins/exitfy/")
+        }
+        if (!foreignClasses.isEmpty()) {
+            throw new GradleException("Embedded DEX defines classes outside the plugin namespace: "
+                    + foreignClasses.take(10).join(", "))
+        }
+        String bridgeDescriptor = "Lcom/extera/plugins/exitfy/ExitFyBridge;"
+        int bridgeStart = dexDump.indexOf("Class descriptor  : '${bridgeDescriptor}'")
+        int bridgeEnd = bridgeStart < 0 ? -1 : dexDump.indexOf("\nClass #", bridgeStart + 1)
+        if (bridgeStart < 0) throw new GradleException("ExitFyBridge class is absent from dexdump")
+        if (bridgeEnd < 0) bridgeEnd = dexDump.length()
+        String bridgeBlock = dexDump.substring(bridgeStart, bridgeEnd)
+        int directMethodsStart = bridgeBlock.indexOf("Direct methods")
+        int virtualMethodsStart = bridgeBlock.indexOf("Virtual methods", directMethodsStart + 1)
+        if (directMethodsStart < 0 || virtualMethodsStart < 0) {
+            throw new GradleException("Cannot locate ExitFyBridge method table")
+        }
+        String bridgeMethodsBlock = bridgeBlock.substring(directMethodsStart, virtualMethodsStart)
+        Set<String> actualPublicStaticBridgeMethods = new LinkedHashSet<>()
+        def bridgeMethodMatcher = bridgeMethodsBlock =~ /(?ms)^\s+name\s+:\s+'([^']+)'\s*$\s*^\s+type\s+:\s+'([^']+)'\s*$\s*^\s+access\s+:\s+0x[0-9a-f]+\s+\(([^)]*)\)\s*$/
+        while (bridgeMethodMatcher.find()) {
+            String flags = bridgeMethodMatcher.group(3)
+            if (flags.contains("PUBLIC") && flags.contains("STATIC")) {
+                actualPublicStaticBridgeMethods.add(
+                        bridgeMethodMatcher.group(1) + bridgeMethodMatcher.group(2))
+            }
+        }
+        Set<String> expectedPublicStaticBridgeMethods = [
+                "configure(Ljava/lang/String;)V",
+                "load()V",
+                "unload()V",
+                "updateSettings(Ljava/lang/String;)V",
+                "execute(Ljava/lang/String;)Ljava/lang/String;",
+                "getUiState()Ljava/lang/String;",
+                "onAppResume()V",
+        ] as Set
+        if (actualPublicStaticBridgeMethods != expectedPublicStaticBridgeMethods) {
+            throw new GradleException("Public static bridge ABI mismatch. Expected "
+                    + expectedPublicStaticBridgeMethods + ", got "
+                    + actualPublicStaticBridgeMethods)
+        }
+        def dashboardFactoryMatcher = bridgeMethodsBlock =~ /(?ms)^\s+name\s+:\s+'createDashboardFragment'\s*$\s*^\s+type\s+:\s+'\(\)Lorg\/telegram\/ui\/ActionBar\/BaseFragment;'\s*$\s*^\s+access\s+:\s+0x[0-9a-f]+\s+\(([^)]*)\)\s*$/
+        if (!dashboardFactoryMatcher.find()) {
+            throw new GradleException("Package-private dashboard factory is absent from bridge")
+        }
+        String dashboardFactoryFlags = dashboardFactoryMatcher.group(1)
+        if (!dashboardFactoryFlags.contains("STATIC")
+                || dashboardFactoryFlags.contains("PUBLIC")) {
+            throw new GradleException(
+                    "Dashboard factory must remain package-private and outside public bridge ABI")
+        }
+        String proxyControllerDescriptor =
+                "Lcom/exteragram/messenger/proxy/ProxyController;"
+        if (new String(dex, StandardCharsets.ISO_8859_1)
+                .contains(proxyControllerDescriptor)) {
+            throw new GradleException(
+                    "Embedded DEX has a static ProxyController type reference")
+        }
+        String forbiddenProtocol = ["tg", "ws"].join("")
+        String forbiddenDashed = ["tg", "-ws"].join("")
+        String dexText = new String(dex, StandardCharsets.ISO_8859_1).toLowerCase(Locale.ROOT)
+        ["landroidx/compose/", "lcom/google/android/material/", "composeview"].each { token ->
+            if (dexText.contains(token)) {
+                throw new GradleException("Forbidden UI runtime remains in decoded DEX: ${token}")
+            }
+        }
+        if (dexText.contains("exitfyviews")
+                || dexText.contains("exitfynativeui")
+                || dexText.contains("exitfyui")
+                || dexText.contains("universalfragment")
+                || dexText.contains("android/graphics/path;")) {
+            throw new GradleException("Obsolete or unsupported UI remains in decoded DEX")
+        }
+        if (!dexText.contains("createDashboardFragment".toLowerCase(Locale.ROOT))
+                || !dexText.contains("lorg/telegram/ui/actionbar/basefragment;")) {
+            throw new GradleException("Telegram-native dashboard is missing from decoded DEX")
+        }
+        if (!dexText.contains(
+                "lcom/exteragram/messenger/plugins/pythonpluginsengine;")
+                || !dexText.contains("openpluginsettings")
+                || !dexText.contains("exitfy_v2")
+                || !dexText.contains("lde/robv/android/xposed/xposedbridge;")) {
+            throw new GradleException("Direct plugin-settings hook is missing from decoded DEX")
+        }
+        forbiddenAndroidRuntimeAbiTokens.each { token ->
+            if (dexText.contains(token) || text.toLowerCase(Locale.ROOT).contains(token)) {
+                throw new GradleException(
+                        "Removed Android ABI remains in generated artifact: ${token}")
+            }
+        }
+        forbiddenLocalArtifactTokens.each { token ->
+            if (dexText.contains(token) || text.toLowerCase(Locale.ROOT).contains(token)) {
+                throw new GradleException("Local source path leaked into generated plugin")
+            }
+        }
+        if (dexText.contains(forbiddenProtocol) || dexText.contains(forbiddenDashed)) {
+            throw new GradleException("Removed transport remains in decoded DEX")
+        }
+        if (text.toLowerCase(Locale.ROOT).contains(forbiddenProtocol)
+                || text.toLowerCase(Locale.ROOT).contains(forbiddenDashed)) {
+            throw new GradleException("Removed transport remains in generated plugin")
+        }
+        forbiddenResetTokens.each { removed ->
+            String token = removed.toLowerCase(Locale.ROOT)
+            if (dexText.contains(token) || text.toLowerCase(Locale.ROOT).contains(token)) {
+                throw new GradleException("Removed settings reset path remains in artifact: ${removed}")
+            }
+        }
+        forbiddenThirdPartyCoreTokens.each { removed ->
+            String token = removed.toLowerCase(Locale.ROOT)
+            if (dexText.contains(token) || text.toLowerCase(Locale.ROOT).contains(token)) {
+                throw new GradleException("Removed third-party core source remains in artifact")
+            }
+        }
+        forbiddenRemovedProviderTokens.each { removed ->
+            if (dexText.contains(removed) || text.toLowerCase(Locale.ROOT).contains(removed)) {
+                throw new GradleException("Removed provider remains in artifact")
+            }
+        }
+        forbiddenSensitiveSubscriptionTokens.each { token ->
+            if (dexText.contains(token) || text.toLowerCase(Locale.ROOT).contains(token)) {
+                throw new GradleException(
+                        "Plaintext built-in subscription material remains in artifact")
+            }
+        }
+        for (String className : ["ProviderCatalog", "ProviderCatalogData",
+                                 "CatalogMaterialA", "CatalogMaterialB"]) {
+            if (dexText.contains(className.toLowerCase(Locale.ROOT))) {
+                throw new GradleException("Provider material class was not obfuscated: ${className}")
+            }
+        }
+        File mappingFile = layout.buildDirectory.file(
+                "outputs/mapping/plugin/mapping.txt").get().asFile
+        File minifiedJar = layout.buildDirectory.file("dex-input/classes.jar").get().asFile
+        if (!mappingFile.isFile() || !minifiedJar.isFile()) {
+            throw new GradleException("R8 mapping or minified classes.jar is missing")
+        }
+        String mappingText = mappingFile.getText("UTF-8")
+        def catalogClassMatch = mappingText =~
+                /(?m)^com\.extera\.plugins\.exitfy\.ProviderCatalog -> ([^:]+):$/
+        if (!catalogClassMatch.find()) {
+            throw new GradleException("R8 mapping does not contain the provider catalog")
+        }
+        String catalogClassName = catalogClassMatch.group(1)
+        int catalogBlockStart = catalogClassMatch.end()
+        int catalogBlockEnd = mappingText.indexOf("\ncom.", catalogBlockStart)
+        if (catalogBlockEnd < 0) catalogBlockEnd = mappingText.length()
+        String catalogBlock = mappingText.substring(catalogBlockStart, catalogBlockEnd)
+        def endpointMethodMatch = catalogBlock =~
+                /(?m)^\s+(?:\d+:\d+:)?java\.lang\.String endpoint\(int\)(?::\d+:\d+)? -> (\S+)$/
+        if (!endpointMethodMatch.find()) {
+            throw new GradleException("R8 mapping does not contain the endpoint decoder")
+        }
+        String endpointMethodName = endpointMethodMatch.group(1)
+        def sizeMethodMatch = catalogBlock =~
+                /(?m)^\s+(?:\d+:\d+:)?int size\(\)(?::\d+:\d+)? -> (\S+)$/
+        def enabledMethodMatch = catalogBlock =~
+                /(?m)^\s+(?:\d+:\d+:)?boolean isEnabled\(int\)(?::\d+:\d+)? -> (\S+)$/
+        if (!sizeMethodMatch.find() || !enabledMethodMatch.find()) {
+            throw new GradleException("R8 mapping does not contain the provider catalog shape")
+        }
+        String sizeMethodName = sizeMethodMatch.group(1)
+        String enabledMethodName = enabledMethodMatch.group(1)
+        List<String> decodedEndpoints = new ArrayList<>()
+        URLClassLoader catalogLoader = new URLClassLoader(
+                [minifiedJar.toURI().toURL()] as URL[], ClassLoader.getPlatformClassLoader())
+        try {
+            Class<?> catalogClass = Class.forName(catalogClassName, true, catalogLoader)
+            java.lang.reflect.Method endpointMethod = catalogClass.getDeclaredMethod(
+                    endpointMethodName, Integer.TYPE)
+            java.lang.reflect.Method sizeMethod = catalogClass.getDeclaredMethod(sizeMethodName)
+            java.lang.reflect.Method enabledMethod = catalogClass.getDeclaredMethod(
+                    enabledMethodName, Integer.TYPE)
+            endpointMethod.setAccessible(true)
+            sizeMethod.setAccessible(true)
+            enabledMethod.setAccessible(true)
+            Object rawSize = sizeMethod.invoke(null)
+            if (!(rawSize instanceof Number) || ((Number) rawSize).intValue() != 2) {
+                throw new GradleException("R8-obfuscated provider catalog has an invalid slot count")
+            }
+            for (int index = 0; index < 2; index++) {
+                Object rawEnabled = enabledMethod.invoke(null, index)
+                if (!(rawEnabled instanceof Boolean)) {
+                    throw new GradleException("R8-obfuscated provider state is invalid")
+                }
+                if (!((Boolean) rawEnabled)) continue
+                Object decoded = endpointMethod.invoke(null, index)
+                if (!(decoded instanceof String)) {
+                    throw new GradleException(
+                            "R8-obfuscated provider catalog failed its runtime integrity check")
+                }
+                byte[] encoded = decoded.getBytes(StandardCharsets.UTF_8)
+                URI parsed = new URI(decoded)
+                if (encoded.length == 0 || encoded.length > 4096
+                        || !"https".equalsIgnoreCase(parsed.scheme)
+                        || parsed.host == null || parsed.host.isEmpty()
+                        || parsed.rawUserInfo != null || parsed.rawFragment != null
+                        || decodedEndpoints.contains(decoded)) {
+                    throw new GradleException(
+                            "R8-obfuscated provider catalog returned an invalid endpoint")
+                }
+                decodedEndpoints.add((String) decoded)
+            }
+        } finally {
+            catalogLoader.close()
+        }
+        List<String> configuredProviderUrls = privateProviderUrls() as List<String>
+        if (providerPrivateFile.isFile() && decodedEndpoints != configuredProviderUrls) {
+            throw new GradleException(
+                    "R8-obfuscated provider catalog does not match providers.private.json")
+        }
+        Set<String> decodedProviderNeedles = providerSecretNeedles(decodedEndpoints)
+        decodedProviderNeedles.each { needle ->
+            if (dexText.contains(needle) || text.toLowerCase(Locale.ROOT).contains(needle)) {
+                throw new GradleException(
+                        "Plaintext private provider material remains in generated artifact")
+            }
+        }
+        File jadxSourceRoot = layout.buildDirectory.dir("jadx-audit/sources").get().asFile
+        Collection<File> jadxSources = jadxSourceRoot.isDirectory()
+                ? fileTree(jadxSourceRoot).matching { include "**/*.java" }.files
+                : [] as Set
+        assertNoProviderPlaintext(jadxSources, decodedProviderNeedles, "JADX output")
+        Collection<File> decodedSourceFiles = new ArrayList<>()
+        [file("src/main"), file("src/test"), file("src/androidTest"), file("tests"),
+         file("tools")].each { sourceRoot ->
+            if (sourceRoot.isDirectory()) decodedSourceFiles.addAll(fileTree(sourceRoot).files)
+        }
+        decodedSourceFiles.addAll([pluginTemplateFile, file("build.gradle"), proguardFile,
+                                   file("README.md"), file("DEVICE_BETA_CHECKLIST.md")])
+        assertNoProviderPlaintext(decodedSourceFiles, decodedProviderNeedles, "project sources")
+        forbiddenDiagnosticsTokens.each { removed ->
+            if (dexText.contains(removed) || text.toLowerCase(Locale.ROOT).contains(removed)) {
+                throw new GradleException(
+                        "Removed diagnostics surface remains in artifact: ${removed}")
+            }
+        }
+        forbiddenNodeSelectionTokens.each { removed ->
+            String token = removed.toLowerCase(Locale.ROOT)
+            if (dexText.contains(token) || text.toLowerCase(Locale.ROOT).contains(token)) {
+                throw new GradleException(
+                        "Removed node-selection feature remains in artifact")
+            }
+        }
+        if (dexText.contains("deleterecursively")) {
+            throw new GradleException("Generic recursive data deletion leaked into the plugin DEX")
+        }
+
+        byte[] bundleJson = inflate(payloadFromBlock(text, nativeBeginMarker, nativeEndMarker).decodeBase64())
+        Map bundle = (Map) new JsonSlurper().parseText(new String(bundleJson, StandardCharsets.UTF_8))
+        if ((bundle.format as int) != 1 || bundle.version != pluginVersion) {
+            throw new GradleException("Native bundle metadata is invalid")
+        }
+        if (((Map) bundle.libs).keySet() as Set != supportedAbis as Set) {
+            throw new GradleException("Native bundle contains an unexpected ABI set")
+        }
+        Map expectedMachines = ["arm64-v8a": 183]
+        Map expectedElfClasses = ["arm64-v8a": 2]
+        List<String> requiredJniExports = [
+                "Java_com_extera_plugins_exitfy_NativeBridge_nativeOpen",
+                "Java_com_extera_plugins_exitfy_NativeBridge_nativeLoadedIdentity",
+                "Java_com_extera_plugins_exitfy_NativeBridge_nativeLoadedCoreApi",
+                "Java_com_extera_plugins_exitfy_NativeBridge_nativeStart",
+                "Java_com_extera_plugins_exitfy_NativeBridge_nativeStop",
+        ]
+        Set<String> expectedJniExports = requiredJniExports as Set
+        String llvmNm = resolveNdkTool("llvm-nm")
+        String llvmReadelf = resolveNdkTool("llvm-readelf")
+        File nativeVerifyDir = layout.buildDirectory.dir("verified-native").get().asFile
+        delete nativeVerifyDir
+        nativeVerifyDir.mkdirs()
+        supportedAbis.each { abi ->
+            Map item = (Map) ((Map) bundle.libs)[abi]
+            if (item == null) throw new GradleException("Bundle ABI missing: ${abi}")
+            byte[] so = item.data.toString().decodeBase64()
+            if (so.length != (item.size as int) || sha256(so) != item.sha256) {
+                throw new GradleException("Bundle digest mismatch: ${abi}")
+            }
+            if (so.length < 20 || so[0] != 0x7f || so[1] != (byte) 'E' || so[2] != (byte) 'L' || so[3] != (byte) 'F') {
+                throw new GradleException("Invalid ELF header: ${abi}")
+            }
+            int elfClass = so[4] & 0xff
+            int elfData = so[5] & 0xff
+            if (elfClass != expectedElfClasses[abi] || elfData != 1) {
+                throw new GradleException("Wrong ELF class/data encoding for ${abi}: ${elfClass}/${elfData}")
+            }
+            int machine = (so[18] & 0xff) | ((so[19] & 0xff) << 8)
+            if (machine != expectedMachines[abi]) throw new GradleException("Wrong ELF machine for ${abi}: ${machine}")
+
+            File soFile = new File(nativeVerifyDir, "${abi}/libexitfy_bridge.so")
+            soFile.parentFile.mkdirs()
+            Files.write(soFile.toPath(), so)
+            String dynamicSymbols = captureCommand([
+                    llvmNm, "-D", "--defined-only", soFile.absolutePath
+            ])
+            Set<String> exportedNames = dynamicSymbols.readLines()
+                    .collect { it.trim().tokenize() }
+                    .findAll { !it.isEmpty() }
+                    .collect { it.last() } as Set
+            if (exportedNames != expectedJniExports) {
+                throw new GradleException("JNI export set mismatch for ${abi}. Expected "
+                        + expectedJniExports + ", got " + exportedNames)
+            }
+            String nativeText = new String(so, StandardCharsets.ISO_8859_1)
+                    .toLowerCase(Locale.ROOT)
+            forbiddenLocalArtifactTokens.each { token ->
+                if (nativeText.contains(token)) {
+                    throw new GradleException("Local source path leaked into JNI bridge: ${abi}")
+                }
+            }
+
+            String programHeaders = captureCommand([llvmReadelf, "-lW", soFile.absolutePath])
+            def loadHeaders = programHeaders.readLines().findAll {
+                it.trim().startsWith("LOAD ")
+            }
+            if (loadHeaders.isEmpty()) {
+                throw new GradleException("ELF has no PT_LOAD segments: ${abi}")
+            }
+            loadHeaders.each { header ->
+                def fields = header.trim().tokenize()
+                if (fields.size() < 8) {
+                    throw new GradleException("Cannot parse ELF PT_LOAD header for ${abi}: ${header}")
+                }
+                String offsetText = fields[1]
+                String virtualAddressText = fields[2]
+                String alignmentText = fields.last()
+                long alignment = alignmentText.startsWith("0x") ?
+                        Long.parseUnsignedLong(alignmentText.substring(2), 16) :
+                        Long.parseLong(alignmentText)
+                if (alignment < 16 * 1024) {
+                    throw new GradleException("ELF PT_LOAD alignment is below 16 KiB for ${abi}: ${alignmentText}")
+                }
+                long offset = offsetText.startsWith("0x") ?
+                        Long.parseUnsignedLong(offsetText.substring(2), 16) :
+                        Long.parseLong(offsetText)
+                long virtualAddress = virtualAddressText.startsWith("0x") ?
+                        Long.parseUnsignedLong(virtualAddressText.substring(2), 16) :
+                        Long.parseLong(virtualAddressText)
+                if (Math.floorMod(offset - virtualAddress, alignment) != 0L) {
+                    throw new GradleException("ELF PT_LOAD offset/vaddr are not congruent for ${abi}: ${header}")
+                }
+            }
+        }
+
+        File androidTestDir = layout.buildDirectory.dir("outputs/apk/androidTest/debug").get().asFile
+        def androidTestApks = androidTestDir.isDirectory() ?
+                fileTree(androidTestDir).matching { include "*.apk" }.files : [] as Set
+        if (androidTestApks.isEmpty()) {
+            throw new GradleException("Debug androidTest APK was not produced")
+        }
+        androidTestApks.each { apk ->
+            ZipFile testZip = new ZipFile(apk)
+            boolean sawTestDex = false
+            Set<String> packagedAndroidAbis = new LinkedHashSet<>()
+            try {
+                testZip.entries().each { entry ->
+                    def nativeMatch = entry.name =~ '^lib/([^/]+)/[^/]+\\.so$'
+                    if (nativeMatch.matches()) packagedAndroidAbis.add(nativeMatch.group(1))
+                    if (entry.name ==~ /classes(\d*)?\.dex/) {
+                        sawTestDex = true
+                        byte[] testDexBytes = testZip.getInputStream(entry).bytes
+                        String testDexText = new String(testDexBytes,
+                                StandardCharsets.ISO_8859_1).toLowerCase(Locale.ROOT)
+                        if (testDexText.contains(forbiddenProtocol)
+                                || testDexText.contains(forbiddenDashed)) {
+                            throw new GradleException("Removed transport remains in androidTest DEX: "
+                                    + "${apk.name}!${entry.name}")
+                        }
+                        forbiddenResetTokens.each { removed ->
+                            if (testDexText.contains(removed.toLowerCase(Locale.ROOT))) {
+                                throw new GradleException(
+                                        "Removed settings reset path remains in androidTest DEX: "
+                                                + "${apk.name}!${entry.name}")
+                            }
+                        }
+                        forbiddenThirdPartyCoreTokens.each { removed ->
+                            if (testDexText.contains(removed.toLowerCase(Locale.ROOT))) {
+                                throw new GradleException(
+                                        "Removed third-party core source remains in androidTest DEX: "
+                                                + "${apk.name}!${entry.name}")
+                            }
+                        }
+                        forbiddenRemovedProviderTokens.each { removed ->
+                            if (testDexText.contains(removed)) {
+                                throw new GradleException(
+                                        "Removed provider remains in androidTest DEX: "
+                                                + "${apk.name}!${entry.name}")
+                            }
+                        }
+                        forbiddenSensitiveSubscriptionTokens.each { token ->
+                            if (testDexText.contains(token)) {
+                                throw new GradleException(
+                                        "Plaintext built-in subscription material remains in androidTest DEX: "
+                                                + "${apk.name}!${entry.name}")
+                            }
+                        }
+                    }
+                }
+            } finally {
+                testZip.close()
+            }
+            if (!sawTestDex) {
+                throw new GradleException("androidTest APK contains no DEX: ${apk}")
+            }
+            if (packagedAndroidAbis != supportedAbis as Set) {
+                throw new GradleException("androidTest APK ABI set mismatch for ${apk.name}: "
+                        + packagedAndroidAbis)
+            }
+        }
+        [file("src/main"), file("src/test"), file("src/androidTest"), file("tests"), pluginTemplateFile,
+         file("build.gradle"), proguardFile, file("README.md"),
+         file("DEVICE_BETA_CHECKLIST.md")].each { source ->
+            if (!source.exists()) return
+            def files = source.isDirectory() ? fileTree(source).files : [source] as Set
+            files.each { candidate ->
+                String lower = candidate.getText("UTF-8").toLowerCase(Locale.ROOT)
+                if (lower.contains(forbiddenProtocol) || lower.contains(forbiddenDashed)) {
+                    throw new GradleException("Removed transport remains in source: ${candidate}")
+                }
+                forbiddenResetTokens.each { removed ->
+                    if (lower.contains(removed.toLowerCase(Locale.ROOT))) {
+                        throw new GradleException(
+                                "Removed settings reset path remains in source: ${candidate}")
+                    }
+                }
+                forbiddenThirdPartyCoreTokens.each { removed ->
+                    if (lower.contains(removed.toLowerCase(Locale.ROOT))) {
+                        throw new GradleException(
+                                "Removed third-party core source remains in source: ${candidate}")
+                    }
+                }
+                forbiddenRemovedProviderTokens.each { removed ->
+                    if (lower.contains(removed)) {
+                        throw new GradleException(
+                                "Removed provider remains in source: ${candidate}")
+                    }
+                }
+                forbiddenSensitiveSubscriptionTokens.each { token ->
+                    if (lower.contains(token)) {
+                        throw new GradleException(
+                                "Plaintext built-in subscription material remains in source: ${candidate}")
+                    }
+                }
+            }
+        }
+        String nativeBridgeSource = file("src/main/cpp/exitfy_bridge.c").getText("UTF-8")
+        if (!nativeBridgeSource.contains("RTLD_NOW | RTLD_LOCAL")
+                || nativeBridgeSource.contains("RTLD_GLOBAL")) {
+            throw new GradleException("JNI core loader must use RTLD_LOCAL only")
+        }
+        if (!nativeBridgeSource.contains(
+                "ANDROID_DLEXT_USE_LIBRARY_FD | ANDROID_DLEXT_FORCE_LOAD")
+                || !nativeBridgeSource.contains("fcntl(source_fd, F_DUPFD_CLOEXEC, 0)")) {
+            throw new GradleException(
+                    "JNI core loader must consume only a duplicated pinned descriptor")
+        }
+        if ((nativeBridgeSource =~ /(^|[^A-Za-z0-9_])dlopen\s*\(/).find()) {
+            throw new GradleException("JNI core loader must not fall back to path dlopen")
+        }
+        String nativeRuntimeSource = file(
+                "src/main/java/com/extera/plugins/exitfy/NativeCoreRuntime.java")
+                .getText("UTF-8")
+        String coreHandleSource = file(
+                "src/main/java/com/extera/plugins/exitfy/CoreFileHandle.java")
+                .getText("UTF-8")
+        String coreUpdaterSource = file(
+                "src/main/java/com/extera/plugins/exitfy/CoreUpdater.java")
+                .getText("UTF-8")
+        if (!nativeRuntimeSource.contains("preparePinnedLoadTarget()")
+                || !coreHandleSource.contains("OsConstants.O_NOFOLLOW")
+                || !coreUpdaterSource.contains("handle.verify(abi, target.digest)")) {
+            throw new GradleException(
+                    "core digest/ELF/native-load descriptor attestation is incomplete")
+        }
+        providers.exec {
+            commandLine "python3", "-c",
+                    "import ast,sys; ast.parse(open(sys.argv[1],encoding='utf-8').read(), filename=sys.argv[1], feature_version=(3,11))",
+                    outputPlugin.absolutePath
+        }.result.get().assertNormalExitValue()
+        logger.lifecycle("Verified ${outputPlugin}: DEX + ${supportedAbis.size()} JNI ABIs")
+    }
+}

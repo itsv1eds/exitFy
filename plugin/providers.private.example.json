@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "providers": {
+    "elix": "https://replace.invalid/elix-subscription",
+    "shrimp": null
+  }
+}
