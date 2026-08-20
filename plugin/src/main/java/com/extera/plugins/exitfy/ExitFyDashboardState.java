@@ -209,7 +209,7 @@ final class ExitFyDashboardState {
                 case INSTALLING:
                     return I18n.t("Установка…", "Installing…");
                 case INSTALL_CORES:
-                    return I18n.t("Установить ядра", "Install cores");
+                    return I18n.t("Установить компоненты", "Install components");
                 case DISCONNECT:
                     return I18n.t("Отключить", "Disconnect");
                 case CONNECT:
@@ -280,7 +280,7 @@ final class ExitFyDashboardState {
 
         String terminalMessage() {
             if (successful()) {
-                return I18n.t("Ядра установлены", "Cores installed");
+                return I18n.t("Компоненты установлены", "Components are installed");
             }
             if (partial()) {
                 return I18n.t(

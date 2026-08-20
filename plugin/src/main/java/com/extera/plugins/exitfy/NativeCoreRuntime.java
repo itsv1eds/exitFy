@@ -128,21 +128,21 @@ final class NativeCoreRuntime implements Closeable {
                 return StartResult.error(I18n.t("Runtime завершает работу", "Runtime is shutting down"));
             }
             if (processQuarantined) {
-                return StartResult.error(I18n.t("Ядро заблокировано до перезапуска приложения",
-                        "Core is blocked until the app restarts"));
+                return StartResult.error(I18n.t("Подключение заблокировано до перезапуска exteraGram",
+                        "The connection is blocked until exteraGram restarts"));
             }
             if (isProcessCleanupClaimed()) {
                 return StartResult.error(I18n.t(
-                        "Завершается предыдущая сессия ядра; повторите подключение",
-                        "The previous core session is still stopping; retry the connection"));
+                        "Предыдущее подключение ещё завершается; повторите попытку",
+                        "The previous connection is still stopping; try again"));
             }
             if (running) {
                 return runningFamily == family ? StartResult.ok()
-                        : restartRequired(processLoadedFamily, family);
+                        : restartRequired();
             }
             if (processNativeOpened
                     && CoreProcessState.requiresRestart(processLoadedFamily, family)) {
-                return restartRequired(processLoadedFamily, family);
+                return restartRequired();
             }
 
             if (!processNativeOpened) {
@@ -465,13 +465,14 @@ final class NativeCoreRuntime implements Closeable {
         return value;
     }
 
-    private static StartResult restartRequired(CoreFamily loaded, CoreFamily required) {
-        String loadedName = loaded == null ? I18n.t("другое ядро", "another core")
-                : loaded.displayName;
+    private static StartResult restartRequired() {
+        // Naming the loaded and required families would tell the user nothing
+        // they can act on, and the interface never exposes them elsewhere.
         return StartResult.restart(I18n.t(
-                "Загружено " + loadedName + "; для " + required.displayName
-                        + " перезапустите exteraGram",
-                loadedName + " is loaded; restart exteraGram to use " + required.displayName));
+                "Этому серверу нужен другой компонент подключения. "
+                        + "Перезапустите exteraGram",
+                "This server needs a different connection component. "
+                        + "Restart exteraGram"));
     }
 
     private static JSONObject selfTestConfig(CoreFamily family) throws Exception {

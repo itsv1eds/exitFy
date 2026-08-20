@@ -68,7 +68,7 @@ final class CoreInstallProgressView extends FrameLayout {
         titleView.setGravity(Gravity.CENTER_HORIZONTAL);
         titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
         titleView.setTypeface(AndroidUtilities.bold());
-        titleView.setText(I18n.t("Установка ядер", "Installing cores"));
+        titleView.setText(I18n.t("Установка компонентов", "Installing components"));
         titleView.setIncludeFontPadding(false);
         addView(titleView, LayoutHelper.createFrame(
                 LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT,
@@ -98,8 +98,8 @@ final class CoreInstallProgressView extends FrameLayout {
         progressBar.setProgress(progress / 100f);
         subtitleView.setText(state.stageLabel());
         setContentDescription(I18n.format(
-                "Установка ядер. Прогресс: %d%%. %s",
-                "Installing cores. Progress: %d%%. %s",
+                "Установка компонентов. Прогресс: %d%%. %s",
+                "Installing components. Progress: %d%%. %s",
                 progress, state.stageLabel()));
     }
 
