@@ -414,10 +414,12 @@ def _validate_snapshot(
         raise ValueError("pin snapshot is not canonical JSON")
     if set(value) != {"schema", "modulePath", "moduleVersion", "originCommit", "pins"}:
         raise ValueError("pin snapshot fields do not match the contract")
+    # Pin snapshots record paths relative to the Git worktree root, and both
+    # Go modules live under cores/ in this repository.
     expected_paths = (
-        ["go.mod", "go.sum"]
+        ["cores/go.mod", "cores/go.sum"]
         if family == "xray"
-        else ["singbox/go.mod", "singbox/go.sum"]
+        else ["cores/singbox/go.mod", "cores/singbox/go.sum"]
     )
     pins = value.get("pins")
     if (

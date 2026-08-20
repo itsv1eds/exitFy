@@ -33,13 +33,13 @@ class CandidateHandoffTest(unittest.TestCase):
         if family == "xray":
             names = [f"libxray-{abi}.so" for abi in candidate_handoff.ABIS]
             module_path = "github.com/xtls/libxray"
-            pin_paths = ["go.mod", "go.sum"]
+            pin_paths = ["cores/go.mod", "cores/go.sum"]
             release_tag = "xray-v1.2.3-w2"
         else:
             names = [f"libexitfy-sb-{abi}.so" for abi in candidate_handoff.ABIS]
             names.append("exitfy-sb-v1.2.3-source.tar.gz")
             module_path = "github.com/sagernet/sing-box"
-            pin_paths = ["singbox/go.mod", "singbox/go.sum"]
+            pin_paths = ["cores/singbox/go.mod", "cores/singbox/go.sum"]
             release_tag = "sb-v1.2.3-w2"
         for index, name in enumerate(names):
             payload = (name.encode() + b"\n") * (index + 1)

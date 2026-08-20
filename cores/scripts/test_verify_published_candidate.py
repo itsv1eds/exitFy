@@ -63,7 +63,7 @@ class PublishedCandidateTest(unittest.TestCase):
             (snapshot / name).write_bytes(raw)
             records.append(
                 {
-                    "path": name,
+                    "path": "cores/" + name,
                     "file": name,
                     "size": len(raw),
                     "sha256": hashlib.sha256(raw).hexdigest(),
