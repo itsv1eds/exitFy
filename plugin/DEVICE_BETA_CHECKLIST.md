@@ -72,8 +72,9 @@ Device testing is performed by the beta tester after receiving
 
 - On a fresh install, confirm only
   [itsv1eds/exitFy](https://github.com/itsv1eds/exitFy) is contacted.
-  The verified handoff releases are `sb-v1.13.19-w1006` and
-  `xray-v26.7.28-w2010`; a newer stable compatible `wN` may be selected.
+  The handoff builds sing-box v1.13.19 and Xray v26.7.28; the wrapper
+  revision advances with every core commit, so record the `wN` actually
+  installed instead of expecting a fixed tag.
 - Confirm every accepted manifest is schema 3, core API 2, config contract 1,
   `minAndroidApi=29`, and contains exactly one `arm64-v8a` ELF64 asset.
 - Start with old schema-2/API-26 active, pending and backup core files. None may

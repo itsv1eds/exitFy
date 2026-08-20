@@ -119,7 +119,8 @@ installation session, retry timers and late network callbacks.
 New downloads accept only stable schema-3/core-API-2/config-contract-1 releases
 from [itsv1eds/exitFy](https://github.com/itsv1eds/exitFy), with
 `minAndroidApi=29` and exactly one `arm64-v8a` asset. The handoff releases are
-`sb-v1.13.19-w1006` and `xray-v26.7.28-w2010`; the updater may select a newer
+sing-box v1.13.19 and Xray v26.7.28. Every core commit publishes a new
+wrapper revision, so the exact `wN` moves; the updater selects the newest
 compatible stable revision and never downgrades. A verified candidate is
 self-tested before use. A legacy core never becomes its backup, and a failed
 first candidate leaves that family without a working core while suppressing
