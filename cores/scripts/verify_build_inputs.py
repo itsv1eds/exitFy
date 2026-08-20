@@ -877,7 +877,13 @@ def _is_non_build_ignored(path: str) -> bool:
 
 
 def _is_generated_output(path: str) -> bool:
-    return path.startswith("dist/") or path.startswith("dist-repro/")
+    # Build output sits beside the Go module it belongs to.  This repository
+    # keeps both modules under cores/, while the verifier always reports paths
+    # relative to the worktree root.
+    return any(
+        path.startswith(prefix + "dist/") or path.startswith(prefix + "dist-repro/")
+        for prefix in ("", "cores/")
+    )
 
 
 def _assert_default_index_entries(

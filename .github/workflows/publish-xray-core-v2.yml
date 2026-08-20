@@ -76,7 +76,7 @@ jobs:
 
       - name: Freeze clean wrapper build inputs
         run: |
-          ./scripts/verify_build_inputs.py preflight --repo . \
+          ./scripts/verify_build_inputs.py preflight --repo .. \
             --expected-head "$GITHUB_SHA"
 
       - name: Resolve stable upstream and wrapper revision
@@ -145,7 +145,7 @@ jobs:
                 "repos/$GITHUB_REPOSITORY/releases/assets/$manifest_id" \
                 > "$RUNNER_TEMP/current-manifest.json"
               current_tag="$(jq -r .tag_name "$RUNNER_TEMP/current-release.json")"
-              ./scripts/release_head_state.py --repo . --head "$GITHUB_SHA" \
+              ./scripts/release_head_state.py --repo .. --head "$GITHUB_SHA" \
                 --foreign-pin cores/singbox/go.mod --foreign-pin cores/singbox/go.sum \
                 > "$RUNNER_TEMP/current-wrapper-candidates"
               gh api --paginate --slurp \
@@ -209,12 +209,12 @@ jobs:
           go get "github.com/xtls/libxray@${{ steps.resolve.outputs.upstream_commit }}"
           go mod tidy
           snapshot_sha="$(./scripts/verify_build_inputs.py capture \
-            --repo . --module-dir . \
+            --repo .. --module-dir cores \
             --module-path github.com/xtls/libxray \
             --commit "${{ steps.resolve.outputs.upstream_commit }}" \
             --expected-head "$GITHUB_SHA" \
             --snapshot "$RUNNER_TEMP/xray-pin-snapshot" \
-            --pin go.mod --pin go.sum)"
+            --pin cores/go.mod --pin cores/go.sum)"
           if [[ ! "$snapshot_sha" =~ ^[0-9a-f]{64}$ ]]; then
             echo "pin snapshot digest is invalid" >&2
             exit 1
@@ -228,16 +228,16 @@ jobs:
           go test ./...
           /usr/bin/git -c core.fsmonitor=false -c core.hooksPath=/dev/null \
             show "$GITHUB_SHA:cores/scripts/verify_build_inputs.py" \
-            | /usr/bin/python3 - verify --repo . \
+            | /usr/bin/python3 - verify --repo .. \
             --expected-head "$GITHUB_SHA" \
             --snapshot "$RUNNER_TEMP/xray-pin-snapshot" \
             --snapshot-sha256 "${{ steps.pins.outputs.snapshot_sha }}" \
-            --pin go.mod --pin go.sum
+            --pin cores/go.mod --pin cores/go.sum
           /usr/bin/git -c core.fsmonitor=false -c core.hooksPath=/dev/null \
             show "$GITHUB_SHA:cores/scripts/verify_build_inputs.py" \
-            | /usr/bin/python3 - verify-module-cache --repo . \
-            --module-dir . --expected-head "$GITHUB_SHA" \
-            --pin go.mod --pin go.sum
+            | /usr/bin/python3 - verify-module-cache --repo .. \
+            --module-dir cores --expected-head "$GITHUB_SHA" \
+            --pin cores/go.mod --pin cores/go.sum
 
       - name: Build and verify arm64-v8a twice
         if: steps.resolve.outputs.build_needed == 'true'
@@ -251,17 +251,17 @@ jobs:
             "$RUNNER_TEMP/xray-repro-tmp-b"
           /usr/bin/git -c core.fsmonitor=false -c core.hooksPath=/dev/null \
             show "$GITHUB_SHA:cores/scripts/verify_build_inputs.py" \
-            | /usr/bin/python3 - verify-module-cache --repo . \
-            --module-dir . --expected-head "$GITHUB_SHA" \
-            --pin go.mod --pin go.sum
+            | /usr/bin/python3 - verify-module-cache --repo .. \
+            --module-dir cores --expected-head "$GITHUB_SHA" \
+            --pin cores/go.mod --pin cores/go.sum
           GOCACHE="$RUNNER_TEMP/xray-repro-cache-a" \
             GOTMPDIR="$RUNNER_TEMP/xray-repro-tmp-a" \
             ./scripts/build_android.sh dist
           /usr/bin/git -c core.fsmonitor=false -c core.hooksPath=/dev/null \
             show "$GITHUB_SHA:cores/scripts/verify_build_inputs.py" \
-            | /usr/bin/python3 - verify-module-cache --repo . \
-            --module-dir . --expected-head "$GITHUB_SHA" \
-            --pin go.mod --pin go.sum --allow-generated
+            | /usr/bin/python3 - verify-module-cache --repo .. \
+            --module-dir cores --expected-head "$GITHUB_SHA" \
+            --pin cores/go.mod --pin cores/go.sum --allow-generated
           GOCACHE="$RUNNER_TEMP/xray-repro-cache-b" \
             GOTMPDIR="$RUNNER_TEMP/xray-repro-tmp-b" \
             ./scripts/build_android.sh dist-repro
@@ -301,11 +301,11 @@ jobs:
         run: |
           /usr/bin/git -c core.fsmonitor=false -c core.hooksPath=/dev/null \
             show "$GITHUB_SHA:cores/scripts/verify_build_inputs.py" \
-            | /usr/bin/python3 - verify --repo . \
+            | /usr/bin/python3 - verify --repo .. \
             --expected-head "$GITHUB_SHA" \
             --snapshot "$RUNNER_TEMP/xray-pin-snapshot" \
             --snapshot-sha256 "${{ steps.pins.outputs.snapshot_sha }}" \
-            --pin go.mod --pin go.sum --allow-generated
+            --pin cores/go.mod --pin cores/go.sum --allow-generated
 
       - name: Create immutable candidate handoff
         id: handoff

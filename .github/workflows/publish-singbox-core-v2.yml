@@ -75,7 +75,7 @@ jobs:
 
       - name: Freeze clean wrapper build inputs
         run: |
-          ./scripts/verify_build_inputs.py preflight --repo . \
+          ./scripts/verify_build_inputs.py preflight --repo .. \
             --expected-head "$GITHUB_SHA"
 
       - name: Resolve stable upstream and wrapper revision
@@ -145,7 +145,7 @@ jobs:
                 "repos/$GITHUB_REPOSITORY/releases/assets/$manifest_id" \
                 > "$RUNNER_TEMP/current-manifest.json"
               current_tag="$(jq -r .tag_name "$RUNNER_TEMP/current-release.json")"
-              ./scripts/release_head_state.py --repo . --head "$GITHUB_SHA" \
+              ./scripts/release_head_state.py --repo .. --head "$GITHUB_SHA" \
                 --foreign-pin cores/go.mod --foreign-pin cores/go.sum \
                 > "$RUNNER_TEMP/current-wrapper-candidates"
               gh api --paginate --slurp \
@@ -213,13 +213,13 @@ jobs:
           go mod tidy
           cd ..
           snapshot_sha="$(./scripts/verify_build_inputs.py capture \
-            --repo . --module-dir singbox \
+            --repo .. --module-dir cores/singbox \
             --module-path github.com/sagernet/sing-box \
             --commit "${{ steps.resolve.outputs.upstream_commit }}" \
             --version "${{ steps.resolve.outputs.upstream_tag }}" \
             --expected-head "$GITHUB_SHA" \
             --snapshot "$RUNNER_TEMP/singbox-pin-snapshot" \
-            --pin singbox/go.mod --pin singbox/go.sum)"
+            --pin cores/singbox/go.mod --pin cores/singbox/go.sum)"
           if [[ ! "$snapshot_sha" =~ ^[0-9a-f]{64}$ ]]; then
             echo "pin snapshot digest is invalid" >&2
             exit 1
@@ -235,16 +235,16 @@ jobs:
           cd ..
           /usr/bin/git -c core.fsmonitor=false -c core.hooksPath=/dev/null \
             show "$GITHUB_SHA:cores/scripts/verify_build_inputs.py" \
-            | /usr/bin/python3 - verify --repo . \
+            | /usr/bin/python3 - verify --repo .. \
             --expected-head "$GITHUB_SHA" \
             --snapshot "$RUNNER_TEMP/singbox-pin-snapshot" \
             --snapshot-sha256 "${{ steps.pins.outputs.snapshot_sha }}" \
-            --pin singbox/go.mod --pin singbox/go.sum
+            --pin cores/singbox/go.mod --pin cores/singbox/go.sum
           /usr/bin/git -c core.fsmonitor=false -c core.hooksPath=/dev/null \
             show "$GITHUB_SHA:cores/scripts/verify_build_inputs.py" \
-            | /usr/bin/python3 - verify-module-cache --repo . \
-            --module-dir singbox --expected-head "$GITHUB_SHA" \
-            --pin singbox/go.mod --pin singbox/go.sum
+            | /usr/bin/python3 - verify-module-cache --repo .. \
+            --module-dir cores/singbox --expected-head "$GITHUB_SHA" \
+            --pin cores/singbox/go.mod --pin cores/singbox/go.sum
 
       - name: Preflight Android arm64-v8a
         if: steps.resolve.outputs.build_needed == 'true'
@@ -271,14 +271,14 @@ jobs:
             | /usr/bin/python3 - snapshot-pin-digest \
             --snapshot "$RUNNER_TEMP/singbox-pin-snapshot" \
             --snapshot-sha256 "${{ steps.pins.outputs.snapshot_sha }}" \
-            --pin singbox/go.mod)"
+            --pin cores/singbox/go.mod)"
           pin_sum_sha="$(/usr/bin/git -c core.fsmonitor=false \
             -c core.hooksPath=/dev/null \
             show "$GITHUB_SHA:cores/scripts/verify_build_inputs.py" \
             | /usr/bin/python3 - snapshot-pin-digest \
             --snapshot "$RUNNER_TEMP/singbox-pin-snapshot" \
             --snapshot-sha256 "${{ steps.pins.outputs.snapshot_sha }}" \
-            --pin singbox/go.sum)"
+            --pin cores/singbox/go.sum)"
           if [[ ! "$pin_mod_sha" =~ ^[0-9a-f]{64}$ || \
             ! "$pin_sum_sha" =~ ^[0-9a-f]{64}$ ]]; then
             echo "frozen sing-box pin digest is invalid" >&2
@@ -290,9 +290,9 @@ jobs:
             "$RUNNER_TEMP/sb-source-tmp-b"
           /usr/bin/git -c core.fsmonitor=false -c core.hooksPath=/dev/null \
             show "$GITHUB_SHA:cores/scripts/verify_build_inputs.py" \
-            | /usr/bin/python3 - verify-module-cache --repo . \
-            --module-dir singbox --expected-head "$GITHUB_SHA" \
-            --pin singbox/go.mod --pin singbox/go.sum --allow-generated
+            | /usr/bin/python3 - verify-module-cache --repo .. \
+            --module-dir cores/singbox --expected-head "$GITHUB_SHA" \
+            --pin cores/singbox/go.mod --pin cores/singbox/go.sum --allow-generated
           /usr/bin/git -c core.fsmonitor=false -c core.hooksPath=/dev/null \
             show "$GITHUB_SHA:cores/scripts/build_singbox_source_bundle.py" \
             | GOCACHE="$RUNNER_TEMP/sb-source-cache-a" \
@@ -305,9 +305,9 @@ jobs:
             --output "$source"
           /usr/bin/git -c core.fsmonitor=false -c core.hooksPath=/dev/null \
             show "$GITHUB_SHA:cores/scripts/verify_build_inputs.py" \
-            | /usr/bin/python3 - verify-module-cache --repo . \
-            --module-dir singbox --expected-head "$GITHUB_SHA" \
-            --pin singbox/go.mod --pin singbox/go.sum --allow-generated
+            | /usr/bin/python3 - verify-module-cache --repo .. \
+            --module-dir cores/singbox --expected-head "$GITHUB_SHA" \
+            --pin cores/singbox/go.mod --pin cores/singbox/go.sum --allow-generated
           /usr/bin/git -c core.fsmonitor=false -c core.hooksPath=/dev/null \
             show "$GITHUB_SHA:cores/scripts/build_singbox_source_bundle.py" \
             | GOCACHE="$RUNNER_TEMP/sb-source-cache-b" \
@@ -384,11 +384,11 @@ jobs:
         run: |
           /usr/bin/git -c core.fsmonitor=false -c core.hooksPath=/dev/null \
             show "$GITHUB_SHA:cores/scripts/verify_build_inputs.py" \
-            | /usr/bin/python3 - verify --repo . \
+            | /usr/bin/python3 - verify --repo .. \
             --expected-head "$GITHUB_SHA" \
             --snapshot "$RUNNER_TEMP/singbox-pin-snapshot" \
             --snapshot-sha256 "${{ steps.pins.outputs.snapshot_sha }}" \
-            --pin singbox/go.mod --pin singbox/go.sum --allow-generated
+            --pin cores/singbox/go.mod --pin cores/singbox/go.sum --allow-generated
 
       - name: Create immutable candidate handoff
         id: handoff
