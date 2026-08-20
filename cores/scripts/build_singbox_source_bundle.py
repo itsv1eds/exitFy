@@ -25,6 +25,10 @@ from pathlib import Path, PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# Subdirectory of the Git worktree that holds the bundled tree.  Paths are
+# recorded relative to it, so the archive layout never depends on where the
+# core tree sits inside the repository.
+TREE_PREFIX: PurePosixPath | None = None
 BUILD_TAGS = "with_quic,with_utls,badlinkname,tfogo_checklinkname0"
 SOURCE_FIELDS = (
     "GoFiles", "CgoFiles", "CFiles", "CXXFiles", "MFiles", "HFiles",
@@ -824,6 +828,7 @@ def git_index_entries(
         "--debug",
         "-z",
         "--",
+        *(() if TREE_PREFIX is None else (TREE_PREFIX.as_posix(),)),
     )
     reject_split_index(repository)
     values: dict[PurePosixPath, GitIndexEntry] = {}
@@ -859,6 +864,14 @@ def git_index_entries(
         if re.fullmatch(rb"[0-9a-f]{40}|[0-9a-f]{64}", raw_object_id) is None:
             raise ValueError("Git index contains an invalid object id")
         relative = public_relative_path(raw_path)
+        if TREE_PREFIX is not None:
+            prefix_parts = TREE_PREFIX.parts
+            if relative.parts[: len(prefix_parts)] != prefix_parts:
+                raise ValueError("Git index entry escapes the bundled tree prefix")
+            stripped = relative.parts[len(prefix_parts) :]
+            if not stripped:
+                raise ValueError("Git index entry has no path inside the tree prefix")
+            relative = PurePosixPath(*stripped)
         records += 1
         retained_bytes += len(raw_path)
         if records > MAX_ARCHIVE_FILES:
@@ -914,6 +927,7 @@ def public_relative_path(raw: bytes) -> PurePosixPath:
 def public_files(
     repository: PinnedGitRepository | None = None,
     leaf_flags: int | None = None,
+    content_root: int | None = None,
 ) -> list[PurePosixPath]:
     if repository is None:
         directory_flags, default_leaf_flags, _ = secure_open_flags()
@@ -933,7 +947,7 @@ def public_files(
             identity = source_root_identity(os.fstat(owned_root))
             verify_source_root_path(identity)
             files = public_files_from_descriptor(
-                owned_repository, leaf_flags
+                owned_repository, leaf_flags, content_root
             )
             verify_pinned_git(owned_repository)
             verify_source_root_path(identity)
@@ -948,13 +962,14 @@ def public_files(
         if directory_flags != repository.directory_flags:
             raise ValueError("pinned Git directory flags changed")
     return public_files_from_descriptor(
-        repository, leaf_flags
+        repository, leaf_flags, content_root
     )
 
 
 def public_files_from_descriptor(
     repository: PinnedGitRepository,
     leaf_flags: int,
+    content_root: int | None = None,
 ) -> list[PurePosixPath]:
 
     listed = git_file_set(repository, "--cached")
@@ -986,7 +1001,7 @@ def public_files_from_descriptor(
                     "public Git file paths exceed the retained-name limit"
                 )
         descriptor, _ = open_public_file(
-            repository.root_descriptor,
+            repository.root_descriptor if content_root is None else content_root,
             relative,
             repository.directory_flags,
             leaf_flags,
@@ -1285,6 +1300,8 @@ def copy_public_tree(
     except OSError as error:
         raise ValueError("source bundle root cannot be opened securely") from error
     repository: PinnedGitRepository | None = None
+    copy_root = source_root
+    owns_copy_root = False
     try:
         repository = pinned_git_repository(
             source_root, directory_flags, leaf_flags
@@ -1293,8 +1310,18 @@ def copy_public_tree(
             verify_expected_git_state(repository, expected_head)
         root_identity = source_root_identity(os.fstat(source_root))
         verify_source_root_path(root_identity)
+        if TREE_PREFIX is not None:
+            try:
+                copy_root = os.open(
+                    TREE_PREFIX.as_posix(), directory_flags, dir_fd=source_root
+                )
+            except OSError as error:
+                raise ValueError(
+                    "bundled tree prefix cannot be opened securely"
+                ) from error
+            owns_copy_root = True
         relative_files = tuple(
-            public_files(repository, leaf_flags)
+            public_files(repository, leaf_flags, copy_root)
         )
         index_entries = git_index_entries(repository)
         if tuple(sorted(index_entries, key=PurePosixPath.as_posix)) != relative_files:
@@ -1313,7 +1340,7 @@ def copy_public_tree(
             copied_bytes = 0
             for relative in relative_files:
                 fingerprint, entry_bytes, archive_entry = copy_public_entry(
-                    source_root,
+                    copy_root,
                     target_root,
                     relative,
                     directory_flags,
@@ -1327,7 +1354,7 @@ def copy_public_tree(
                 copied_bytes += entry_bytes
             verify_source_root_path(root_identity)
             final_relative_files = tuple(
-                public_files(repository, leaf_flags)
+                public_files(repository, leaf_flags, copy_root)
             )
             final_index_entries = git_index_entries(repository)
             verify_pinned_git(repository)
@@ -1339,7 +1366,7 @@ def copy_public_tree(
                 raise ValueError("public Git file set changed during source copy")
             for relative, expected in fingerprints.items():
                 descriptor, metadata = open_public_file(
-                    source_root, relative, directory_flags, leaf_flags
+                    copy_root, relative, directory_flags, leaf_flags
                 )
                 try:
                     verify_source_metadata(relative, expected, metadata)
@@ -1352,6 +1379,8 @@ def copy_public_tree(
         finally:
             os.close(target_root)
     finally:
+        if owns_copy_root:
+            os.close(copy_root)
         if repository is not None:
             close_pinned_git(repository)
         os.close(source_root)
@@ -2871,13 +2900,14 @@ def parse_expected_pin_digests(values: list[str]) -> dict[PurePosixPath, str]:
 
 
 def main() -> None:
-    global ROOT
+    global ROOT, TREE_PREFIX
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--expected-head", required=True)
     parser.add_argument("--expected-pin-sha256", action="append", required=True)
     parser.add_argument("--upstream-version", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--tree-prefix", default=None)
     args = parser.parse_args()
 
     try:
@@ -2888,6 +2918,15 @@ def main() -> None:
     if not stat.S_ISDIR(repository_metadata.st_mode):
         raise ValueError("source repository root is not a directory")
     ROOT = repository_root
+    if args.tree_prefix is not None:
+        prefix = PurePosixPath(args.tree_prefix)
+        if (
+            prefix.is_absolute()
+            or not prefix.parts
+            or any(part in {"", ".", ".."} for part in prefix.parts)
+        ):
+            raise ValueError("bundled tree prefix is invalid")
+        TREE_PREFIX = prefix
     if FULL_COMMIT.fullmatch(args.expected_head) is None:
         raise ValueError("source repository expected HEAD is invalid")
     expected_pin_digests = parse_expected_pin_digests(

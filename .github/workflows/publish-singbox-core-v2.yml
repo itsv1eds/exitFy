@@ -297,7 +297,8 @@ jobs:
             show "$GITHUB_SHA:cores/scripts/build_singbox_source_bundle.py" \
             | GOCACHE="$RUNNER_TEMP/sb-source-cache-a" \
             GOTMPDIR="$RUNNER_TEMP/sb-source-tmp-a" \
-            /usr/bin/python3 - --repo-root "$GITHUB_WORKSPACE/cores" \
+            /usr/bin/python3 - --repo-root "$GITHUB_WORKSPACE" \
+            --tree-prefix cores \
             --expected-head "$GITHUB_SHA" \
             --expected-pin-sha256 "singbox/go.mod=$pin_mod_sha" \
             --expected-pin-sha256 "singbox/go.sum=$pin_sum_sha" \
@@ -312,7 +313,8 @@ jobs:
             show "$GITHUB_SHA:cores/scripts/build_singbox_source_bundle.py" \
             | GOCACHE="$RUNNER_TEMP/sb-source-cache-b" \
             GOTMPDIR="$RUNNER_TEMP/sb-source-tmp-b" \
-            /usr/bin/python3 - --repo-root "$GITHUB_WORKSPACE/cores" \
+            /usr/bin/python3 - --repo-root "$GITHUB_WORKSPACE" \
+            --tree-prefix cores \
             --expected-head "$GITHUB_SHA" \
             --expected-pin-sha256 "singbox/go.mod=$pin_mod_sha" \
             --expected-pin-sha256 "singbox/go.sum=$pin_sum_sha" \
