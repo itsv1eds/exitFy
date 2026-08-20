@@ -876,6 +876,12 @@ def _is_non_build_ignored(path: str) -> bool:
     return Path(path).name == ".DS_Store" or "__pycache__" in parts
 
 
+def _is_sibling_project_output(path: str) -> bool:
+    # The plugin shares this worktree but contributes nothing to a core build,
+    # so its own ignored outputs are not core build inputs.
+    return path == "exitfy.plugin" or path.startswith("plugin/")
+
+
 def _is_generated_output(path: str) -> bool:
     # Build output sits beside the Go module it belongs to.  This repository
     # keeps both modules under cores/, while the verifier always reports paths
@@ -1019,6 +1025,7 @@ def _scan_repository_state(
         value
         for value in ignored
         if not _is_non_build_ignored(value)
+        and not _is_sibling_project_output(value)
         and not (allow_generated and _is_generated_output(value))
     }
     if unexpected_ignored:
