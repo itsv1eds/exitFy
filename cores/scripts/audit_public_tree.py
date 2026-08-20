@@ -319,7 +319,15 @@ def resolve_history_base(root: Path = ROOT) -> tuple[str | None, bool]:
         if explicit == ZERO_COMMIT:
             default_base = _default_branch_merge_base(root)
             return (default_base, False) if default_base is not None else (None, True)
-        return _validate_base(root, explicit), False
+        try:
+            return _validate_base(root, explicit), False
+        except ValueError:
+            # A force-push, a deleted commit or a re-created branch can leave
+            # the event's "before" SHA pointing at an object this checkout does
+            # not contain.  Audit the entire reachable history instead of
+            # failing: that is strictly more thorough than the range it
+            # replaces, so no commit is skipped.
+            return None, True
 
     result = subprocess.run(
         [
