@@ -1,0 +1,9 @@
+.gradle/
+.cxx/
+build/
+local.properties
+java_pid*.hprof
+__pycache__/
+*.pyc
+# maintainer-only private endpoints, never packaged
+providers.private.json

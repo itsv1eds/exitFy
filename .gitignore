@@ -7,15 +7,5 @@ dist/
 dist-repro/
 *.h
 
-# plugin build outputs and local configuration
-plugin/build/
-plugin/.gradle/
-plugin/.cxx/
-plugin/local.properties
-java_pid*.hprof
-
-# maintainer-only private endpoints, never packaged
-plugin/providers.private.json
-
 # plugin build output; rebuild instead of committing a stale copy
 /exitfy.plugin

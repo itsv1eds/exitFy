@@ -86,7 +86,10 @@ def forbiddenResetTokens = [
         ["_migrate", "_settings"].join(""),
 ]
 def forbiddenThirdPartyCoreTokens = [
-        ["its", "v1eds"].join(""),
+        // The historical third-party cores lived in the owner's personal
+        // repository.  The owner now also hosts the official cores, so match
+        // that old repository path rather than the account name alone.
+        ["its", "v1eds/its", "v1eds"].join(""),
         ["lib", "_singbox"].join(""),
         ["libvless", "-"].join(""),
 ]
