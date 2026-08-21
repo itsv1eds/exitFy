@@ -533,9 +533,15 @@ class ExitFyPlugin(BasePlugin):
             imported_nodes = 0
             try:
                 for url in subscriptions:
+                    # Unloading mid-import must not record a complete import:
+                    # the remaining sources would be lost without a retry.
+                    if not self._runtime_ready:
+                        return
                     if self._run_legacy_command({"command": "add_subscription", "url": url}):
                         imported_subscriptions += 1
                 for uri in nodes:
+                    if not self._runtime_ready:
+                        return
                     if self._run_legacy_command({"command": "add_node", "uri": uri}):
                         imported_nodes += 1
                 self.set_setting(LEGACY_IMPORT_FLAG, True, reload_settings=False)

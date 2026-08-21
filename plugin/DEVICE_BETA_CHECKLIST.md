@@ -122,6 +122,11 @@ Device testing is performed by the beta tester after receiving
   subscription endpoint, domain or credential token. After upgrading an old
   installation, confirm `subscriptions.json` stores only opaque built-in source
   keys while both providers still refresh successfully.
+- Install beside an enabled 3.x `exitfy` and confirm the dashboard says the old
+  plugin is still on. Confirm custom subscriptions, manual nodes and an unset
+  HWID are imported once, that a second load issues no import commands, and
+  that unloading mid-import leaves the import pending instead of losing the
+  remaining sources.
 - Disable/enable and reload the same beta.24 plugin without killing the process;
   confirm its DEX keeper is reused. Installing another embedded DEX version in
   that process must fail closed until restart.

@@ -326,6 +326,32 @@ class LegacyImportTest(unittest.TestCase):
             [m for m, _ in replay_runtime.calls if m == "execute"], [])
         self.assertTrue(replay.settings.get("legacy_import_done"))
 
+    def test_unloading_mid_import_keeps_the_import_pending(self) -> None:
+        module = types.ModuleType("plugin_settings")
+        module.get_all_settings = lambda plugin_id: (
+            self.LEGACY if plugin_id == "exitfy" else {})
+        sys.modules["plugin_settings"] = module
+        try:
+            plugin_type, runtime, _errors, _opened, _infos = load_plugin_class({
+                "threading": InlineThreading,
+                "_t": lambda key: "imported %d/%d" if key == "legacy_imported" else key,
+            })
+            plugin = plugin_type()
+            original = runtime.call
+
+            def unload_after_first(method, *arguments):
+                if method == "execute":
+                    plugin._runtime_ready = False
+                return original(method, *arguments)
+
+            runtime.call = unload_after_first
+            plugin.on_plugin_load()
+        finally:
+            sys.modules.pop("plugin_settings", None)
+        executed = [m for m, _ in runtime.calls if m == "execute"]
+        self.assertEqual(1, len(executed))
+        self.assertNotIn("legacy_import_done", plugin.settings)
+
     def test_existing_hwid_is_never_replaced(self) -> None:
         plugin, _runtime, _infos = self._run(
             self.LEGACY, {"custom_hwid": "current"})
