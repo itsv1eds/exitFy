@@ -67,7 +67,17 @@ loading a different embedded DEX version fails closed until exteraGram is
 restarted.
 
 The plugin ID remains `exitFy_v2` and the settings schema is 6. Upgrading to
-beta.24 does not clear settings, custom subscriptions or custom nodes. A legacy
+beta.25 does not clear settings, custom subscriptions or custom nodes.
+
+The 3.x plugin used the separate id `exitfy`, so the host installs this one
+beside it instead of replacing it. On first load exitFy reads that plugin's
+stored values through the SDK and imports what the user typed by hand: custom
+subscription URLs, manually added nodes and a custom HWID that is not already
+set. Both are added through the same commands the server browser uses, so they
+pass the same validation, and cached nodes are left to a normal refresh. The
+import runs once; storage that cannot be read leaves it pending rather than
+marking it done. While the old plugin is still enabled the dashboard says so,
+because both would otherwise keep rewriting the Telegram proxy. A legacy
 `core_policy` value is rewritten once to the inert `auto` tombstone and is no
 longer sent to DEX or exposed by Android UI. The migration also erases the four
 obsolete transient dialog/filter keys from beta.16 because they may contain a
@@ -136,6 +146,15 @@ they do **not** protect a core `.so` from targeted MITM replacement. Downloads
 are streamed with a 64 MiB limit and checked for GitHub digest, manifest SHA,
 ELF64/`EM_AARCH64`, 16 KiB `PT_LOAD` alignment and the exact
 `StartCore`/`StopCore` exports.
+
+Release downloads are blocked outright on some networks, so the manifest and
+the core fall back to public GitHub mirrors after the direct asset URL fails.
+Both are pinned to the SHA-256 the release listing already reported, so a
+mirror can serve nothing else; it only learns that the request happened, and
+only when the direct download did not work. The release listing itself is
+never mirrored, because nothing would pin it: a network that blocks
+`api.github.com` still blocks updates entirely. Removing that last dependency
+needs a signed manifest, which would also close the MITM exposure above.
 
 The two bundled subscription endpoints are not present as plaintext strings in
 the Java sources, generated DEX, JADX output or plugin artifact. Authenticated

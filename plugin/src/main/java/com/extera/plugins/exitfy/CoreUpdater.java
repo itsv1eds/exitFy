@@ -39,6 +39,15 @@ class CoreUpdater {
     private static final int MIN_ANDROID_API = 29;
     private static final String ANDROID_ABI = "arm64-v8a";
     private static final String CORE_ORIGIN = "itsv1eds/exitFy";
+    // Release downloads are blocked outright on some networks. Every byte these
+    // return is pinned by the SHA-256 the GitHub API already reported, so a
+    // mirror cannot substitute content; it can only observe the request, which
+    // is why they are tried after the direct URL and never before it.
+    private static final String[] DOWNLOAD_MIRRORS = {
+            "https://ghfast.top/",
+            "https://gh-proxy.com/",
+            "https://ghproxy.net/",
+    };
     private static final String SB_NDK_VERSION = "27.2.12479018";
     private static final String[] SB_BUILD_TAGS = {
             "badlinkname", "tfogo_checklinkname0", "with_quic", "with_utls"
@@ -502,13 +511,33 @@ class CoreUpdater {
         String url = asset.optString("browser_download_url", "");
         if (url.isEmpty()) throw new IllegalStateException(
                 family.displayName + " manifest URL is missing");
-        LimitedHttpClient.Response response = http.getBinary(url, Collections.emptyMap(),
-                MAX_MANIFEST_BYTES);
-        if (response.status < 200 || response.status >= 300 || response.body.length != size) {
-            throw new IllegalStateException(family.displayName + " manifest download failed");
+        LimitedHttpClient.Response response = null;
+        RuntimeException lastFailure = null;
+        for (String candidate : downloadCandidates(url)) {
+            try {
+                LimitedHttpClient.Response attempt = http.getBinary(candidate,
+                        Collections.emptyMap(), MAX_MANIFEST_BYTES);
+                if (attempt.status < 200 || attempt.status >= 300
+                        || attempt.body.length != size) {
+                    throw new IllegalStateException(
+                            family.displayName + " manifest download failed");
+                }
+                if (!expected.equals(sha256(attempt.body))) {
+                    throw new IllegalStateException(
+                            family.displayName + " manifest digest mismatch");
+                }
+                response = attempt;
+                break;
+            } catch (RuntimeException failure) {
+                lastFailure = failure;
+            } catch (Exception failure) {
+                lastFailure = new IllegalStateException(
+                        family.displayName + " manifest download failed", failure);
+            }
         }
-        if (!expected.equals(sha256(response.body))) {
-            throw new IllegalStateException(family.displayName + " manifest digest mismatch");
+        if (response == null) {
+            throw lastFailure != null ? lastFailure : new IllegalStateException(
+                    family.displayName + " manifest download failed");
         }
         JSONObject manifest = JsonGuard.object(
                 new String(response.body, StandardCharsets.UTF_8));
@@ -676,9 +705,13 @@ class CoreUpdater {
     static List<String> downloadCandidates(String url) {
         List<String> values = new ArrayList<>();
         if (url == null || url.trim().isEmpty()) return values;
-        // Release assets are fetched only from the URL explicitly returned by
-        // GitHub. Third-party mirrors change the trust and privacy boundary.
-        values.add(url.trim());
+        String direct = url.trim();
+        values.add(direct);
+        if (!direct.startsWith("https://")) return values;
+        for (String mirror : DOWNLOAD_MIRRORS) {
+            String candidate = mirror + direct;
+            if (!values.contains(candidate)) values.add(candidate);
+        }
         return values;
     }
 

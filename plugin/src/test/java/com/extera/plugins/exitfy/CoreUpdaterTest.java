@@ -502,11 +502,19 @@ public class CoreUpdaterTest {
     }
 
     @Test
-    public void usesOnlyExplicitReleaseAssetUrl() {
-        assertEquals(1, CoreUpdater.downloadCandidates(
-                "https://github.com/itsv1eds/exitFy/releases/download/"
-                        + "sb-v1.13.14-w2/libexitfy-sb-arm64-v8a.so").size());
-        assertEquals(1, CoreUpdater.downloadCandidates("https://example.com/core.so").size());
+    public void triesTheReleaseAssetUrlBeforeAnyMirror() {
+        String asset = "https://github.com/itsv1eds/exitFy/releases/download/"
+                + "sb-v1.13.14-w2/libexitfy-sb-arm64-v8a.so";
+        java.util.List<String> candidates = CoreUpdater.downloadCandidates(asset);
+        assertEquals(asset, candidates.get(0));
+        assertTrue(candidates.size() > 1);
+        for (String candidate : candidates.subList(1, candidates.size())) {
+            assertTrue(candidate.endsWith(asset));
+            assertTrue(candidate.startsWith("https://"));
+        }
+        assertEquals(candidates.size(), new java.util.HashSet<>(candidates).size());
+        assertEquals(1, CoreUpdater.downloadCandidates("http://example.com/core.so").size());
+        assertEquals(0, CoreUpdater.downloadCandidates("").size());
     }
 
     @Test

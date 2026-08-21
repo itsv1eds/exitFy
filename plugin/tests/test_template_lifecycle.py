@@ -1,4 +1,7 @@
 import ast
+import sys
+import threading
+import types
 import json
 import pathlib
 import unittest
@@ -65,10 +68,12 @@ class FakeDexRuntime:
             return self.dashboard
         if method == "onAppResume":
             return None
+        if method == "execute":
+            return json.dumps({"ok": True, "message": "", "value": ""})
         raise AssertionError("unexpected bridge call: " + method)
 
 
-def load_plugin_class():
+def load_plugin_class(overrides=None):
     template = pathlib.Path(__file__).resolve().parents[1] / "ExitFy.template.plugin"
     tree = ast.parse(template.read_text(encoding="utf-8"), filename=str(template))
     selected = next(
@@ -77,6 +82,7 @@ def load_plugin_class():
     )
     runtime = FakeDexRuntime()
     errors = []
+    infos = []
     opened = []
 
     class FakeLastFragment:
@@ -96,13 +102,21 @@ def load_plugin_class():
             "/private/exitfy", "/private/bridge.so", "arm64-v8a"
         ),
         "__id__": "exitFy_v2",
-        "__version__": "4.0.0-beta.24",
+        "__version__": "4.0.0-beta.25",
         "PROVIDER_CATALOG_VERSION": 2,
         "CUSTOM_PROVIDER_ID": 2,
         "SETTINGS_SCHEMA": 6,
         "LEGACY_TRANSIENT_SETTING_KEYS": (
             "ui_add_node", "ui_add_subscription", "ui_hwid_entry", "ui_node_query",
         ),
+        "LEGACY_PLUGIN_ID": "exitfy",
+        "LEGACY_IMPORT_FLAG": "legacy_import_done",
+        "LEGACY_MAX_SUBSCRIPTIONS": 16,
+        "LEGACY_MAX_MANUAL_NODES": 200,
+        "PLUGIN_ENABLED_PREFIX": "plugin_enabled_",
+        "threading": threading,
+        "ApplicationLoader": None,
+        "_ui_info": infos.append,
         "json": json,
         "_ui_error": errors.append,
         "_t": lambda key: key,
@@ -112,9 +126,11 @@ def load_plugin_class():
         "MenuItemData": type("MenuItemData", (FakeValue,), {}),
         "MenuItemType": FakeMenuItemType,
     }
+    if overrides:
+        namespace.update(overrides)
     exec(compile(ast.Module(body=[selected], type_ignores=[]), str(template), "exec"),
          namespace)
-    return namespace["ExitFyPlugin"], runtime, errors, opened
+    return namespace["ExitFyPlugin"], runtime, errors, opened, infos
 
 
 class TemplateLifecycleTest(unittest.TestCase):
@@ -161,7 +177,7 @@ class TemplateLifecycleTest(unittest.TestCase):
         self.assertTrue(any("schema marker" in item for item in plugin.logs))
 
     def test_runtime_start_failure_is_cleaned_up_and_reaches_host_engine(self):
-        plugin_type, runtime, errors, _opened = load_plugin_class()
+        plugin_type, runtime, errors, _opened, _infos = load_plugin_class()
         plugin = plugin_type()
         runtime.start = lambda *_args: (_ for _ in ()).throw(
             RuntimeError("native bridge failure")
@@ -184,7 +200,7 @@ class TemplateLifecycleTest(unittest.TestCase):
         self.assertEqual({"text"}, set(vars(rows[0])))
 
     def test_both_menu_entries_open_dashboard_directly(self):
-        plugin_type, runtime, _errors, opened = load_plugin_class()
+        plugin_type, runtime, _errors, opened, _infos = load_plugin_class()
         plugin = plugin_type()
         plugin._runtime_ready = True
         plugin._register_menu()
@@ -247,6 +263,87 @@ class TemplateLifecycleTest(unittest.TestCase):
         self.assertEqual("", plugin.settings["ui_hwid_entry"])
         self.assertEqual("preserved-hwid", plugin.settings["custom_hwid"])
         self.assertEqual("", plugin.settings["ui_node_query"])
+
+class InlineThread:
+    def __init__(self, target=None, name=None, daemon=None):
+        del name, daemon
+        self._target = target
+
+    def start(self):
+        if self._target is not None:
+            self._target()
+
+
+class InlineThreading:
+    Thread = InlineThread
+
+
+class LegacyImportTest(unittest.TestCase):
+    LEGACY = {
+        "custom_hwid": "  legacy-hwid  ",
+        "vless_data_custom": {
+            "subs": ["https://example.invalid/sub", "", "https://example.invalid/sub"],
+            "manual": ["vless://one", "  vless://two  ", 5],
+            "active_uri": "vless://one",
+        },
+    }
+
+    def _run(self, legacy, existing=None):
+        module = types.ModuleType("plugin_settings")
+        module.get_all_settings = lambda plugin_id: (
+            legacy if plugin_id == "exitfy" else {})
+        sys.modules["plugin_settings"] = module
+        try:
+            plugin_type, runtime, _errors, _opened, infos = load_plugin_class({
+                "threading": InlineThreading,
+                # the real key carries the two counts
+                "_t": lambda key: "imported %d/%d" if key == "legacy_imported" else key,
+            })
+            plugin = plugin_type()
+            if existing:
+                plugin.settings.update(existing)
+            plugin.on_plugin_load()
+            return plugin, runtime, infos
+        finally:
+            sys.modules.pop("plugin_settings", None)
+
+    def test_hand_written_sources_are_imported_once(self) -> None:
+        plugin, runtime, infos = self._run(self.LEGACY)
+        commands = [json.loads(arguments[0]) for method, arguments in runtime.calls
+                    if method == "execute"]
+        self.assertEqual(
+            [c for c in commands if c["command"] == "add_subscription"],
+            [{"command": "add_subscription", "url": "https://example.invalid/sub"}])
+        self.assertEqual(
+            [c["uri"] for c in commands if c["command"] == "add_node"],
+            ["vless://one", "vless://two"])
+        self.assertEqual(plugin.settings.get("custom_hwid"), "legacy-hwid")
+        self.assertTrue(plugin.settings.get("legacy_import_done"))
+        self.assertTrue(infos)
+
+        replay, replay_runtime, _infos = self._run(self.LEGACY, plugin.settings)
+        self.assertEqual(
+            [m for m, _ in replay_runtime.calls if m == "execute"], [])
+        self.assertTrue(replay.settings.get("legacy_import_done"))
+
+    def test_existing_hwid_is_never_replaced(self) -> None:
+        plugin, _runtime, _infos = self._run(
+            self.LEGACY, {"custom_hwid": "current"})
+        self.assertEqual(plugin.settings.get("custom_hwid"), "current")
+
+    def test_unreachable_storage_leaves_the_import_pending(self) -> None:
+        plugin_type, runtime, _errors, _opened, _infos = load_plugin_class(
+            {"threading": InlineThreading})
+        plugin = plugin_type()
+        sys.modules.pop("plugin_settings", None)
+        plugin.on_plugin_load()
+        self.assertEqual([m for m, _ in runtime.calls if m == "execute"], [])
+        self.assertNotIn("legacy_import_done", plugin.settings)
+
+    def test_absent_previous_plugin_marks_import_complete(self) -> None:
+        plugin, runtime, _infos = self._run({})
+        self.assertEqual([m for m, _ in runtime.calls if m == "execute"], [])
+        self.assertTrue(plugin.settings.get("legacy_import_done"))
 
 
 if __name__ == "__main__":

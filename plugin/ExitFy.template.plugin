@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import os
+import threading
 import zlib
 
 from base_plugin import AppEvent, BasePlugin, MenuItemData, MenuItemType
@@ -28,6 +29,11 @@ DEX_KEEPER_NAME = DEX_KEEPER_PREFIX + __version__
 SETTINGS_SCHEMA = 6
 PROVIDER_CATALOG_VERSION = 2
 CUSTOM_PROVIDER_ID = 2
+LEGACY_PLUGIN_ID = "exitfy"
+LEGACY_IMPORT_FLAG = "legacy_import_done"
+LEGACY_MAX_SUBSCRIPTIONS = 16
+LEGACY_MAX_MANUAL_NODES = 200
+PLUGIN_ENABLED_PREFIX = "plugin_enabled_"
 LEGACY_TRANSIENT_SETTING_KEYS = (
     "ui_add_node", "ui_add_subscription", "ui_hwid_entry", "ui_node_query",
 )
@@ -47,6 +53,16 @@ _TRANSLATIONS = {
     "runtime_not_started": ("exitFy не запущен: ", "exitFy did not start: "),
     "runtime_unavailable": ("Runtime exitFy недоступен", "exitFy runtime is unavailable"),
     "menu_settings": ("Настройки exitFy", "exitFy settings"),
+    "legacy_still_enabled": (
+        "Старый плагин exitFy включён. Выключите его, иначе оба будут "
+        "переключать прокси Telegram",
+        "The old exitFy plugin is enabled. Turn it off, or both will keep "
+        "switching the Telegram proxy",
+    ),
+    "legacy_imported": (
+        "Перенесено из старого exitFy: подписок %d, серверов %d",
+        "Imported from the old exitFy: %d subscriptions, %d servers",
+    ),
     "settings_open_failed": (
         "Не удалось открыть exitFy",
         "Could not open exitFy",
@@ -77,6 +93,13 @@ def _t(key):
 def _ui_error(message):
     try:
         run_on_ui_thread(lambda: BulletinHelper.show_error(str(message)))
+    except Exception:
+        pass
+
+
+def _ui_info(message):
+    try:
+        run_on_ui_thread(lambda: BulletinHelper.show_info(str(message)))
     except Exception:
         pass
 
@@ -313,11 +336,13 @@ class ExitFyPlugin(BasePlugin):
         self._menu_ids = []
         self._runtime_ready = False
         self._provider_migration_value = None
+        self._legacy_import = None
 
     def on_plugin_load(self):
         try:
             self._clear_legacy_transient_settings()
             self._migrate_provider_catalog()
+            self._migrate_legacy_plugin()
             self._normalize_runtime_setting_storage()
             data_dir, bridge_path, abi = _extract_native_bridge()
             bootstrap = {
@@ -338,6 +363,9 @@ class ExitFyPlugin(BasePlugin):
             except Exception as exc:
                 self.log("exitFy schema marker persistence failed: " + str(exc))
             self._register_menu()
+            self._import_legacy_sources()
+            if self._legacy_plugin_enabled():
+                _ui_info(_t("legacy_still_enabled"))
         except Exception as exc:
             self._remove_menu_items()
             try:
@@ -431,6 +459,117 @@ class ExitFyPlugin(BasePlugin):
             self._provider_migration_value = None
         except Exception as exc:
             self.log("exitFy provider catalog migration failed: " + str(exc))
+
+    @staticmethod
+    def _read_legacy_settings():
+        """Read the previous plugin's stored values through the SDK itself."""
+        try:
+            import plugin_settings
+            stored = plugin_settings.get_all_settings(LEGACY_PLUGIN_ID)
+        except Exception:
+            # Unreachable storage is not the same as an absent previous
+            # install: leave the import unmarked so the next load retries.
+            return None
+        return stored if isinstance(stored, dict) else {}
+
+    @staticmethod
+    def _collect_legacy_import(stored):
+        """Take only what the user typed by hand; cached nodes are refetched."""
+        custom = stored.get("vless_data_custom")
+        if not isinstance(custom, dict):
+            return [], []
+        def _clean(values, limit):
+            output = []
+            if not isinstance(values, list):
+                return output
+            for value in values:
+                if not isinstance(value, str):
+                    continue
+                trimmed = value.strip()
+                if trimmed and trimmed not in output:
+                    output.append(trimmed)
+                if len(output) >= limit:
+                    break
+            return output
+        return (_clean(custom.get("subs"), LEGACY_MAX_SUBSCRIPTIONS),
+                _clean(custom.get("manual"), LEGACY_MAX_MANUAL_NODES))
+
+    def _migrate_legacy_plugin(self):
+        if self._as_bool(self.get_setting(LEGACY_IMPORT_FLAG, False)):
+            return
+        stored = self._read_legacy_settings()
+        if stored is None:
+            return
+        if not stored:
+            try:
+                self.set_setting(LEGACY_IMPORT_FLAG, True, reload_settings=False)
+            except Exception as exc:
+                self.log("exitFy legacy import marker failed: " + str(exc))
+            return
+        hwid = stored.get("custom_hwid")
+        current = str(self.get_setting("custom_hwid", "") or "").strip()
+        if isinstance(hwid, str) and hwid.strip() and not current:
+            try:
+                self.set_setting("custom_hwid", hwid.strip(), reload_settings=False)
+            except Exception as exc:
+                self.log("exitFy legacy HWID import failed: " + str(exc))
+        self._legacy_import = self._collect_legacy_import(stored)
+
+    def _import_legacy_sources(self):
+        """Add the imported sources through the same commands the UI uses."""
+        if self._legacy_import is None:
+            return
+        subscriptions, nodes = self._legacy_import
+        self._legacy_import = None
+        if not subscriptions and not nodes:
+            try:
+                self.set_setting(LEGACY_IMPORT_FLAG, True, reload_settings=False)
+            except Exception:
+                pass
+            return
+
+        def worker():
+            imported_subscriptions = 0
+            imported_nodes = 0
+            try:
+                for url in subscriptions:
+                    if self._run_legacy_command({"command": "add_subscription", "url": url}):
+                        imported_subscriptions += 1
+                for uri in nodes:
+                    if self._run_legacy_command({"command": "add_node", "uri": uri}):
+                        imported_nodes += 1
+                self.set_setting(LEGACY_IMPORT_FLAG, True, reload_settings=False)
+            except Exception as exc:
+                self.log("exitFy legacy import failed: " + str(exc))
+                return
+            if imported_subscriptions or imported_nodes:
+                _ui_info(_t("legacy_imported") % (imported_subscriptions, imported_nodes))
+
+        threading.Thread(target=worker, name="exitfy-legacy-import", daemon=True).start()
+
+    def _run_legacy_command(self, request):
+        try:
+            raw = _DEX_RUNTIME.call(
+                "execute", json.dumps(request, separators=(",", ":")))
+        except Exception as exc:
+            self.log("exitFy legacy command failed: " + str(exc))
+            return False
+        try:
+            return bool(json.loads(str(raw)).get("ok"))
+        except Exception:
+            return False
+
+    @staticmethod
+    def _legacy_plugin_enabled():
+        try:
+            context = ApplicationLoader.applicationContext
+            if context is None:
+                return False
+            preferences = context.getSharedPreferences("plugin_settings", 0)
+            return bool(preferences.getBoolean(
+                PLUGIN_ENABLED_PREFIX + LEGACY_PLUGIN_ID, False))
+        except Exception:
+            return False
 
     def _clear_legacy_transient_settings(self):
         """Remove obsolete dialog/filter scratch values which may contain secrets."""
