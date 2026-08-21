@@ -77,7 +77,11 @@ is also why a network that blocks `api.github.com` blocks updates outright.
 A detached signature is pinned to a key rather than to the transport and
 removes that constraint.
 
-Everything except the key is in place. To turn it on:
+Everything except the key is in place, and the publisher step was exercised
+both ways from a workstation: without the secret it produces no signature and
+leaves the release contract untouched, and with a throwaway key it produces a
+signature that verifies against the matching public key without the key
+reaching the candidate directory. To turn it on:
 
     openssl ecparam -name prime256v1 -genkey -noout -out core-signing.pem
     openssl ec -in core-signing.pem -pubout -outform DER | base64 | tr -d '\n'
