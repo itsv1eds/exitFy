@@ -68,6 +68,29 @@ runner or Action starts. Candidate artifact names are stable for the workflow
 run, so both a full rerun and a failed-publisher-only rerun consume the same
 verified candidate.
 
+## Enabling manifest signatures
+
+The digest chain in a release proves that the downloaded bytes match what the
+release listing reported. It cannot prove that the listing itself was genuine,
+so the listing is the one thing exitFy never fetches through a mirror — which
+is also why a network that blocks `api.github.com` blocks updates outright.
+A detached signature is pinned to a key rather than to the transport and
+removes that constraint.
+
+Everything except the key is in place. To turn it on:
+
+    openssl ecparam -name prime256v1 -genkey -noout -out core-signing.pem
+    openssl ec -in core-signing.pem -pubout -outform DER | base64 | tr -d '\n'
+
+Add the contents of `core-signing.pem` as the repository secret
+`CORE_SIGNING_KEY`, keep the file offline, and put the printed public key into
+`MANIFEST_PUBLIC_KEY` in the plugin's `CoreUpdater`. Publishers sign every new
+manifest once the secret exists, and the client requires a valid signature once
+the public key is set — releases published before that point stop being
+accepted, which is the intent. Leaving the public key empty keeps the previous
+behaviour and claims no guarantee, so an unsigned release is never presented
+as verified.
+
 ## Local build
 
 All commands below run from this `cores/` directory.

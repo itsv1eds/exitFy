@@ -12,8 +12,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.security.GeneralSecurityException;
+import java.security.KeyFactory;
+import java.security.PublicKey;
+import java.security.Signature;
+import java.security.spec.X509EncodedKeySpec;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -43,6 +49,15 @@ class CoreUpdater {
     // return is pinned by the SHA-256 the GitHub API already reported, so a
     // mirror cannot substitute content; it can only observe the request, which
     // is why they are tried after the direct URL and never before it.
+    // Base64 X.509 SubjectPublicKeyInfo of the P-256 key that signs manifests.
+    // While this is empty the updater behaves exactly as it did before and
+    // claims no signature guarantee, so an unsigned release is never presented
+    // as verified. Setting it makes a valid signature mandatory: releases
+    // published without one stop being accepted, which is the point.
+    static final String MANIFEST_PUBLIC_KEY = "";
+    private static final String MANIFEST_SIGNATURE_ASSET = "manifest.json.sig";
+    private static final int MAX_SIGNATURE_BYTES = 1024;
+
     private static final String[] DOWNLOAD_MIRRORS = {
             "https://ghfast.top/",
             "https://gh-proxy.com/",
@@ -461,6 +476,7 @@ class CoreUpdater {
         Set<String> expected = new HashSet<>();
         expected.add(assetName(ANDROID_ABI));
         expected.add("manifest.json");
+        if (!MANIFEST_PUBLIC_KEY.isEmpty()) expected.add(MANIFEST_SIGNATURE_ASSET);
         if (family == CoreFamily.SING_BOX) {
             ReleaseVersion version = ReleaseVersion.parse(
                     release.optString("tag_name", ""), family);
@@ -486,6 +502,49 @@ class CoreUpdater {
                         + " release asset contract is invalid");
             }
         }
+    }
+
+    /**
+     * Fetches the detached manifest signature. Returns null while no signing
+     * key is configured, which keeps the release contract unchanged until one
+     * exists.
+     */
+    private byte[] downloadManifestSignature(JSONObject release) throws Exception {
+        if (MANIFEST_PUBLIC_KEY.isEmpty()) return null;
+        JSONObject asset = findAsset(release.optJSONArray("assets"),
+                MANIFEST_SIGNATURE_ASSET);
+        if (asset == null) throw new IllegalStateException(
+                family.displayName + " manifest signature is missing");
+        long size = asset.optLong("size", 0L);
+        if (size <= 0 || size > MAX_SIGNATURE_BYTES) {
+            throw new IllegalStateException(
+                    family.displayName + " manifest signature size is invalid");
+        }
+        String expected = parseDigest(asset.optString("digest", ""));
+        if (!isDigest(expected)) throw new IllegalStateException(
+                family.displayName + " manifest signature digest is missing");
+        String url = asset.optString("browser_download_url", "");
+        RuntimeException lastFailure = null;
+        for (String candidate : downloadCandidates(url)) {
+            try {
+                LimitedHttpClient.Response attempt = http.getBinary(candidate,
+                        Collections.emptyMap(), MAX_SIGNATURE_BYTES);
+                if (attempt.status < 200 || attempt.status >= 300
+                        || attempt.body.length != size
+                        || !expected.equals(sha256(attempt.body))) {
+                    throw new IllegalStateException(family.displayName
+                            + " manifest signature download failed");
+                }
+                return attempt.body;
+            } catch (RuntimeException failure) {
+                lastFailure = failure;
+            } catch (Exception failure) {
+                lastFailure = new IllegalStateException(family.displayName
+                        + " manifest signature download failed", failure);
+            }
+        }
+        throw lastFailure != null ? lastFailure : new IllegalStateException(
+                family.displayName + " manifest signature download failed");
     }
 
     static JSONObject selectRelease(JSONArray releases, CoreFamily family) {
@@ -539,6 +598,8 @@ class CoreUpdater {
             throw lastFailure != null ? lastFailure : new IllegalStateException(
                     family.displayName + " manifest download failed");
         }
+        verifyManifestSignature(response.body,
+                downloadManifestSignature(release));
         JSONObject manifest = JsonGuard.object(
                 new String(response.body, StandardCharsets.UTF_8));
         if (!family.id.equals(manifest.optString("family", ""))
@@ -699,6 +760,42 @@ class CoreUpdater {
         try {
             observer.onProgress(Math.max(0L, downloadedBytes), Math.max(0L, totalBytes));
         } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * Verifies the manifest bytes against the embedded signing key. The digest
+     * chain above only proves the bytes match what the release listing said;
+     * a mirror serving that listing could state its own digests. A signature
+     * is pinned to the key instead of to the transport, so it survives a
+     * listing this client did not fetch from GitHub itself.
+     */
+    static void verifyManifestSignature(byte[] manifest, byte[] signature)
+            throws GeneralSecurityException {
+        verifyManifestSignature(MANIFEST_PUBLIC_KEY, manifest, signature);
+    }
+
+    static void verifyManifestSignature(String publicKey, byte[] manifest,
+                                        byte[] signature)
+            throws GeneralSecurityException {
+        if (publicKey == null || publicKey.isEmpty()) return;
+        if (manifest == null || signature == null || signature.length == 0
+                || signature.length > MAX_SIGNATURE_BYTES) {
+            throw new GeneralSecurityException("core manifest signature is missing");
+        }
+        byte[] encoded;
+        try {
+            encoded = Base64.getDecoder().decode(publicKey);
+        } catch (IllegalArgumentException invalid) {
+            throw new GeneralSecurityException("core signing key is invalid", invalid);
+        }
+        PublicKey key = KeyFactory.getInstance("EC")
+                .generatePublic(new X509EncodedKeySpec(encoded));
+        Signature verifier = Signature.getInstance("SHA256withECDSA");
+        verifier.initVerify(key);
+        verifier.update(manifest);
+        if (!verifier.verify(signature)) {
+            throw new GeneralSecurityException("core manifest signature is invalid");
         }
     }
 

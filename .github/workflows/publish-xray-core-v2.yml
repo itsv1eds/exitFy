@@ -517,6 +517,8 @@ jobs:
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Generate and verify final manifest
+        env:
+          CORE_SIGNING_KEY: ${{ secrets.CORE_SIGNING_KEY }}
         run: |
           set -euo pipefail
           candidate="$RUNNER_TEMP/candidate"
@@ -534,6 +536,12 @@ jobs:
             --upstream-tag "$UPSTREAM_TAG" --upstream-commit "$UPSTREAM_COMMIT" \
             --go-version "$GO_VERSION" --release-tag "$RELEASE_TAG" \
             --snapshot-sha256 "$SNAPSHOT_SHA" --allow-final-manifest
+          if [[ -n "${CORE_SIGNING_KEY:-}" ]]; then
+            printf '%s' "$CORE_SIGNING_KEY" \
+              | ./scripts/sign_manifest.py \
+                --manifest "$candidate/manifest.json" \
+                --output "$candidate/manifest.json.sig"
+          fi
           ./scripts/audit_public_tree.py --repo-root "$GITHUB_WORKSPACE" \
             --path-prefix cores --path-prefix .github
 
@@ -633,9 +641,17 @@ jobs:
                   "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
               done < <(jq -r '.assetIds[]' "$RUNNER_TEMP/draft-plan.json")
             fi
+            signature_expectation=()
+            if [[ -f "$candidate/manifest.json.sig" ]]; then
+              signature_expectation+=(--expected-asset manifest.json.sig)
+            fi
+            signature_asset=()
+            if [[ -f "$candidate/manifest.json.sig" ]]; then
+              signature_asset+=("$candidate/manifest.json.sig")
+            fi
             gh release upload "$RELEASE_TAG" \
               "$candidate/libxray-arm64-v8a.so" \
-              "$candidate/manifest.json" --clobber
+              "$candidate/manifest.json" ${signature_asset[@]+"${signature_asset[@]}"} --clobber
             draft_ready=false
             for attempt in 1 2 3 4 5 6; do
               ./scripts/fetch_github_release_pages.sh "$GITHUB_REPOSITORY" \
@@ -645,6 +661,7 @@ jobs:
                   --tag "$RELEASE_TAG" --commit "$wrapper_commit" \
                   --expected-asset libxray-arm64-v8a.so \
                   --expected-asset manifest.json \
+                  ${signature_expectation[@]+"${signature_expectation[@]}"} \
                   > "$RUNNER_TEMP/draft.pending.json"; then
                 mv "$RUNNER_TEMP/draft.pending.json" "$RUNNER_TEMP/draft.json"
                 draft_ready=true
