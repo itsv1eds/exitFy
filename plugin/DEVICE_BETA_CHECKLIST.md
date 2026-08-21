@@ -79,6 +79,10 @@ Device testing is performed by the beta tester after receiving
   The handoff builds sing-box v1.13.19 and Xray v26.7.28; the wrapper
   revision advances with every core commit, so record the `wN` actually
   installed instead of expecting a fixed tag.
+- The mirror fallback was verified against the published
+  `xray-v26.7.28-w4023` assets from this machine: all three mirrors returned a
+  byte-identical `manifest.json`, and the core fetched through a mirror matched
+  the SHA-256 the manifest pins. Re-check only if the mirror list changes.
 - Confirm every accepted manifest is schema 3, core API 2, config contract 1,
   `minAndroidApi=29`, and contains exactly one `arm64-v8a` ELF64 asset.
 - Start with old schema-2/API-26 active, pending and backup core files. None may
