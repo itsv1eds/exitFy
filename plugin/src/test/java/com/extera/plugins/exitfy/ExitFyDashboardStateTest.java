@@ -6,6 +6,7 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 public class ExitFyDashboardStateTest {
@@ -168,6 +169,37 @@ public class ExitFyDashboardStateTest {
     }
 
     @Test
+    public void tellsAFirstTimeUserWhatToDoNext() throws Exception {
+        ExitFyDashboardState missing = ExitFyDashboardState.parse(new JSONObject()
+                .put("coreInstall", new JSONObject()
+                        .put("required", true)
+                        .put("state", "idle")
+                        .put("stage", "idle")
+                        .put("generation", 1))
+                .toString());
+        assertFalse(missing.nextStepHint().isEmpty());
+
+        ExitFyDashboardState noServer = ExitFyDashboardState.parse(
+                new JSONObject().toString());
+        assertFalse(noServer.nextStepHint().isEmpty());
+        assertNotEquals(missing.nextStepHint(), noServer.nextStepHint());
+
+        // A running install already explains itself, and an error owns the line.
+        ExitFyDashboardState installing = ExitFyDashboardState.parse(new JSONObject()
+                .put("coreInstall", new JSONObject()
+                        .put("required", true)
+                        .put("state", "running")
+                        .put("stage", "downloading")
+                        .put("generation", 2))
+                .toString());
+        assertEquals("", installing.nextStepHint());
+        ExitFyDashboardState failure = ExitFyDashboardState.parse(new JSONObject()
+                .put("state", "ERROR")
+                .toString());
+        assertEquals("", failure.nextStepHint());
+    }
+
+    @Test
     public void distinguishesPartialAndFullCoreInstallTerminals()
             throws Exception {
         ExitFyDashboardState partial = ExitFyDashboardState.parse(new JSONObject()
@@ -196,8 +228,12 @@ public class ExitFyDashboardStateTest {
                 .contains(I18n.isRussian() ? "автоматически" : "automatically"));
         assertTrue(failed.coreInstall.terminal());
         assertFalse(failed.coreInstall.partial());
+        // Mirrors already cover a blocked asset host, so a full failure points
+        // at GitHub itself rather than at the user's connection.
         assertTrue(failed.coreInstall.terminalMessage().toLowerCase()
-                .contains(I18n.isRussian() ? "интернет" : "internet"));
+                .contains("github"));
+        assertTrue(failed.coreInstall.terminalMessage().toLowerCase()
+                .contains(I18n.isRussian() ? "vpn" : "vpn"));
         assertTrue(success.coreInstall.successful());
         assertFalse(success.coreInstall.partial());
     }

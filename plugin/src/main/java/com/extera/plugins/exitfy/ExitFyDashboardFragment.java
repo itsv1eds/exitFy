@@ -74,6 +74,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
 
     private TextView connectionStatusView;
     private TextView connectionIssueView;
+    private TextView connectionHintView;
     private TextView connectButton;
     private TextView sourceValueView;
     private TextView sourceSummaryView;
@@ -247,6 +248,11 @@ final class ExitFyDashboardFragment extends BaseFragment {
         connectionIssueView.setEllipsize(TextUtils.TruncateAt.END);
         connectionIssueView.setVisibility(View.GONE);
         labels.addView(connectionIssueView, topMargin(4));
+        connectionHintView = text(context, 13,
+                Theme.key_windowBackgroundWhiteGrayText, false);
+        connectionHintView.setMaxLines(3);
+        connectionHintView.setVisibility(View.GONE);
+        labels.addView(connectionHintView, topMargin(4));
 
         card.addView(header, matchWrap());
 
@@ -347,12 +353,23 @@ final class ExitFyDashboardFragment extends BaseFragment {
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.addView(iconBadge(context, R.drawable.msg_settings,
                 I18n.t("Дополнительно", "Advanced"), 48), fixed(dp(48), dp(48)));
+        LinearLayout labels = new LinearLayout(context);
+        labels.setOrientation(LinearLayout.VERTICAL);
         TextView title = text(context, 17, Theme.key_windowBackgroundWhiteBlackText, true);
         title.setText(I18n.t("Дополнительно", "Advanced"));
-        LinearLayout.LayoutParams titleParams = weighted();
-        titleParams.leftMargin = dp(13);
-        card.addView(title, titleParams);
-        card.setContentDescription(I18n.t("Дополнительно", "Advanced"));
+        labels.addView(title, matchWrap());
+        TextView summary = text(context, 13,
+                Theme.key_windowBackgroundWhiteGrayText, false);
+        summary.setText(I18n.t(
+                "Способ проверки задержки и замена идентификатора",
+                "Latency check method and identifier replacement"));
+        labels.addView(summary, topMargin(2));
+        LinearLayout.LayoutParams labelsParams = weighted();
+        labelsParams.leftMargin = dp(13);
+        card.addView(labels, labelsParams);
+        card.setContentDescription(I18n.t(
+                "Дополнительно: способ проверки задержки и замена идентификатора",
+                "Advanced: latency check method and identifier replacement"));
         return card;
     }
 
@@ -399,6 +416,9 @@ final class ExitFyDashboardFragment extends BaseFragment {
                 && !state.connectionIssue.isEmpty();
         connectionIssueView.setText(showConnectionIssue ? state.connectionIssue : "");
         connectionIssueView.setVisibility(showConnectionIssue ? View.VISIBLE : View.GONE);
+        String hint = showConnectionIssue ? "" : state.nextStepHint();
+        connectionHintView.setText(hint);
+        connectionHintView.setVisibility(hint.isEmpty() ? View.GONE : View.VISIBLE);
         connectButton.setText(state.primaryAction().label());
         boolean commandIdle = state.runtimeAvailable
                 && !commandRunning.get()

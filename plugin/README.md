@@ -11,6 +11,12 @@ and updates remain automatic. Whenever either connection component is missing,
 the dashboard exposes one generic action which installs/checks both components
 and reports combined progress; it never exposes family names, versions,
 selection or per-family update controls.
+The connection card carries one line of guidance: it explains that the
+connection files are downloaded once when a component is missing, and points at
+the server source when nothing is selected yet. A running install or a
+connection error replaces that line. A failed installation names GitHub as the
+likely cause rather than blaming the user's connection, because mirrors already
+cover a blocked asset host.
 The screens use Telegram icons and the current exteraGram theme—there are no
 bundled pictures. Runtime code lives in
 `src/main/java/com/extera/plugins/exitfy`; the only embedded native

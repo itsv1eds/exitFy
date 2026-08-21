@@ -27,7 +27,11 @@ Device testing is performed by the beta tester after receiving
   directly. Opening it must only read UI state and must not start the proxy,
   subscriptions, core downloads or ping.
 - Verify the dashboard contains connection, active server, source and advanced
-  cards. Whenever either current connection component is missing it must also
+  cards. With a component missing it must state that the connection files are
+  downloaded once rather than only demanding the install; with every component
+  present but no server chosen it must point at the server source instead. A
+  running install and a connection error each replace that line rather than
+  stacking with it. The advanced card must say what it contains. Whenever either current connection component is missing it must also
   show the one generic installation action. The large connection state remains
   visible, while version text, secondary connection/core/SOCKS details,
   per-family core cards, quick actions and the ActionBar overflow menu are

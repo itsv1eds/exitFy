@@ -98,6 +98,26 @@ final class ExitFyDashboardState {
         }
     }
 
+    /**
+     * One line telling a first-time user what the screen expects from them.
+     * The install action otherwise appears with no stated reason, and a fresh
+     * install shows no server without saying where servers come from.
+     */
+    String nextStepHint() {
+        if (coreInstall.active() || "ERROR".equals(runtimeState)) return "";
+        if (coreInstall.required) {
+            return I18n.t(
+                    "Файлы подключения не входят в плагин — их нужно скачать один раз",
+                    "The connection files do not ship with the plugin and are downloaded once");
+        }
+        if (!hasActiveNode()) {
+            return I18n.t(
+                    "Откройте «Источник серверов» и выберите сервер",
+                    "Open \u201cServer source\u201d and pick a server");
+        }
+        return "";
+    }
+
     String connectionTitle() {
         switch (runtimeState) {
             case "RUNNING":
@@ -287,9 +307,14 @@ final class ExitFyDashboardState {
                         "Один компонент установлен. Оставшийся будет установлен автоматически",
                         "One component is installed. The remaining component will be installed automatically");
             }
+            // Mirrors already cover a blocked download host, so reaching this
+            // point usually means the release listing itself is unreachable.
+            // "Check your connection" is misleading there: the connection works.
             return I18n.t(
-                    "Не удалось установить компоненты. Проверьте подключение к интернету и попробуйте снова",
-                    "Could not install the components. Check your internet connection and try again");
+                    "Не удалось скачать файлы подключения. Если сеть ограничивает "
+                            + "доступ к GitHub, включите любой другой VPN и повторите",
+                    "Could not download the connection files. If your network "
+                            + "restricts GitHub, turn on any other VPN once and retry");
         }
 
         private static CoreInstallState parse(JSONObject value) {
