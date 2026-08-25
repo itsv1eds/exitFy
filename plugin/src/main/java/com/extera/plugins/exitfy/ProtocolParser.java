@@ -511,7 +511,7 @@ final class ProtocolParser {
     }
 
     private static JSONObject parseHysteria2(Parsed parsed) throws Exception {
-        rejectUnknownParams(parsed.params, "Hysteria2", "security", "sni", "peer",
+        ignoreUnknownParams(parsed.params, "Hysteria2", "security", "sni", "peer",
                 "insecure", "allowInsecure", "allow_insecure", "alpn",
                 "obfs", "obfs-password", "hop_interval", "hop-interval", "hopInterval",
                 "upmbps", "up", "downmbps", "down");
@@ -561,7 +561,7 @@ final class ProtocolParser {
     }
 
     private static JSONObject parseHysteria(Parsed parsed) throws Exception {
-        rejectUnknownParams(parsed.params, "Hysteria", "security", "sni", "peer",
+        ignoreUnknownParams(parsed.params, "Hysteria", "security", "sni", "peer",
                 "insecure", "allowInsecure", "allow_insecure", "alpn",
                 "auth", "auth_str", "upmbps", "up", "downmbps", "down", "obfs",
                 "obfsParam", "obfs-param", "obfs_password");
@@ -609,7 +609,7 @@ final class ProtocolParser {
     }
 
     private static JSONObject parseTuic(Parsed parsed) throws Exception {
-        rejectUnknownParams(parsed.params, "TUIC", "security", "sni", "peer",
+        ignoreUnknownParams(parsed.params, "TUIC", "security", "sni", "peer",
                 "insecure", "allowInsecure", "allow_insecure", "alpn",
                 "congestion_control", "udp_relay_mode");
         String uuid = parsed.user;
@@ -995,6 +995,7 @@ final class ProtocolParser {
         }
     }
 
+    private static final int MAX_IGNORED_PARAM_CHARS = 512;
     private static final int MAX_XHTTP_EXTRA_FIELDS = 32;
     private static final int MAX_XHTTP_EXTRA_VALUE_CHARS = 256;
 
@@ -1267,6 +1268,49 @@ final class ProtocolParser {
         Collections.addAll(allowed, STREAM_PARAMS);
         Collections.addAll(allowed, protocolSpecific);
         rejectUnknownParams(params, label, allowed);
+    }
+
+    /**
+     * Options these protocols actually define. Silently ignoring one would
+     * connect on terms other than the link asked for, so an unsupported name
+     * from this set stays fatal.
+     */
+    private static final String[] QUIC_FUNCTIONAL_PARAMS = {
+            "fp", "utls", "pinsha256", "ech", "echconfig", "ca", "cert", "disablesni",
+            "congestioncontrol", "cc", "udprelaymode", "udpoverstream",
+            "zerortthandshake", "heartbeat", "auth", "authstr", "protocol",
+            "recvwindow", "recvwindowconn", "disablemtudiscovery",
+            "brutal", "ignoreclientbandwidth",
+    };
+
+    /**
+     * Names outside that set are decoration a source added for other clients:
+     * elix tags every Hysteria2 link with "fm", which carries QUIC congestion
+     * hints. Discarding the server over a name we do not enumerate hid three
+     * working nodes that the previous plugin listed. Ignoring is safe in this
+     * direction — every value that could relax security is named explicitly,
+     * so what is left cannot loosen what the defaults already enforce.
+     */
+    private static void ignoreUnknownParams(Map<String, String> params, String label,
+                                            String... allowedValues) {
+        HashSet<String> allowed = new HashSet<>();
+        Collections.addAll(allowed, allowedValues);
+        HashSet<String> functional = new HashSet<>();
+        Collections.addAll(functional, QUIC_FUNCTIONAL_PARAMS);
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            String key = entry.getKey();
+            if (allowed.contains(key)) continue;
+            String compact = key.toLowerCase(Locale.US).replace("_", "").replace("-", "");
+            if (functional.contains(compact)) {
+                throw new IllegalArgumentException(
+                        "unsupported " + label + " parameter: " + key);
+            }
+            String value = entry.getValue();
+            if (value != null && value.length() > MAX_IGNORED_PARAM_CHARS) {
+                throw new IllegalArgumentException(
+                        "oversized " + label + " parameter: " + key);
+            }
+        }
     }
 
     private static void rejectUnknownParams(Map<String, String> params, String label,

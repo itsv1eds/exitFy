@@ -225,7 +225,7 @@ public class RuntimeModelsTest {
         try {
             String valid = new org.json.JSONObject()
                     .put("pluginId", "exitFy_v2")
-                    .put("pluginVersion", "4.0.0-beta.26")
+                    .put("pluginVersion", "4.0.0-beta.27")
                     .put("settingsSchema", 6)
                     .put("dataDir", root.getAbsolutePath())
                     .put("nativeBridgePath", bridge.getAbsolutePath())
@@ -247,13 +247,13 @@ public class RuntimeModelsTest {
             }
             try {
                 BootstrapConfig.parse(valid.replace(
-                        "4.0.0-beta.26", "4.0.0-beta.23"));
+                        "4.0.0-beta.27", "4.0.0-beta.23"));
                 throw new AssertionError("old bootstrap version accepted");
             } catch (IllegalArgumentException expected) {
                 assertTrue(expected.getMessage().contains("version"));
             }
             File versionedBridge = new File(root,
-                    "bridge/4.0.0-beta.26/arm64-v8a/libexitfy_bridge.so");
+                    "bridge/4.0.0-beta.27/arm64-v8a/libexitfy_bridge.so");
             assertTrue(versionedBridge.getParentFile().mkdirs());
             assertTrue(versionedBridge.createNewFile());
             try {
@@ -1750,4 +1750,23 @@ public class RuntimeModelsTest {
         assertTrue(CoreProcessState.requiresRestart(CoreFamily.XRAY, CoreFamily.SING_BOX));
     }
 
+
+    @Test
+    public void aRefreshThatChangesNothingDoesNotReconnect() throws Exception {
+        // Every successful refresh used to reconnect. A source that never
+        // refreshes keeps the provider stale, so the next start refreshed
+        // again and the connection dropped over and over.
+        String uri = "vless://33333333-3333-3333-3333-333333333333@edge.example:443"
+                + "?security=reality&pbk=" + "a".repeat(43) + "&sni=edge.example&fp=chrome";
+        ProtocolParser.Node before = ProtocolParser.parse(uri + "#Server");
+        ProtocolParser.Node renamed = ProtocolParser.parse(uri + "#Server%20renamed");
+        ProtocolParser.Node moved = ProtocolParser.parse(
+                uri.replace("edge.example:443", "other.example:443") + "#Server");
+
+        assertFalse(RuntimePolicy.activeConfigurationChanged(before, before));
+        assertFalse(RuntimePolicy.activeConfigurationChanged(before, renamed));
+        assertTrue(RuntimePolicy.activeConfigurationChanged(before, moved));
+        assertTrue(RuntimePolicy.activeConfigurationChanged(null, before));
+        assertTrue(RuntimePolicy.activeConfigurationChanged(before, null));
+    }
 }

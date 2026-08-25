@@ -9,6 +9,18 @@ final class RuntimePolicy {
     // 12 s StartCore + 6 s probes + 3 s StopCore + 1 s scheduling slack.
     private static final long PROXY_PROBE_BATCH_BUDGET_MS = 22_000L;
 
+    /**
+     * Whether a completed subscription refresh actually changed the server the
+     * connection is running on. The key is a digest of the canonical outbound,
+     * so equal keys mean the live connection already matches what the refresh
+     * produced, and a renamed server keeps its key.
+     */
+    static boolean activeConfigurationChanged(ProtocolParser.Node active,
+                                              ProtocolParser.Node reselected) {
+        if (active == null || reselected == null) return true;
+        return !active.normalizedKey.equals(reselected.normalizedKey);
+    }
+
     private RuntimePolicy() {
     }
 

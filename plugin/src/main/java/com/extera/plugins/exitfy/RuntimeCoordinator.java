@@ -2147,11 +2147,17 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 }
                 return;
             }
-            subscriptions.selected(provider);
+            ProtocolParser.Node reselected = subscriptions.selected(provider);
             if (effectiveAnnounce) invalidateSettings();
             if (settings.enabled) {
                 startRequired = requiredForStart;
-                reconnect = !requiredForStart;
+                // Reconnecting after every refresh tore down a healthy
+                // connection each time the list reloaded, and a source that
+                // never refreshes successfully keeps the provider stale, so
+                // the next start refreshed again and the connection dropped
+                // in a loop. Only a changed active configuration justifies it.
+                reconnect = !requiredForStart
+                        && RuntimePolicy.activeConfigurationChanged(activeNode, reselected);
             }
         }
         if (startRequired) startInternal(operation);

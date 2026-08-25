@@ -12,6 +12,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.fail;
 import static org.junit.Assert.assertTrue;
 
 public class ProtocolParserTest {
@@ -164,6 +165,38 @@ public class ProtocolParserTest {
         assertEquals("salamander", h2.outbound.getJSONObject("obfs").getString("type"));
         assertEquals("tuic", tuic.outbound.getString("type"));
         assertEquals("password", tuic.outbound.getString("password"));
+    }
+
+    @Test
+    public void keepsQuicNodesCarryingClientHintsWeDoNotEnumerate() throws Exception {
+        // A live provider decorates every Hysteria2 link with "fm", a client
+        // hint for QUIC congestion control. Rejecting the whole node over it
+        // hid three working servers that the previous plugin listed.
+        ProtocolParser.Node hinted = ProtocolParser.parse(
+                "hysteria2://password@hy2.example:443?sni=edge.example"
+                        + "&fm=%7B%22quicParams%22%3A%7B%22congestion%22%3A%22bbr%22%7D%7D#Hinted");
+        assertEquals("hysteria2", hinted.outbound.getString("type"));
+        assertEquals("edge.example", hinted.outbound.getJSONObject("tls").getString("server_name"));
+        assertFalse(hinted.supports(CoreFamily.XRAY));
+        assertTrue(hinted.supports(CoreFamily.SING_BOX));
+
+        ProtocolParser.Node tuic = ProtocolParser.parse(
+                "tuic://33333333-3333-3333-3333-333333333333:password@tuic.example:443"
+                        + "?sni=edge.example&fm=%7B%22a%22%3A1%7D#Hinted");
+        assertEquals("tuic", tuic.outbound.getString("type"));
+    }
+
+    @Test
+    public void rejectsAnOversizedUnknownQuicParameter() throws Exception {
+        StringBuilder oversized = new StringBuilder();
+        for (int index = 0; index < 600; index++) oversized.append('x');
+        try {
+            ProtocolParser.parse("hysteria2://password@hy2.example:443?sni=edge.example&fm="
+                    + oversized + "#Oversized");
+            fail("oversized parameter must not be ignored");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("oversized"));
+        }
     }
 
     @Test
