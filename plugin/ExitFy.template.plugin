@@ -31,6 +31,9 @@ PROVIDER_CATALOG_VERSION = 3
 CUSTOM_PROVIDER_ID = 3
 CUSTOM_V2_ID = 2
 LEGACY_PLUGIN_ID = "exitfy"
+LEGACY_PREFS = "exitfy_prefs"
+LEGACY_HWID_KEY = "exitfy_hwid"
+LEGACY_CUSTOM_HWID_KEY = "exitfy_hwid_custom"
 LEGACY_IMPORT_FLAG = "legacy_import_done"
 LEGACY_MAX_SUBSCRIPTIONS = 16
 LEGACY_MAX_MANUAL_NODES = 200
@@ -353,6 +356,7 @@ class ExitFyPlugin(BasePlugin):
                 "dataDir": data_dir,
                 "nativeBridgePath": bridge_path,
                 "nativeAbi": abi,
+                "migratedHwid": self._migrated_hwid(),
             }
             _DEX_RUNTIME.start(
                 json.dumps(bootstrap, separators=(",", ":")),
@@ -526,6 +530,22 @@ class ExitFyPlugin(BasePlugin):
                 self.log("exitFy legacy HWID import failed: " + str(exc))
         self._legacy_import = self._collect_legacy_import(stored)
 
+    def _migrated_hwid(self):
+        """Reuses the previous identifier once, then remembers the decision."""
+        try:
+            stored = str(self.get_setting("migrated_hwid", "") or "").strip()
+        except Exception:
+            stored = ""
+        if stored:
+            return stored
+        value = self._legacy_device_hwid()
+        if value:
+            try:
+                self.set_setting("migrated_hwid", value, reload_settings=False)
+            except Exception as exc:
+                self.log("exitFy HWID carry-over persistence failed: " + str(exc))
+        return value
+
     def _import_legacy_sources(self):
         """Add the imported sources through the same commands the UI uses."""
         if self._legacy_import is None:
@@ -575,6 +595,26 @@ class ExitFyPlugin(BasePlugin):
             return bool(json.loads(str(raw)).get("ok"))
         except Exception:
             return False
+
+    @staticmethod
+    def _legacy_device_hwid():
+        """The identifier the 3.x plugin sent, kept in its own preferences.
+
+        Sources bind a subscription to it, so a fresh identifier reads as an
+        unknown device and the source answers with a refusal instead of servers.
+        """
+        try:
+            context = ApplicationLoader.applicationContext
+            if context is None:
+                return ""
+            preferences = context.getSharedPreferences(LEGACY_PREFS, 0)
+            for key in (LEGACY_CUSTOM_HWID_KEY, LEGACY_HWID_KEY):
+                value = str(preferences.getString(key, "") or "").strip().lower()
+                if len(value) == 16 and all(item in "0123456789abcdef" for item in value):
+                    return value
+        except Exception:
+            pass
+        return ""
 
     @staticmethod
     def _legacy_plugin_enabled():

@@ -13,14 +13,21 @@ final class BootstrapConfig {
     final File dataDir;
     final String nativeBridgePath;
     final String nativeAbi;
+    /**
+     * Device identifier carried over from the 3.x plugin. Sources bind a
+     * subscription to it, so generating a fresh one silently loses access to
+     * every subscription the previous install had registered.
+     */
+    final String migratedHwid;
 
     private BootstrapConfig(String pluginId, String pluginVersion, File dataDir, String nativeBridgePath,
-                            String nativeAbi) {
+                            String nativeAbi, String migratedHwid) {
         this.pluginId = pluginId;
         this.pluginVersion = pluginVersion;
         this.dataDir = dataDir;
         this.nativeBridgePath = nativeBridgePath;
         this.nativeAbi = nativeAbi;
+        this.migratedHwid = migratedHwid;
     }
 
     static BootstrapConfig parse(String json) throws Exception {
@@ -53,7 +60,9 @@ final class BootstrapConfig {
         if (!canonicalBridge.equals(expectedBridge)) {
             throw new IllegalArgumentException("native bridge path is not stable");
         }
+        String migratedHwid = value.optString("migratedHwid", "").trim();
+        if (!migratedHwid.matches("[0-9a-f]{16}")) migratedHwid = "";
         return new BootstrapConfig(pluginId, pluginVersion, dataDir,
-                canonicalBridge.getPath(), abi);
+                canonicalBridge.getPath(), abi, migratedHwid);
     }
 }

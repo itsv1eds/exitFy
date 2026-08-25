@@ -83,6 +83,13 @@ final class SubscriptionManager implements Closeable {
     // an older parse must never overwrite a newer add/remove/clear action.
     private long mutationRevision;
 
+    private String migratedHwid = "";
+
+    /** Seeds the device identifier once, before any request is made. */
+    synchronized void adoptMigratedHwid(String value) {
+        migratedHwid = value == null ? "" : value.trim();
+    }
+
     SubscriptionManager(AtomicStore store, LimitedHttpClient http) {
         this(store, http, OperationObserver.NO_OP);
     }
@@ -918,6 +925,16 @@ final class SubscriptionManager implements Closeable {
         JSONObject meta = data.optJSONObject("meta");
         String value = meta.optString("hwid", "");
         if (!value.isEmpty()) return value;
+        if (!migratedHwid.isEmpty()) {
+            try {
+                if (!persistencePoisoned.get()) {
+                    meta.put("hwid", migratedHwid);
+                    persist(SnapshotMode.NONE);
+                }
+            } catch (Exception ignored) {
+            }
+            return migratedHwid;
+        }
         byte[] bytes = new byte[8];
         new SecureRandom().nextBytes(bytes);
         StringBuilder output = new StringBuilder(16);

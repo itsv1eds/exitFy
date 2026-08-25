@@ -81,7 +81,9 @@ def forbiddenResetTokens = [
         ["reset", "Schema"].join(""),
         ["Schema", "Migration"].join(""),
         ["runtime", "-v4"].join(""),
-        ["exitfy", "_prefs"].join(""),
+        // The previous plugin's preferences are read once to carry the device
+        // identifier over; sources bind subscriptions to it. Mutating them is
+        // what stays forbidden, and the template writes no preferences at all.
         ["exitfy", "_modules"].join(""),
         ["_migrate", "_settings"].join(""),
 ]
@@ -980,6 +982,12 @@ tasks.register("validateEmbeddedDexConfig") {
         forbiddenResetTokens.each { removed ->
             if (pluginText.contains(removed)) {
                 throw new GradleException("Removed settings reset path remains in template: ${removed}")
+            }
+        }
+        [".edit()", "putString(", "putBoolean(", "putInt("].each { mutation ->
+            if (pluginText.contains(mutation)) {
+                throw new GradleException(
+                        "Template must not write host preferences: ${mutation}")
             }
         }
         forbiddenThirdPartyCoreTokens.each { removed ->

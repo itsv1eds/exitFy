@@ -154,6 +154,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     private RuntimeCoordinator(BootstrapConfig bootstrap, AtomicStore store) throws Exception {
         this.pluginId = bootstrap.pluginId;
         this.subscriptions = new SubscriptionManager(store, subscriptionHttp);
+        this.subscriptions.adoptMigratedHwid(bootstrap.migratedHwid);
         this.singBoxUpdater = new CoreUpdater(
                 store, coreHttp, bootstrap.nativeAbi, CoreFamily.SING_BOX);
         this.xrayUpdater = new CoreUpdater(

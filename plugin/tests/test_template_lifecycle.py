@@ -111,6 +111,9 @@ def load_plugin_class(overrides=None):
             "ui_add_node", "ui_add_subscription", "ui_hwid_entry", "ui_node_query",
         ),
         "LEGACY_PLUGIN_ID": "exitfy",
+        "LEGACY_PREFS": "exitfy_prefs",
+        "LEGACY_HWID_KEY": "exitfy_hwid",
+        "LEGACY_CUSTOM_HWID_KEY": "exitfy_hwid_custom",
         "LEGACY_IMPORT_FLAG": "legacy_import_done",
         "LEGACY_MAX_SUBSCRIPTIONS": 16,
         "LEGACY_MAX_MANUAL_NODES": 200,
@@ -292,6 +295,60 @@ class InlineThread:
 
 class InlineThreading:
     Thread = InlineThread
+
+
+class FakePreferences:
+    def __init__(self, values):
+        self._values = values
+
+    def getString(self, key, default):
+        return self._values.get(key, default)
+
+    def getBoolean(self, key, default):
+        return bool(self._values.get(key, default))
+
+
+class FakeApplicationLoader:
+    """Stands in for the host so preference reads can be exercised."""
+
+    def __init__(self, stores):
+        self.applicationContext = self
+        self._stores = stores
+
+    def getSharedPreferences(self, name, mode):
+        del mode
+        return FakePreferences(self._stores.get(name, {}))
+
+
+class MigratedHwidTest(unittest.TestCase):
+    HWID = "0123456789abcdef"
+
+    def _plugin(self, stored):
+        plugin_type, runtime, *_ = load_plugin_class(
+            {"ApplicationLoader": FakeApplicationLoader({"exitfy_prefs": stored})})
+        return plugin_type(), runtime
+
+    def test_generated_identifier_is_carried_over(self):
+        plugin, _runtime = self._plugin({"exitfy_hwid": self.HWID})
+        self.assertEqual(self.HWID, plugin._migrated_hwid())
+        self.assertEqual(self.HWID, plugin.settings["migrated_hwid"])
+
+    def test_a_custom_identifier_wins_over_the_generated_one(self):
+        plugin, _runtime = self._plugin(
+            {"exitfy_hwid": self.HWID, "exitfy_hwid_custom": "fedcba9876543210"})
+        self.assertEqual("fedcba9876543210", plugin._migrated_hwid())
+
+    def test_a_malformed_identifier_is_ignored(self):
+        for value in ("", "zzzz", "0123", self.HWID + "00"):
+            plugin, _runtime = self._plugin({"exitfy_hwid": value})
+            self.assertEqual("", plugin._migrated_hwid())
+
+    def test_the_decision_is_made_once(self):
+        plugin, _runtime = self._plugin({"exitfy_hwid": self.HWID})
+        plugin._migrated_hwid()
+        # A later read must keep the first answer even if the old store changes.
+        plugin.settings["migrated_hwid"] = "aaaaaaaaaaaaaaaa"
+        self.assertEqual("aaaaaaaaaaaaaaaa", plugin._migrated_hwid())
 
 
 class LegacyImportTest(unittest.TestCase):
