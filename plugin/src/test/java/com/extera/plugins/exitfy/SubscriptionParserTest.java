@@ -3120,4 +3120,16 @@ public class SubscriptionParserTest {
     private static void cborHeader(ByteArrayOutputStream output, int major, int value) {
         output.write((major << 5) | value);
     }
+
+    @Test
+    public void placeholderNodesFromARefusingSourceAreRejectedWithTheirOwnReason() {
+        // Verbatim shape of what a source returns when it does not accept the
+        // client: routable-looking URIs whose address can never be dialled.
+        String body = "dmxlc3M6Ly8wMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDBAMC4wLjAuMDoxP2VuY3J5cHRpb249bm9uZSZ0eXBlPXRjcCZzZWN1cml0eT1ub25lIyVFMiU5RCU4Qwp2bGVzczovLzAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwMDAwMEAwLjAuMC4wOjE/ZW5jcnlwdGlvbj1ub25lJnR5cGU9dGNwJnNlY3VyaXR5PW5vbmUjSGFwcA==";
+        SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(body);
+
+        assertTrue(parsed.nodes.isEmpty());
+        assertEquals(2, parsed.rejected);
+        assertTrue(parsed.reasons.contains(SubscriptionParser.UNREACHABLE_ONLY));
+    }
 }

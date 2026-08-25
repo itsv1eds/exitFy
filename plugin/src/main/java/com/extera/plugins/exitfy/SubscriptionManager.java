@@ -365,7 +365,20 @@ final class SubscriptionManager implements Closeable {
                     if (!parsed.nodes.isEmpty()) break;
                 }
                 if (parsed == null || parsed.nodes.isEmpty()) {
-                    throw new IllegalStateException(I18n.t(
+                    // A source that answers an unrecognised client sends entries
+                    // whose names carry a notice and whose address cannot be
+                    // reached. Saying "no supported servers" there points the
+                    // user at their own configuration instead of the refusal.
+                    boolean refused = parsed != null && parsed.rejected > 0
+                            && parsed.reasons.contains(SubscriptionParser.UNREACHABLE_ONLY);
+                    throw new IllegalStateException(refused
+                            ? I18n.t(
+                            "Источник не отдаёт серверы этому приложению. "
+                                    + "Используйте встроенный источник или попросите "
+                                    + "провайдера разрешить exitFy",
+                            "This source refuses to serve this app. Use a built-in "
+                                    + "source, or ask the provider to allow exitFy")
+                            : I18n.t(
                             "Подписка не содержит поддерживаемых серверов",
                             "Subscription contains no supported servers"));
                 }

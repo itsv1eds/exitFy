@@ -1661,6 +1661,8 @@ final class ProtocolParser {
      * accepting them would report a server count made entirely of nodes that
      * cannot connect.
      */
+    static final String UNREACHABLE_SERVER = "proxy server is unreachable";
+
     static boolean isUnreachableServer(String server) {
         String value = server == null ? "" : server.trim();
         if (value.startsWith("[") && value.endsWith("]") && value.length() > 2) {
@@ -1682,7 +1684,10 @@ final class ProtocolParser {
         AtomicStore.jsonUtf8Size(outbound, AtomicStore.MAX_JSON_BYTES);
         String protocol = neutralString(outbound, "type", true, false, 32);
         String server = neutralString(outbound, "server", true, false, 1024);
-        if (containsWhitespaceOrControl(server) || isUnreachableServer(server)) {
+        if (isUnreachableServer(server)) {
+            throw new IllegalArgumentException(UNREACHABLE_SERVER);
+        }
+        if (containsWhitespaceOrControl(server)) {
             throw new IllegalArgumentException("invalid neutral proxy server");
         }
         neutralInteger(outbound, "server_port", true, 1, 65535);

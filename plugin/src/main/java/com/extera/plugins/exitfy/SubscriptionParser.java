@@ -1557,9 +1557,12 @@ final class SubscriptionParser {
                 || type.equals("shadowsocks") ? type : "";
     }
 
+    static final String UNREACHABLE_ONLY = "unreachable_placeholders";
+
     private static String reasonCode(Exception error) {
         String value = error == null || error.getMessage() == null ? ""
                 : error.getMessage().toLowerCase(Locale.US);
+        if (value.contains(ProtocolParser.UNREACHABLE_SERVER)) return UNREACHABLE_ONLY;
         if (value.contains("16 kib") || value.contains("uri exceeds")) return "uri_too_large";
         if (value.contains("cbor value exceeds") || value.contains("hitvpn link exceeds")) {
             return "hit_config_too_large";

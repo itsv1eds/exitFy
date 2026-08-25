@@ -1972,7 +1972,7 @@ public class ProtocolParserTest {
                 ProtocolParser.parse(uri);
                 throw new AssertionError("placeholder accepted: " + host);
             } catch (IllegalArgumentException expected) {
-                assertEquals("invalid neutral proxy server", expected.getMessage());
+                assertEquals(ProtocolParser.UNREACHABLE_SERVER, expected.getMessage());
             }
         }
 
