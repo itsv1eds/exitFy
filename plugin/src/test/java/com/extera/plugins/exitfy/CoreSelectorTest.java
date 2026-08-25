@@ -4,6 +4,7 @@ import org.json.JSONObject;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class CoreSelectorTest {
@@ -110,5 +111,47 @@ public class CoreSelectorTest {
         } catch (Exception error) {
             throw new AssertionError(error);
         }
+    }
+
+    @Test
+    public void aDualServerMapsTheFamilyThatUnlocksMoreOfItsProvider() throws Exception {
+        // Only one family maps per process. A provider whose other servers are
+        // XHTTP is unusable if a dual-compatible server maps sing-box, and the
+        // user has no way to see why.
+        ProtocolParser.Node shared = ProtocolParser.parse(
+                "vless://33333333-3333-3333-3333-333333333333@edge.example:443"
+                        + "?security=tls&sni=edge.example&type=grpc&serviceName=s#Shared");
+        assertTrue(shared.supports(CoreFamily.XRAY));
+        assertTrue(shared.supports(CoreFamily.SING_BOX));
+
+        CoreSelector.Coverage xrayHeavy = new CoreSelector.Coverage(4, 0);
+        CoreSelector.Coverage singBoxHeavy = new CoreSelector.Coverage(0, 3);
+        assertEquals(CoreFamily.XRAY,
+                CoreSelector.select(shared, null, true, true, xrayHeavy));
+        assertEquals(CoreFamily.SING_BOX,
+                CoreSelector.select(shared, null, true, true, singBoxHeavy));
+        assertEquals(CoreFamily.SING_BOX,
+                CoreSelector.select(shared, null, true, true, CoreSelector.Coverage.EMPTY));
+        // Readiness still outranks coverage: choosing an absent core would
+        // stall the connection on a download.
+        assertEquals(CoreFamily.SING_BOX,
+                CoreSelector.select(shared, null, true, false, xrayHeavy));
+    }
+
+    @Test
+    public void coverageCountsOnlyServersASingleFamilyCanRun() throws Exception {
+        ProtocolParser.Node xrayOnly = ProtocolParser.parse(
+                "vless://33333333-3333-3333-3333-333333333333@edge.example:443"
+                        + "?security=tls&sni=edge.example&type=xhttp&path=%2Fx#Xhttp");
+        ProtocolParser.Node singBoxOnly = ProtocolParser.parse(
+                "hysteria2://password@hy2.example:443?sni=edge.example#Hy");
+        ProtocolParser.Node shared = ProtocolParser.parse(
+                "vless://33333333-3333-3333-3333-333333333333@edge.example:443"
+                        + "?security=tls&sni=edge.example&type=grpc&serviceName=s#Shared");
+        CoreSelector.Coverage coverage = CoreSelector.coverage(
+                java.util.Arrays.asList(xrayOnly, singBoxOnly, shared, null));
+        assertEquals(1, coverage.xrayOnly);
+        assertEquals(1, coverage.singBoxOnly);
+        assertEquals(0, CoreSelector.coverage(null).xrayOnly);
     }
 }

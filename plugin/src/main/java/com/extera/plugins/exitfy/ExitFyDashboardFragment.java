@@ -1,6 +1,8 @@
 package com.extera.plugins.exitfy;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.PorterDuff;
@@ -87,6 +89,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
     private TextView pingButton;
     private View advancedCard;
     private View providerPageCard;
+    private View restartCard;
 
     @Override
     public boolean onFragmentCreate() {
@@ -124,6 +127,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
         holder.addView(content, contentParams);
 
         content.addView(createConnectionCard(context), sectionParams());
+        content.addView(createRestartCard(context), sectionParams());
         content.addView(createActiveServerCard(context), sectionParams());
         content.addView(createSourceCard(context), sectionParams());
         content.addView(createProviderPageCard(context), sectionParams());
@@ -262,6 +266,70 @@ final class ExitFyDashboardFragment extends BaseFragment {
         connectButton.setOnClickListener(view -> onPrimaryActionClicked());
         card.addView(connectButton, topMargin(15));
         return card;
+    }
+
+    /**
+     * Only one connection component may be mapped per app process, so a server
+     * needing the other one cannot start until exteraGram restarts. The state
+     * was already reported; without an action the user had to work out on
+     * their own that the app needed restarting.
+     */
+    private View createRestartCard(Context context) {
+        LinearLayout card = card(context, true);
+        restartCard = card;
+        card.setVisibility(View.GONE);
+        card.setOnClickListener(view -> confirmRestart());
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        String label = I18n.t("Перезапустить exteraGram", "Restart exteraGram");
+        String summary = I18n.t(
+                "Этому серверу нужен другой компонент подключения",
+                "This server needs a different connection component");
+        card.addView(iconBadge(context, R.drawable.msg_reset, label, 48),
+                fixed(dp(48), dp(48)));
+        LinearLayout labels = new LinearLayout(context);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        TextView title = text(context, 17, Theme.key_windowBackgroundWhiteBlackText, true);
+        title.setText(label);
+        labels.addView(title, matchWrap());
+        TextView hint = text(context, 13, Theme.key_windowBackgroundWhiteGrayText, false);
+        hint.setText(summary);
+        hint.setMaxLines(3);
+        labels.addView(hint, topMargin(2));
+        LinearLayout.LayoutParams labelsParams = weighted();
+        labelsParams.leftMargin = dp(13);
+        card.addView(labels, labelsParams);
+        card.setContentDescription(label + ". " + summary);
+        return card;
+    }
+
+    private void confirmRestart() {
+        Activity activity = getParentActivity();
+        if (activity == null) return;
+        AlertDialog.Builder builder = new AlertDialog.Builder(activity);
+        builder.setTitle(I18n.t("Перезапустить exteraGram?", "Restart exteraGram?"));
+        builder.setMessage(I18n.t(
+                "Приложение закроется и откроется снова. Переписки не затрагиваются.",
+                "The app closes and opens again. Your chats are not affected."));
+        builder.setPositiveButton(I18n.t("Перезапустить", "Restart"),
+                (dialog, which) -> restartApplication());
+        builder.setNegativeButton(I18n.t("Отмена", "Cancel"), null);
+        showDialog(builder.create());
+    }
+
+    private void restartApplication() {
+        Activity activity = getParentActivity();
+        if (activity == null) return;
+        try {
+            Intent intent = activity.getPackageManager()
+                    .getLaunchIntentForPackage(activity.getPackageName());
+            if (intent == null) return;
+            activity.finishAffinity();
+            activity.startActivity(intent);
+        } catch (Exception ignored) {
+            return;
+        }
+        System.exit(0);
     }
 
     private View createSourceCard(Context context) {
@@ -447,6 +515,9 @@ final class ExitFyDashboardFragment extends BaseFragment {
         String hint = showConnectionIssue ? "" : state.nextStepHint();
         connectionHintView.setText(hint);
         connectionHintView.setVisibility(hint.isEmpty() ? View.GONE : View.VISIBLE);
+        if (restartCard != null) {
+            restartCard.setVisibility(state.restartRequired ? View.VISIBLE : View.GONE);
+        }
         connectButton.setText(state.primaryAction().label());
         boolean commandIdle = state.runtimeAvailable
                 && !commandRunning.get()

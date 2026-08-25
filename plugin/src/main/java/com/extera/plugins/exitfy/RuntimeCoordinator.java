@@ -1094,11 +1094,20 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         }
     }
 
+    private CoreSelector.Coverage providerCoverage() {
+        try {
+            return CoreSelector.coverage(subscriptions.nodes(settings.providerId));
+        } catch (Exception ignored) {
+            return CoreSelector.Coverage.EMPTY;
+        }
+    }
+
     private CoreFamily resolveCore(ProtocolParser.Node node) {
         try {
             return CoreSelector.select(node, nativeCore.loadedFamily(),
                     isCoreUsable(CoreFamily.SING_BOX),
-                    isCoreUsable(CoreFamily.XRAY));
+                    isCoreUsable(CoreFamily.XRAY),
+                    providerCoverage());
         } catch (IllegalArgumentException incompatible) {
             coreSelectionBlocked = true;
             throw incompatible;
@@ -2510,7 +2519,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             CoreFamily selectedFamily = CoreSelector.select(selected,
                     nativeCore.loadedFamily(),
                     isCoreUsable(CoreFamily.SING_BOX),
-                    isCoreUsable(CoreFamily.XRAY));
+                    isCoreUsable(CoreFamily.XRAY),
+                    providerCoverage());
             if (RuntimePolicy.shouldReconnectAfterCoreInstall(
                     loaded, settings.enabled, nativeCore.loadedFamily(),
                     selectedFamily, family)) {
@@ -2822,7 +2832,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             }
             return CoreSelector.select(selected, nativeCore.loadedFamily(),
                     isCoreUsable(CoreFamily.SING_BOX),
-                    isCoreUsable(CoreFamily.XRAY)) == request.family;
+                    isCoreUsable(CoreFamily.XRAY),
+                    providerCoverage()) == request.family;
         } catch (Exception ignored) {
             return false;
         }
