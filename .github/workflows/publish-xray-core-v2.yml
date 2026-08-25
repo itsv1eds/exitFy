@@ -536,12 +536,14 @@ jobs:
             --upstream-tag "$UPSTREAM_TAG" --upstream-commit "$UPSTREAM_COMMIT" \
             --go-version "$GO_VERSION" --release-tag "$RELEASE_TAG" \
             --snapshot-sha256 "$SNAPSHOT_SHA" --allow-final-manifest
-          if [[ -n "${CORE_SIGNING_KEY:-}" ]]; then
-            printf '%s' "$CORE_SIGNING_KEY" \
-              | ./scripts/sign_manifest.py \
-                --manifest "$candidate/manifest.json" \
-                --output "$candidate/manifest.json.sig"
+          if [[ -z "${CORE_SIGNING_KEY:-}" ]]; then
+            echo "CORE_SIGNING_KEY is not set; clients refuse unsigned manifests" >&2
+            exit 1
           fi
+          printf '%s' "$CORE_SIGNING_KEY" \
+            | ./scripts/sign_manifest.py \
+              --manifest "$candidate/manifest.json" \
+              --output "$candidate/manifest.json.sig"
           ./scripts/audit_public_tree.py --repo-root "$GITHUB_WORKSPACE" \
             --path-prefix cores --path-prefix .github
 
@@ -641,17 +643,14 @@ jobs:
                   "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
               done < <(jq -r '.assetIds[]' "$RUNNER_TEMP/draft-plan.json")
             fi
-            signature_expectation=()
-            if [[ -f "$candidate/manifest.json.sig" ]]; then
-              signature_expectation+=(--expected-asset manifest.json.sig)
-            fi
-            signature_asset=()
-            if [[ -f "$candidate/manifest.json.sig" ]]; then
-              signature_asset+=("$candidate/manifest.json.sig")
+            if [[ ! -f "$candidate/manifest.json.sig" ]]; then
+              echo "signature is missing from the verified candidate" >&2
+              exit 1
             fi
             gh release upload "$RELEASE_TAG" \
               "$candidate/libxray-arm64-v8a.so" \
-              "$candidate/manifest.json" ${signature_asset[@]+"${signature_asset[@]}"} --clobber
+              "$candidate/manifest.json" \
+              "$candidate/manifest.json.sig" --clobber
             draft_ready=false
             for attempt in 1 2 3 4 5 6; do
               ./scripts/fetch_github_release_pages.sh "$GITHUB_REPOSITORY" \
@@ -661,7 +660,7 @@ jobs:
                   --tag "$RELEASE_TAG" --commit "$wrapper_commit" \
                   --expected-asset libxray-arm64-v8a.so \
                   --expected-asset manifest.json \
-                  ${signature_expectation[@]+"${signature_expectation[@]}"} \
+                  --expected-asset manifest.json.sig \
                   > "$RUNNER_TEMP/draft.pending.json"; then
                 mv "$RUNNER_TEMP/draft.pending.json" "$RUNNER_TEMP/draft.json"
                 draft_ready=true
@@ -683,7 +682,7 @@ jobs:
               exit 1
             fi
             draft_id="$(jq -r '.id' "$RUNNER_TEMP/draft.json")"
-            expected="libxray-arm64-v8a.so,manifest.json"
+            expected="libxray-arm64-v8a.so,manifest.json,manifest.json.sig"
             actual="$(jq -r '[.assets[].name] | sort | join(",")' "$RUNNER_TEMP/draft.json")"
             if [[ "$actual" != "$expected" ]]; then
               echo "draft asset set is incomplete or unexpected" >&2

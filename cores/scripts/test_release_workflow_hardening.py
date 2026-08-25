@@ -196,7 +196,7 @@ class ReleaseWorkflowHardeningTest(unittest.TestCase):
                 )
 
     def test_new_draft_visibility_retry_is_bounded_and_fail_closed(self) -> None:
-        expected_counts = {"xray": 2, "sing_box": 3}
+        expected_counts = {"xray": 3, "sing_box": 4}
         for family, path in WORKFLOWS.items():
             with self.subTest(family=family):
                 workflow = path.read_text(encoding="utf-8")

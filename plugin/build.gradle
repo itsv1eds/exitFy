@@ -1690,8 +1690,36 @@ tasks.register("lintPluginTemplate") {
     }
 }
 
+tasks.register("verifyManifestSigningKey") {
+    group = "verification"
+    description = "Keeps the embedded manifest key equal to the key the release pipeline signs with"
+    def updaterFile = file("src/main/java/com/extera/plugins/exitfy/CoreUpdater.java")
+    def publicKeyFile = rootProject.file("../cores/scripts/core_signing_key.pub")
+    inputs.files(updaterFile, publicKeyFile)
+    outputs.upToDateWhen { false }
+    doLast {
+        if (!publicKeyFile.isFile()) {
+            throw new GradleException("Release signing key is missing: ${publicKeyFile}")
+        }
+        def matcher = updaterFile.text =~ /(?s)MANIFEST_PUBLIC_KEY\s*=\s*(.*?);/
+        if (!matcher.find()) throw new GradleException("MANIFEST_PUBLIC_KEY declaration not found")
+        // The constant is a concatenation of literals, and '+' is both the
+        // Java operator and a base64 character, so only quoted spans count.
+        def embedded = (matcher.group(1) =~ /"([^"]*)"/).collect { it[1] }.join("")
+        def published = publicKeyFile.text
+                .replaceAll(/-----[^-]*-----/, "")
+                .replaceAll(/\s+/, "")
+        if (embedded != published) {
+            throw new GradleException(
+                    "Embedded manifest key differs from cores/scripts/core_signing_key.pub; "
+                            + "signed releases would be refused on every device")
+        }
+    }
+}
+
 tasks.matching { it.name == "lintPlugin" }.configureEach {
     dependsOn tasks.named("lintPluginTemplate")
+    dependsOn tasks.named("verifyManifestSigningKey")
 }
 
 tasks.register("pythonTemplateTests") {

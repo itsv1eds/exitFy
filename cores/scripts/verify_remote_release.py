@@ -20,6 +20,7 @@ TOP_LEVEL = {
 SB_TAGS = ["badlinkname", "tfogo_checklinkname0", "with_quic", "with_utls"]
 NDK_VERSION = "27.2.12479018"
 MAX_MANIFEST_BYTES = 1024 * 1024
+MAX_SIGNATURE_BYTES = 1024
 DIGEST = re.compile(r"sha256:([0-9a-f]{64})")
 COMMIT = re.compile(r"[0-9a-f]{40}")
 VERSION = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
@@ -152,10 +153,21 @@ def verify_remote_release(
     ):
         raise ValueError("remote manifest size/digest mismatch")
 
+    # The manifest cannot carry the digest of its own signature, so the
+    # signature is checked by presence and size here; the plugin verifies it
+    # against the pinned public key.
+    signature_asset = remote_assets.get("manifest.json.sig")
+    if (
+        signature_asset is None
+        or type(signature_asset.get("size")) is not int
+        or not 0 < signature_asset["size"] <= MAX_SIGNATURE_BYTES
+    ):
+        raise ValueError("release is missing a usable manifest signature")
+
     entries = manifest.get("assets")
     if not isinstance(entries, dict) or set(entries) != set(ABIS):
         raise ValueError("manifest ABI set is incomplete")
-    expected_names = {"manifest.json"}
+    expected_names = {"manifest.json", "manifest.json.sig"}
     for abi, (elf_class, machine, machine_name) in ABIS.items():
         name = f"libxray-{abi}.so" if family == "xray" else f"libexitfy-sb-{abi}.so"
         expected_names.add(name)

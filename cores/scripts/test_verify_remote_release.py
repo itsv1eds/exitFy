@@ -86,6 +86,12 @@ def fixture(family: str) -> tuple[dict, dict, bytes]:
         "size": len(manifest_bytes),
         "digest": "sha256:" + hashlib.sha256(manifest_bytes).hexdigest(),
     })
+    release_assets.append({
+        "id": 21,
+        "name": "manifest.json.sig",
+        "size": 71,
+        "digest": "sha256:" + "1" * 64,
+    })
     release = {
         "tag_name": release_tag,
         "target_commitish": WRAPPER,
@@ -96,7 +102,27 @@ def fixture(family: str) -> tuple[dict, dict, bytes]:
     return release, manifest, manifest_bytes
 
 
+def asset(release, name):
+    return next(item for item in release["assets"] if item["name"] == name)
+
+
 class RemoteReleaseTest(unittest.TestCase):
+    def test_release_without_a_signature_is_not_current(self) -> None:
+        # Clients refuse an unsigned manifest, so a release that lacks the
+        # signature must not count as already published.
+        release, manifest, raw = fixture("xray")
+        release["assets"] = [
+            item for item in release["assets"] if item["name"] != "manifest.json.sig"
+        ]
+        with self.assertRaisesRegex(ValueError, "manifest signature"):
+            verify_remote_release(release, manifest, raw, "xray", UPSTREAM, WRAPPER)
+
+    def test_oversized_signature_is_rejected(self) -> None:
+        release, manifest, raw = fixture("xray")
+        asset(release, "manifest.json.sig")["size"] = 4096
+        with self.assertRaisesRegex(ValueError, "manifest signature"):
+            verify_remote_release(release, manifest, raw, "xray", UPSTREAM, WRAPPER)
+
     def test_accepts_exact_xray_and_singbox_contracts(self) -> None:
         for family in ("xray", "sing_box"):
             with self.subTest(family=family):
@@ -117,7 +143,7 @@ class RemoteReleaseTest(unittest.TestCase):
 
     def test_tampered_manifest_asset_forces_new_revision(self) -> None:
         release, manifest, raw = fixture("xray")
-        release["assets"][-1]["digest"] = "sha256:" + "8" * 64
+        asset(release, "manifest.json")["digest"] = "sha256:" + "8" * 64
         with self.assertRaisesRegex(ValueError, "remote manifest"):
             verify_remote_release(release, manifest, raw, "xray", UPSTREAM, WRAPPER)
 

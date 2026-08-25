@@ -68,7 +68,7 @@ def verify_published_candidate(
         go_version=go_version,
         release_tag=release_tag,
         snapshot_sha256=snapshot_sha256,
-        allowed_extra_files=frozenset({"manifest.json"}),
+        allowed_extra_files=frozenset({"manifest.json", "manifest.json.sig"}),
     )
     if re.fullmatch(r"[0-9a-f]{40}", wrapper_commit) is None:
         raise ValueError("published wrapper commit is invalid")
@@ -127,9 +127,24 @@ def verify_published_candidate(
         artifact_names, _, _ = candidate_handoff._family_contract(
             family, upstream_tag
         )
-        expected_release_names = set(artifact_names) | {"manifest.json"}
+        expected_release_names = (
+            set(artifact_names) | {"manifest.json", "manifest.json.sig"}
+        )
         if set(remote_assets) != expected_release_names:
             raise ValueError("published release asset set differs from the candidate")
+        local_signature, local_signature_digest = candidate_handoff._read_regular(
+            root,
+            "manifest.json.sig",
+            verify_remote_release.MAX_SIGNATURE_BYTES,
+            "local manifest signature",
+        )
+        remote_signature_asset = remote_assets["manifest.json.sig"]
+        if (
+            remote_signature_asset.get("size") != len(local_signature)
+            or remote_signature_asset.get("digest")
+            != f"sha256:{local_signature_digest}"
+        ):
+            raise ValueError("published signature differs from the local candidate")
         for name in sorted(artifact_names):
             size, digest = candidate_handoff._digest_regular(
                 root,

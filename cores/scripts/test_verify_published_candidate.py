@@ -151,6 +151,16 @@ class PublishedCandidateTest(unittest.TestCase):
                 "digest": f"sha256:{hashlib.sha256(manifest_raw).hexdigest()}",
             }
         )
+        signature_raw = b"0E\x02!\x00" + b"\x11" * 32 + b"\x02 " + b"\x22" * 32
+        (candidate / "manifest.json.sig").write_bytes(signature_raw)
+        release_assets.append(
+            {
+                "id": 21,
+                "name": "manifest.json.sig",
+                "size": len(signature_raw),
+                "digest": f"sha256:{hashlib.sha256(signature_raw).hexdigest()}",
+            }
+        )
         release = {
             "id": 30,
             "tag_name": RELEASE_TAG,

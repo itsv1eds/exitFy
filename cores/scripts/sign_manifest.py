@@ -31,6 +31,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=pathlib.Path, required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
+    parser.add_argument(
+        "--verify-with",
+        type=pathlib.Path,
+        default=pathlib.Path(__file__).resolve().parent / "core_signing_key.pub",
+        help="public key the produced signature must verify against",
+    )
     arguments = parser.parse_args()
 
     manifest = arguments.manifest
@@ -63,7 +69,22 @@ def main() -> None:
     signature = arguments.output
     if not signature.is_file() or not 0 < signature.stat().st_size <= MAX_SIGNATURE_BYTES:
         fail("produced signature size is out of range")
-    print(f"signed {manifest.name} -> {signature.name}")
+
+    # Signing with the wrong key produces a perfectly well-formed signature
+    # that every client rejects. Verifying here against the key the plugin
+    # ships turns that into a build failure instead of a broken release.
+    public_key = arguments.verify_with
+    if not public_key.is_file() or public_key.is_symlink():
+        fail("public key for verification is not a regular file")
+    verification = subprocess.run(
+        ["openssl", "dgst", "-sha256", "-verify", str(public_key),
+         "-signature", str(signature), str(manifest)],
+        check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    if verification.returncode != 0:
+        fail("signature does not verify against " + public_key.name
+             + "; CORE_SIGNING_KEY does not match the key clients trust")
+    print(f"signed {manifest.name} -> {signature.name} (verified)")
 
 
 if __name__ == "__main__":
