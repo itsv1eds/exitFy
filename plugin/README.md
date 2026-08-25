@@ -1,4 +1,4 @@
-# exitFy 4.0.0-beta.28
+# exitFy 4.0.0-beta.29
 
 `ExitFy.template.plugin` is the thin Python loader and lifecycle layer. Drawer
 and chat-action entries open a compact Telegram-native dashboard implemented as
@@ -69,10 +69,18 @@ family selects that family; a dual-compatible server selects the sole ready
 family, or sing-box when readiness is equal. Ready means a compatible
 active/pending release or an available requested rollback. Xray is therefore
 selected automatically for configurations such as XHTTP and mKCP which cannot
-be represented by sing-box. Only one Go core family may be mapped in a process.
-An incompatible mapped family keeps the existing restart-required fail-closed
-state; opening or starting one family never falls back to the other in the same
-process.
+be represented by sing-box. Only one Go core family may be mapped in a process. An incompatible mapped
+family keeps the existing restart-required fail-closed state; opening or
+starting one family never falls back to the other in the same process.
+
+The `dual_core` setting, off by default and offered as an experiment under
+Advanced, lifts that restriction: the JNI bridge holds one slot per family and
+maps the second on demand, so a server the mapped family cannot run no longer
+waits for a restart. Only one core ever runs — the running one is stopped
+before the other starts — and `g_lock` still serializes every StartCore and
+StopCore across both slots. The cost is that two Go runtimes then share the
+process, each with its own signal handlers, and neither can be unmapped, so
+turning the setting back off only takes effect in the next process.
 
 Java digests and inspects loader-visible ELF tables through one pinned
 `O_NOFOLLOW` descriptor. JNI maps a duplicate of that descriptor with

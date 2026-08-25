@@ -25,6 +25,8 @@ final class ExitFyDashboardState {
     // Retained as the existing restart handoff; this release adds no restart UI.
     final boolean restartRequired;
     final String pingType;
+    final boolean dualCore;
+    final boolean dualCoreActive;
     final boolean customHwidSet;
     final String defaultHwid;
     final String connectionIssue;
@@ -57,6 +59,8 @@ final class ExitFyDashboardState {
                 value.optString("pingType", SettingsModel.PING_PROXY_GET),
                 SettingsModel.PING_PROXY_GET))
                 ? SettingsModel.PING_TCP : SettingsModel.PING_PROXY_GET;
+        dualCore = value.optBoolean("dualCore", false);
+        dualCoreActive = value.optBoolean("dualCoreActive", false);
         customHwidSet = value.optBoolean("customHwidSet", false);
         defaultHwid = safeLabel(value.optString("defaultHwid", ""), 32, "");
         connectionIssue = safeLabel(value.optString("connectionIssue", ""), 180, "");

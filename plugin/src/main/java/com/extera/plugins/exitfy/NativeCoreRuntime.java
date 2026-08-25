@@ -50,6 +50,14 @@ final class NativeCoreRuntime implements Closeable {
 
     private static volatile boolean processNativeOpened;
     private static volatile CoreFamily processLoadedFamily;
+    private static volatile java.util.List<CoreFamily> processLoadedFamilies =
+            java.util.Collections.emptyList();
+    /**
+     * Opt-in experiment. A Go library is never unloaded and each Go runtime
+     * installs its own signal handlers, so mapping the second family is a
+     * process-wide, irreversible decision that stays off unless asked for.
+     */
+    private static volatile boolean processDualCore;
     private static volatile int processLoadedCoreApi;
     private static volatile boolean processQuarantined;
     private static final Object PROCESS_CLEANUP_MONITOR = new Object();
@@ -90,8 +98,11 @@ final class NativeCoreRuntime implements Closeable {
             String loaded = this.nativeCalls.loadedIdentity();
             if (loaded != null && !loaded.isEmpty()) {
                 processNativeOpened = true;
-                processLoadedFamily = CoreFamily.parse(loaded);
-                processLoadedCoreApi = this.nativeCalls.loadedCoreApi();
+                java.util.List<CoreFamily> families = CoreFamily.parseAll(loaded);
+                if (families.isEmpty()) families.add(CoreFamily.parse(loaded));
+                processLoadedFamilies = java.util.Collections.unmodifiableList(families);
+                processLoadedFamily = families.size() == 1 ? families.get(0) : null;
+                processLoadedCoreApi = this.nativeCalls.loadedCoreApi(families.get(0));
                 if (processLoadedCoreApi != 1 && processLoadedCoreApi != 2) {
                     processQuarantined = true;
                 }
@@ -137,15 +148,23 @@ final class NativeCoreRuntime implements Closeable {
                         "The previous connection is still stopping; try again"));
             }
             if (running) {
-                return runningFamily == family ? StartResult.ok()
-                        : restartRequired();
+                if (runningFamily == family) return StartResult.ok();
+                // Both cores may be mapped, but only one ever runs: the other
+                // must be stopped before this one takes over the connection.
+                if (!processDualCore || !stopWithin(
+                        nativeCallBudget(deadline, STOP_TIMEOUT_SECONDS))) {
+                    return restartRequired();
+                }
             }
-            if (processNativeOpened
-                    && CoreProcessState.requiresRestart(processLoadedFamily, family)) {
+            if (processNativeOpened && !isFamilyLoaded(family)
+                    && !(processDualCore && processLoadedFamilies.size() < 2)) {
                 return restartRequired();
             }
 
-            if (!processNativeOpened) {
+            // The mapping is per family: with the experiment on, the second
+            // family still has to be opened even though the process already
+            // mapped the first one.
+            if (!isFamilyLoaded(family)) {
                 CoreUpdater.PinnedLoadTarget loadTarget = updater.preparePinnedLoadTarget();
                 if (loadTarget == null || !loadTarget.file.isFile()) {
                     closeQuietly(loadTarget);
@@ -189,8 +208,13 @@ final class NativeCoreRuntime implements Closeable {
                     String openedIdentity = nativeCalls.loadedIdentity();
                     if (openedIdentity != null && !openedIdentity.isEmpty()) {
                         processNativeOpened = true;
-                        processLoadedFamily = CoreFamily.parse(openedIdentity);
-                        processLoadedCoreApi = nativeCalls.loadedCoreApi();
+                        java.util.List<CoreFamily> opened =
+                                CoreFamily.parseAll(openedIdentity);
+                        if (opened.isEmpty()) opened.add(CoreFamily.parse(openedIdentity));
+                        processLoadedFamilies =
+                                java.util.Collections.unmodifiableList(opened);
+                        processLoadedFamily = opened.size() == 1 ? opened.get(0) : null;
+                        processLoadedCoreApi = nativeCalls.loadedCoreApi(opened.get(0));
                     }
                     // A loader failure schedules rollback for the next process.
                     // Do not retry the same mapped or broken binary in this one.
@@ -199,16 +223,16 @@ final class NativeCoreRuntime implements Closeable {
                     return StartResult.error(openError);
                 }
                 processNativeOpened = true;
-                processLoadedFamily = family;
+                rememberLoadedFamily(family);
                 processLoadedCoreApi = coreApi;
                 nativeOpenPhase = false;
 
                 if (updater.isCandidate()) {
                     String selfTestError = runNativeMillis(
-                            () -> nativeCalls.start(selfTestConfig(family).toString()),
+                            () -> nativeCalls.start(family, selfTestConfig(family).toString()),
                             nativeCallBudget(deadline, START_TIMEOUT_SECONDS));
                     if (selfTestError != null && !selfTestError.isEmpty()) {
-                        String stopError = stopAfterFailedStart(deadline);
+                        String stopError = stopAfterFailedStart(family, deadline);
                         updater.markLoaderFailure();
                         processQuarantined = true;
                         if (stopError != null && !stopError.isEmpty()) {
@@ -219,7 +243,7 @@ final class NativeCoreRuntime implements Closeable {
                                 ? "" : "; StopCore: " + stopError));
                     }
                     String selfTestStopError = runNativeMillis(
-                            nativeCalls::stop,
+                            () -> nativeCalls.stop(family),
                             nativeCallBudget(deadline, STOP_TIMEOUT_SECONDS));
                     if (selfTestStopError != null && !selfTestStopError.isEmpty()) {
                         updater.markLoaderFailure();
@@ -236,12 +260,12 @@ final class NativeCoreRuntime implements Closeable {
                 return StartResult.error(I18n.t(
                         "Runtime завершает работу", "Runtime is shutting down"));
             }
-            String error = runNativeMillis(() -> nativeCalls.start(configJson),
+            String error = runNativeMillis(() -> nativeCalls.start(family, configJson),
                     nativeCallBudget(deadline, START_TIMEOUT_SECONDS));
             if (error != null && !error.isEmpty()) {
                 // The core has passed loader/self-test checks. A selected node
                 // error is not grounds for rolling back the core binary.
-                String stopError = stopAfterFailedStart(deadline);
+                String stopError = stopAfterFailedStart(family, deadline);
                 if (stopError != null && !stopError.isEmpty()) {
                     processQuarantined = true;
                     scheduleLateCleanup(family);
@@ -335,7 +359,8 @@ final class NativeCoreRuntime implements Closeable {
             return false;
         }
         try {
-            String stopError = runNativeMillis(nativeCalls::stop,
+            CoreFamily stopTarget = stoppingFamily;
+            String stopError = runNativeMillis(() -> nativeCalls.stop(stopTarget),
                     Math.min(timeoutMillis, TimeUnit.SECONDS.toMillis(STOP_TIMEOUT_SECONDS)));
             admissionHook.afterNativeStopReturned();
             if (stopError != null && !stopError.isEmpty()) {
@@ -376,6 +401,34 @@ final class NativeCoreRuntime implements Closeable {
     boolean checkForUpdate(CoreFamily family, boolean force,
                            CoreUpdater.UpdateObserver observer) throws Exception {
         return updater(family).checkForUpdate(force, observer);
+    }
+
+    private static boolean isFamilyLoaded(CoreFamily family) {
+        return processLoadedFamilies.contains(family);
+    }
+
+    private static void rememberLoadedFamily(CoreFamily family) {
+        java.util.List<CoreFamily> families =
+                new java.util.ArrayList<>(processLoadedFamilies);
+        if (!families.contains(family)) families.add(family);
+        processLoadedFamilies = java.util.Collections.unmodifiableList(families);
+        // With both mapped there is no single family to prefer; the selector
+        // then picks purely by what a server supports.
+        processLoadedFamily = families.size() == 1 ? families.get(0) : null;
+    }
+
+    /** Turns the second mapping on for this process; it can never be undone. */
+    static void setDualCoreEnabled(boolean enabled) {
+        if (enabled) processDualCore = true;
+    }
+
+    static boolean dualCoreEnabled() {
+        return processDualCore;
+    }
+
+    /** Whether the other family can still be mapped without a restart. */
+    static boolean canMapAnotherFamily() {
+        return processDualCore && processLoadedFamilies.size() < CoreFamily.values().length;
     }
 
     boolean hasUsableCore(CoreFamily family) {
@@ -505,9 +558,9 @@ final class NativeCoreRuntime implements Closeable {
         }
     }
 
-    private String stopAfterFailedStart(long deadline)
+    private String stopAfterFailedStart(CoreFamily family, long deadline)
             throws TimeoutException, ExecutionException, InterruptedException {
-        return runNativeMillis(nativeCalls::stop,
+        return runNativeMillis(() -> nativeCalls.stop(family),
                 nativeCallBudget(deadline, STOP_TIMEOUT_SECONDS));
     }
 
@@ -552,7 +605,8 @@ final class NativeCoreRuntime implements Closeable {
             return nativeExecutor.submit(() -> {
                 boolean complete = false;
                 try {
-                    String stopError = nativeCalls.stop();
+                    String stopError = nativeCalls.stop(
+                            CoreFamily.parse(familyId));
                     if (stopError == null || stopError.isEmpty()) {
                         running = false;
                         runningFamily = null;
@@ -770,18 +824,18 @@ final class NativeCoreRuntime implements Closeable {
             }
 
             @Override
-            public int loadedCoreApi() {
-                return NativeBridge.nativeLoadedCoreApi();
+            public int loadedCoreApi(CoreFamily family) {
+                return NativeBridge.nativeLoadedCoreApi(family.id);
             }
 
             @Override
-            public String start(String configJson) {
-                return NativeBridge.nativeStart(configJson);
+            public String start(CoreFamily family, String configJson) {
+                return NativeBridge.nativeStart(family.id, configJson);
             }
 
             @Override
-            public String stop() {
-                return NativeBridge.nativeStop();
+            public String stop(CoreFamily family) {
+                return NativeBridge.nativeStop(family.id);
             }
         };
 
@@ -790,11 +844,11 @@ final class NativeCoreRuntime implements Closeable {
 
         String loadedIdentity();
 
-        int loadedCoreApi();
+        int loadedCoreApi(CoreFamily family);
 
-        String start(String configJson);
+        String start(CoreFamily family, String configJson);
 
-        String stop();
+        String stop(CoreFamily family);
     }
 
     interface AdmissionHook {
@@ -810,6 +864,8 @@ final class NativeCoreRuntime implements Closeable {
     static void resetProcessStateForTests() {
         processNativeOpened = false;
         processLoadedFamily = null;
+        processLoadedFamilies = java.util.Collections.emptyList();
+        processDualCore = false;
         processLoadedCoreApi = 0;
         processQuarantined = false;
         synchronized (PROCESS_CLEANUP_MONITOR) {

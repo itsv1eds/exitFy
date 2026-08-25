@@ -37,14 +37,36 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
  * constructor.  Never acquire g_lock while holding g_metadata_lock.
  */
 static pthread_mutex_t g_metadata_lock = PTHREAD_MUTEX_INITIALIZER;
-static void *g_handle = NULL;
-static start_core_fn g_start = NULL;
-static stop_core_v1_fn g_stop_v1 = NULL;
-static stop_core_v2_fn g_stop_v2 = NULL;
-static int g_core_api = 0;
-static char *g_identity = NULL;
-static char *g_path = NULL;
-static char g_load_error[512] = {0};
+
+/*
+ * One slot per core family.  A Go library is never unloaded, so a slot is
+ * filled at most once per process.  g_lock still serializes every StartCore
+ * and StopCore across both slots: only one core ever runs at a time, and two
+ * Go runtimes are never entered concurrently.  Whether a second slot may be
+ * filled at all is decided in Java, which keeps the single-core default
+ * fail-closed.
+ */
+#define CORE_SLOT_COUNT 2
+
+struct core_slot {
+    void *handle;
+    start_core_fn start;
+    stop_core_v1_fn stop_v1;
+    stop_core_v2_fn stop_v2;
+    int core_api;
+    char *identity;
+    char *path;
+    char load_error[512];
+};
+
+static struct core_slot g_slots[CORE_SLOT_COUNT];
+
+static int slot_index(const char *identity) {
+    if (identity == NULL) return -1;
+    if (strcmp(identity, "sing_box") == 0) return 0;
+    if (strcmp(identity, "xray") == 0) return 1;
+    return -1;
+}
 
 #ifdef EXITFY_BUILD_FAKE_CORES
 static pthread_mutex_t g_test_metadata_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -351,19 +373,22 @@ Java_com_extera_plugins_exitfy_NativeBridge_nativeOpen(
         return result(env, "unsupported core API");
     }
 
+    int index = slot_index(identity);
     pthread_mutex_lock(&g_lock);
-    if (g_handle != NULL) {
+    struct core_slot *slot = &g_slots[index];
+    if (slot->handle != NULL) {
         char existing_error[512] = {0};
-        if (g_identity == NULL || g_path == NULL
-                || strcmp(g_identity, identity) != 0 || strcmp(g_path, path) != 0) {
+        if (slot->identity == NULL || slot->path == NULL
+                || strcmp(slot->identity, identity) != 0
+                || strcmp(slot->path, path) != 0) {
             snprintf(existing_error, sizeof(existing_error),
                      "core %s is already loaded from another path; restart exteraGram",
-                     g_identity == NULL ? "unknown" : g_identity);
-        } else if (g_core_api != core_api) {
+                     slot->identity == NULL ? "unknown" : slot->identity);
+        } else if (slot->core_api != core_api) {
             snprintf(existing_error, sizeof(existing_error),
                      "core API changed in process; restart exteraGram");
-        } else if (g_load_error[0] != '\0') {
-            snprintf(existing_error, sizeof(existing_error), "%s", g_load_error);
+        } else if (slot->load_error[0] != '\0') {
+            snprintf(existing_error, sizeof(existing_error), "%s", slot->load_error);
         }
         pthread_mutex_unlock(&g_lock);
         free(path);
@@ -374,11 +399,11 @@ Java_com_extera_plugins_exitfy_NativeBridge_nativeOpen(
     char error[512] = {0};
     void *handle = open_core(library_fd, path, error, sizeof(error));
     if (handle != NULL) {
-        g_handle = handle;
+        slot->handle = handle;
         char *retained_identity = strdup(identity);
         char *retained_path = strdup(path);
-        g_path = retained_path;
-        if (retained_identity == NULL || g_path == NULL) {
+        slot->path = retained_path;
+        if (retained_identity == NULL || slot->path == NULL) {
             snprintf(error, sizeof(error), "cannot retain loaded core identity");
         }
         dlerror();
@@ -393,18 +418,20 @@ Java_com_extera_plugins_exitfy_NativeBridge_nativeOpen(
                      (stop != NULL && stop_error == NULL) ? "ok" : "missing");
             /* A mapped Go library is deliberately never passed to dlclose. */
         } else if (error[0] == '\0') {
-            g_start = start;
-            if (core_api == 1) g_stop_v1 = (stop_core_v1_fn) stop;
-            else g_stop_v2 = (stop_core_v2_fn) stop;
+            slot->start = start;
+            if (core_api == 1) slot->stop_v1 = (stop_core_v1_fn) stop;
+            else slot->stop_v2 = (stop_core_v2_fn) stop;
         }
         test_pause_before_metadata_publish();
         /* Publish a valid identity/API pair, or identity/API=0 failure state,
          * in one metadata transaction after retention and export checks. */
         pthread_mutex_lock(&g_metadata_lock);
-        g_identity = retained_identity;
-        g_core_api = error[0] == '\0' ? core_api : 0;
+        slot->identity = retained_identity;
+        slot->core_api = error[0] == '\0' ? core_api : 0;
         pthread_mutex_unlock(&g_metadata_lock);
-        if (error[0] != '\0') snprintf(g_load_error, sizeof(g_load_error), "%s", error);
+        if (error[0] != '\0') {
+            snprintf(slot->load_error, sizeof(slot->load_error), "%s", error);
+        }
     }
     pthread_mutex_unlock(&g_lock);
     free(path);
@@ -412,31 +439,62 @@ Java_com_extera_plugins_exitfy_NativeBridge_nativeOpen(
     return result(env, error);
 }
 
+/*
+ * Every loaded identity, comma separated in slot order.  A process that
+ * mapped one family returns exactly what it returned before two slots
+ * existed, so the single-core path reads identically.
+ */
 JNIEXPORT jstring JNICALL
 Java_com_extera_plugins_exitfy_NativeBridge_nativeLoadedIdentity(
         JNIEnv *env, jclass clazz) {
     (void) clazz;
+    char joined[2 * (MAX_IDENTITY_BYTES + 1)] = {0};
+    size_t used = 0;
     pthread_mutex_lock(&g_metadata_lock);
-    jstring value = result(env, g_identity == NULL ? "" : g_identity);
+    for (int index = 0; index < CORE_SLOT_COUNT; index++) {
+        const char *identity = g_slots[index].identity;
+        if (identity == NULL || identity[0] == '\0') continue;
+        int written = snprintf(joined + used, sizeof(joined) - used,
+                               used == 0 ? "%s" : ",%s", identity);
+        if (written <= 0 || (size_t) written >= sizeof(joined) - used) break;
+        used += (size_t) written;
+    }
     pthread_mutex_unlock(&g_metadata_lock);
-    return value;
+    return result(env, joined);
 }
 
 JNIEXPORT jint JNICALL
 Java_com_extera_plugins_exitfy_NativeBridge_nativeLoadedCoreApi(
-        JNIEnv *env, jclass clazz) {
-    (void) env;
+        JNIEnv *env, jclass clazz, jstring identity_value) {
     (void) clazz;
+    char *identity = NULL;
+    if (jstring_to_utf8(env, identity_value, MAX_IDENTITY_BYTES, &identity)
+            != CONVERSION_OK) {
+        free(identity);
+        return 0;
+    }
+    int index = slot_index(identity);
+    free(identity);
+    if (index < 0) return 0;
     pthread_mutex_lock(&g_metadata_lock);
-    jint value = (jint) g_core_api;
+    jint value = (jint) g_slots[index].core_api;
     pthread_mutex_unlock(&g_metadata_lock);
     return value;
 }
 
 JNIEXPORT jstring JNICALL
 Java_com_extera_plugins_exitfy_NativeBridge_nativeStart(
-        JNIEnv *env, jclass clazz, jstring config_value) {
+        JNIEnv *env, jclass clazz, jstring identity_value, jstring config_value) {
     (void) clazz;
+    char *identity = NULL;
+    if (jstring_to_utf8(env, identity_value, MAX_IDENTITY_BYTES, &identity)
+            != CONVERSION_OK) {
+        free(identity);
+        return result(env, "core identity conversion failed");
+    }
+    int index = slot_index(identity);
+    free(identity);
+    if (index < 0) return result(env, "invalid core identity");
     char *config = NULL;
     int conversion = jstring_to_utf8(
             env, config_value, MAX_CONFIG_BYTES, &config);
@@ -446,12 +504,12 @@ Java_com_extera_plugins_exitfy_NativeBridge_nativeStart(
                 : "config conversion failed");
     }
     pthread_mutex_lock(&g_lock);
-    if (g_start == NULL) {
+    if (g_slots[index].start == NULL) {
         pthread_mutex_unlock(&g_lock);
         free(config);
         return result(env, "core is not loaded");
     }
-    char *raw = g_start(config);
+    char *raw = g_slots[index].start(config);
     jstring output = result(env, raw == NULL ? "" : raw);
     free(raw);
     pthread_mutex_unlock(&g_lock);
@@ -460,12 +518,23 @@ Java_com_extera_plugins_exitfy_NativeBridge_nativeStart(
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_extera_plugins_exitfy_NativeBridge_nativeStop(JNIEnv *env, jclass clazz) {
+Java_com_extera_plugins_exitfy_NativeBridge_nativeStop(
+        JNIEnv *env, jclass clazz, jstring identity_value) {
     (void) clazz;
+    char *identity = NULL;
+    if (jstring_to_utf8(env, identity_value, MAX_IDENTITY_BYTES, &identity)
+            != CONVERSION_OK) {
+        free(identity);
+        return result(env, "core identity conversion failed");
+    }
+    int index = slot_index(identity);
+    free(identity);
+    if (index < 0) return result(env, "invalid core identity");
     pthread_mutex_lock(&g_lock);
+    struct core_slot *slot = &g_slots[index];
     char *raw = NULL;
-    if (g_core_api == 1 && g_stop_v1 != NULL) g_stop_v1();
-    else if (g_core_api == 2 && g_stop_v2 != NULL) raw = g_stop_v2();
+    if (slot->core_api == 1 && slot->stop_v1 != NULL) slot->stop_v1();
+    else if (slot->core_api == 2 && slot->stop_v2 != NULL) raw = slot->stop_v2();
     jstring output = result(env, raw == NULL ? "" : raw);
     free(raw);
     pthread_mutex_unlock(&g_lock);
@@ -563,16 +632,19 @@ Java_com_extera_plugins_exitfy_NativeBridgeTestHooks_nativeResetBridgeForTests(
     (void) clazz;
     pthread_mutex_lock(&g_lock);
     pthread_mutex_lock(&g_metadata_lock);
-    free(g_identity);
-    free(g_path);
-    g_handle = NULL;
-    g_start = NULL;
-    g_stop_v1 = NULL;
-    g_stop_v2 = NULL;
-    g_core_api = 0;
-    g_identity = NULL;
-    g_path = NULL;
-    g_load_error[0] = '\0';
+    for (int index = 0; index < CORE_SLOT_COUNT; index++) {
+        struct core_slot *slot = &g_slots[index];
+        free(slot->identity);
+        free(slot->path);
+        slot->handle = NULL;
+        slot->start = NULL;
+        slot->stop_v1 = NULL;
+        slot->stop_v2 = NULL;
+        slot->core_api = 0;
+        slot->identity = NULL;
+        slot->path = NULL;
+        slot->load_error[0] = '\0';
+    }
     pthread_mutex_unlock(&g_metadata_lock);
     pthread_mutex_unlock(&g_lock);
 }

@@ -51,16 +51,16 @@ public class NativeBridgeInstrumentedTest {
                 apiOne.getAbsolutePath()));
         assertEquals("", openCore(apiOne, "sing_box", 1));
         assertEquals("sing_box", NativeBridge.nativeLoadedIdentity());
-        assertEquals(1, NativeBridge.nativeLoadedCoreApi());
-        assertEquals("", NativeBridge.nativeStart("{}"));
-        assertEquals("", NativeBridge.nativeStop());
-        assertEquals("", NativeBridge.nativeStop());
+        assertEquals(1, NativeBridge.nativeLoadedCoreApi("sing_box"));
+        assertEquals("", NativeBridge.nativeStart("sing_box", "{}"));
+        assertEquals("", NativeBridge.nativeStop("sing_box"));
+        assertEquals("", NativeBridge.nativeStop("sing_box"));
         // Fake C cores can be retained safely while the debug bridge resets
         // only its pointers, giving the ABI 2 checks a deterministic order in
         // the same instrumentation process. Production has no reset export.
         NativeBridgeTestHooks.nativeResetBridgeForTests();
         assertEquals("", NativeBridge.nativeLoadedIdentity());
-        assertEquals(0, NativeBridge.nativeLoadedCoreApi());
+        assertEquals(0, NativeBridge.nativeLoadedCoreApi("sing_box"));
         ExecutorService workers = Executors.newFixedThreadPool(2);
         try {
             NativeBridgeTestHooks.nativeSetMetadataPause(true);
@@ -75,32 +75,32 @@ public class NativeBridgeInstrumentedTest {
                 assertTrue("nativeOpen never reached metadata publication",
                         NativeBridgeTestHooks.nativeMetadataPauseEntered());
                 assertEquals("", NativeBridge.nativeLoadedIdentity());
-                assertEquals(0, NativeBridge.nativeLoadedCoreApi());
+                assertEquals(0, NativeBridge.nativeLoadedCoreApi("sing_box"));
             } finally {
                 NativeBridgeTestHooks.nativeSetMetadataPause(false);
             }
             assertEquals("", open.get(2, TimeUnit.SECONDS));
             assertEquals("sing_box", NativeBridge.nativeLoadedIdentity());
-            assertEquals(2, NativeBridge.nativeLoadedCoreApi());
+            assertEquals(2, NativeBridge.nativeLoadedCoreApi("sing_box"));
             assertEquals("", openCore(fake, "sing_box", 2));
             assertFalse(openCore(fake, "sing_box", 1).isEmpty());
             assertFalse(openCore(alternate, "sing_box", 2).isEmpty());
             assertFalse(openCore(alternate, "xray", 2).isEmpty());
 
-            assertEquals("", NativeBridge.nativeStart(repeatAscii(16 * 1024 * 1024)));
-            assertTrue(NativeBridge.nativeStart(repeatAscii(16 * 1024 * 1024 + 1))
+            assertEquals("", NativeBridge.nativeStart("sing_box", repeatAscii(16 * 1024 * 1024)));
+            assertTrue(NativeBridge.nativeStart("sing_box", repeatAscii(16 * 1024 * 1024 + 1))
                     .contains("16777216"));
-            assertTrue(NativeBridge.nativeStart("{}\u0000{\"hidden\":true}")
+            assertTrue(NativeBridge.nativeStart("sing_box", "{}\u0000{\"hidden\":true}")
                     .contains("conversion failed"));
             StringBuilder chunkBoundary = new StringBuilder(1100);
             while (chunkBoundary.length() < 1023) chunkBoundary.append('a');
             chunkBoundary.appendCodePoint(0x1f642).append(" unicode_input");
-            assertEquals("UTF-8 input ok", NativeBridge.nativeStart(
+            assertEquals("UTF-8 input ok", NativeBridge.nativeStart("sing_box", 
                     chunkBoundary.toString()));
-            assertEquals("replacement input ok", NativeBridge.nativeStart(
+            assertEquals("replacement input ok", NativeBridge.nativeStart("sing_box", 
                     "\ud83d replacement_input"));
 
-            Future<String> start = workers.submit(() -> NativeBridge.nativeStart("{\"slow\":true}"));
+            Future<String> start = workers.submit(() -> NativeBridge.nativeStart("sing_box", "{\"slow\":true}"));
             Thread.sleep(50);
             long identityBegan = System.nanoTime();
             assertEquals("sing_box", NativeBridge.nativeLoadedIdentity());
@@ -109,29 +109,29 @@ public class NativeBridgeInstrumentedTest {
             assertTrue("loader identity blocked behind StartCore", identityWaitedMs < 200L);
             long began = System.nanoTime();
             Future<?> stop = workers.submit(() -> {
-                assertEquals("", NativeBridge.nativeStop());
+                assertEquals("", NativeBridge.nativeStop("sing_box"));
                 return null;
             });
             assertEquals("", start.get(2, TimeUnit.SECONDS));
             stop.get(2, TimeUnit.SECONDS);
             long waitedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began);
             assertTrue("StopCore raced StartCore", waitedMs >= 200);
-            assertEquals("Ошибка ядра 🚀", NativeBridge.nativeStart("{\"unicode\":true}"));
-            String malformed = NativeBridge.nativeStart("{\"malformed\":true}");
+            assertEquals("Ошибка ядра 🚀", NativeBridge.nativeStart("sing_box", "{\"unicode\":true}"));
+            String malformed = NativeBridge.nativeStart("sing_box", "{\"malformed\":true}");
             assertTrue(malformed.contains("\ufffd"));
-            String limited = NativeBridge.nativeStart("{\"long_error\":true}");
+            String limited = NativeBridge.nativeStart("sing_box", "{\"long_error\":true}");
             assertTrue(limited.codePointCount(0, limited.length()) <= 1024);
             assertTrue(limited.getBytes(StandardCharsets.UTF_8).length <= 4096);
-            String malformedBoundary = NativeBridge.nativeStart(
+            String malformedBoundary = NativeBridge.nativeStart("sing_box", 
                     "{\"boundary_bad\":true}");
             assertTrue(malformedBoundary.contains("\ufffd"));
             assertTrue(malformedBoundary.getBytes(StandardCharsets.UTF_8).length <= 4096);
-            assertEquals("", NativeBridge.nativeStart("{\"boundary_valid\":true}"));
-            assertEquals("", NativeBridge.nativeStart("{}"));
-            assertEquals("", NativeBridge.nativeStop());
-            assertEquals("", NativeBridge.nativeStart("{\"stop_error\":true}"));
-            assertEquals("Ошибка остановки 🛑", NativeBridge.nativeStop());
-            assertEquals("", NativeBridge.nativeStop());
+            assertEquals("", NativeBridge.nativeStart("sing_box", "{\"boundary_valid\":true}"));
+            assertEquals("", NativeBridge.nativeStart("sing_box", "{}"));
+            assertEquals("", NativeBridge.nativeStop("sing_box"));
+            assertEquals("", NativeBridge.nativeStart("sing_box", "{\"stop_error\":true}"));
+            assertEquals("Ошибка остановки 🛑", NativeBridge.nativeStop("sing_box"));
+            assertEquals("", NativeBridge.nativeStop("sing_box"));
         } finally {
             NativeBridgeTestHooks.nativeSetMetadataPause(false);
             workers.shutdownNow();

@@ -13,6 +13,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -475,6 +476,76 @@ public class NativeCoreRuntimeTest {
         }
     }
 
+    @Test
+    public void theDualCoreExperimentMapsTheSecondFamilyInsteadOfDemandingARestart()
+            throws Exception {
+        File root = Files.createTempDirectory("exitfy-native-dual").toFile();
+        LimitedHttpClient http = new LimitedHttpClient();
+        try {
+            File singCore = new File(root, "sing.so");
+            File xrayCore = new File(root, "xray.so");
+            Files.write(singCore.toPath(), new byte[]{9});
+            Files.write(xrayCore.toPath(), new byte[]{10});
+            FakeUpdater singBox = new FakeUpdater(root, http, CoreFamily.SING_BOX,
+                    new CoreUpdater.LoadTarget(singCore, 2));
+            FakeUpdater xray = new FakeUpdater(root, http, CoreFamily.XRAY,
+                    new CoreUpdater.LoadTarget(xrayCore, 2));
+            FakeNativeCalls calls = new FakeNativeCalls();
+            NativeCoreRuntime runtime = new NativeCoreRuntime(singBox, xray, calls);
+            NativeCoreRuntime.setDualCoreEnabled(true);
+
+            assertTrue(runtime.start(CoreFamily.SING_BOX, "{}").ok);
+            assertEquals(1, calls.openCalls.get());
+
+            // The other family is mapped and takes over the connection, so the
+            // running core is stopped first: only one ever runs.
+            NativeCoreRuntime.StartResult second = runtime.start(CoreFamily.XRAY, "{}");
+            assertTrue(second.ok);
+            assertFalse(second.restartRequired);
+            assertEquals(2, calls.openCalls.get());
+            assertEquals(1, calls.stopCalls.get());
+
+            // A third family does not exist: both slots are now full and the
+            // already mapped families keep working.
+            assertTrue(runtime.start(CoreFamily.SING_BOX, "{}").ok);
+            assertEquals(2, calls.openCalls.get());
+            runtime.shutdownForUnload(1000L);
+        } finally {
+            http.close();
+            TestFiles.deleteRecursively(root);
+        }
+    }
+
+    @Test
+    public void theExperimentStaysOffUnlessAskedFor() throws Exception {
+        File root = Files.createTempDirectory("exitfy-native-single").toFile();
+        LimitedHttpClient http = new LimitedHttpClient();
+        try {
+            File singCore = new File(root, "sing.so");
+            File xrayCore = new File(root, "xray.so");
+            Files.write(singCore.toPath(), new byte[]{9});
+            Files.write(xrayCore.toPath(), new byte[]{10});
+            FakeUpdater singBox = new FakeUpdater(root, http, CoreFamily.SING_BOX,
+                    new CoreUpdater.LoadTarget(singCore, 2));
+            FakeUpdater xray = new FakeUpdater(root, http, CoreFamily.XRAY,
+                    new CoreUpdater.LoadTarget(xrayCore, 2));
+            FakeNativeCalls calls = new FakeNativeCalls();
+            NativeCoreRuntime runtime = new NativeCoreRuntime(singBox, xray, calls);
+            // Turning the setting off must never unmap what is already mapped.
+            NativeCoreRuntime.setDualCoreEnabled(false);
+
+            assertTrue(runtime.start(CoreFamily.SING_BOX, "{}").ok);
+            NativeCoreRuntime.StartResult second = runtime.start(CoreFamily.XRAY, "{}");
+            assertFalse(second.ok);
+            assertTrue(second.restartRequired);
+            assertEquals(1, calls.openCalls.get());
+            runtime.shutdownForUnload(1000L);
+        } finally {
+            http.close();
+            TestFiles.deleteRecursively(root);
+        }
+    }
+
     private static final class FakeNativeCalls implements NativeCoreRuntime.NativeCalls {
         final AtomicInteger openCalls = new AtomicInteger();
         final AtomicInteger stopCalls = new AtomicInteger();
@@ -508,12 +579,12 @@ public class NativeCoreRuntimeTest {
         }
 
         @Override
-        public int loadedCoreApi() {
+        public int loadedCoreApi(CoreFamily family) {
             return 0;
         }
 
         @Override
-        public String start(String configJson) {
+        public String start(CoreFamily family, String configJson) {
             startCalls.incrementAndGet();
             coreRunning = true;
             if (startOutOfMemory) throw new OutOfMemoryError("NewString failed");
@@ -523,7 +594,7 @@ public class NativeCoreRuntimeTest {
         }
 
         @Override
-        public String stop() {
+        public String stop(CoreFamily family) {
             int call = stopCalls.incrementAndGet();
             if (stopRetryEntered != null && call == 1) return "retryable stop failure";
             if (stopRetryEntered != null && call == 2) {

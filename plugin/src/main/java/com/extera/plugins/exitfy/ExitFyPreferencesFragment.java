@@ -16,6 +16,7 @@ final class ExitFyPreferencesFragment
     private ExitFyDashboardState state = ExitFyDashboardState.EMPTY;
     private SettingRow pingTypeRow;
     private SettingRow customHwidRow;
+    private SettingRow dualCoreRow;
     private boolean commandBusy;
 
     @Override
@@ -40,6 +41,11 @@ final class ExitFyPreferencesFragment
         setSafeClick(customHwidRow.view, this::showCustomHwidDialog);
         content.addView(customHwidRow.view, sectionParams());
 
+        dualCoreRow = settingRow(context, R.drawable.msg_settings,
+                I18n.t("Два ядра сразу (эксперимент)", "Both cores at once (experimental)"), "");
+        setSafeClick(dualCoreRow.view, this::showDualCoreDialog);
+        content.addView(dualCoreRow.view, sectionParams());
+
         renderUiState(state);
     }
 
@@ -52,16 +58,18 @@ final class ExitFyPreferencesFragment
     protected void renderUiState(ExitFyDashboardState next) {
         if (next == null) return;
         state = next;
-        if (pingTypeRow == null || customHwidRow == null) return;
+        if (pingTypeRow == null || customHwidRow == null || dualCoreRow == null) return;
         if (next.runtimeAvailable) {
             pingTypeRow.setValue(pingTypeLabel(next.pingType));
             customHwidRow.setValue(next.customHwidSet
                     ? I18n.t("Настроен", "Configured")
                     : (next.defaultHwid.isEmpty() ? "—" : next.defaultHwid));
+            dualCoreRow.setValue(dualCoreLabel(next));
         } else {
             String unavailable = I18n.t("Runtime недоступен", "Runtime unavailable");
             pingTypeRow.setValue(unavailable);
             customHwidRow.setValue(unavailable);
+            dualCoreRow.setValue(unavailable);
         }
         updateRowsEnabled();
     }
@@ -76,6 +84,7 @@ final class ExitFyPreferencesFragment
         boolean enabled = state.runtimeAvailable && !commandBusy;
         if (pingTypeRow != null) pingTypeRow.setEnabled(enabled);
         if (customHwidRow != null) customHwidRow.setEnabled(enabled);
+        if (dualCoreRow != null) dualCoreRow.setEnabled(enabled);
     }
 
     private void showPingTypeDialog() {
@@ -103,6 +112,46 @@ final class ExitFyPreferencesFragment
                 false,
                 value -> setSetting("custom_hwid", value),
                 () -> setSetting("custom_hwid", ""));
+    }
+
+    /**
+     * The second core is mapped for the life of the process and cannot be
+     * unmapped, so the dialog states the cost before the choice rather than
+     * after it.
+     */
+    private void showDualCoreDialog() {
+        CharSequence[] labels = {
+                I18n.t("Выключено", "Off"),
+                I18n.t("Включено", "On"),
+        };
+        showChoiceDialog(
+                I18n.t("Два ядра сразу (эксперимент)", "Both cores at once (experimental)"),
+                labels, state.dualCore ? 1 : 0, index -> {
+                    boolean value = index == 1;
+                    if (value == state.dualCore) return;
+                    if (!value) {
+                        setSetting("dual_core", false);
+                        showToast(I18n.t(
+                                "Выключится после перезапуска exteraGram",
+                                "Takes effect after exteraGram restarts"), true);
+                        return;
+                    }
+                    setSetting("dual_core", true);
+                    showToast(I18n.t(
+                            "Серверы обоих типов теперь работают без перезапуска",
+                            "Servers of both kinds now work without a restart"), true);
+                });
+    }
+
+    private static String dualCoreLabel(ExitFyDashboardState state) {
+        if (state.dualCoreActive) {
+            return state.dualCore
+                    ? I18n.t("Включено", "On")
+                    : I18n.t("Включено до перезапуска", "On until restart");
+        }
+        return state.dualCore
+                ? I18n.t("Включится при подключении", "On at next connection")
+                : I18n.t("Выключено", "Off");
     }
 
     private static int pingTypeIndex(String value) {

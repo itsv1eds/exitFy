@@ -334,6 +334,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         if (!previous.pingType.equals(next.pingType)) {
             settingPersistenceRevisions.record("ping_type", revision);
         }
+        if (previous.dualCore != next.dualCore) {
+            settingPersistenceRevisions.record("dual_core", revision);
+        }
     }
 
     private void finishSettingsUpdate(SettingsUpdate update) {
@@ -357,6 +360,10 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         cancelSubscriptionRefresh();
         SettingsModel previous = settings;
         settings = next;
+        // Mapping the second core is irreversible for the process, so the
+        // experiment only ever turns on here; turning it back off takes effect
+        // after exteraGram restarts.
+        NativeCoreRuntime.setDualCoreEnabled(next.dualCore);
         appliedSettings.markApplied(requestedRevision);
         if (previous.providerId != next.providerId) {
             restartRequired = false;
@@ -740,6 +747,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             providerAvailability.put(true);
             value.put("providerAvailability", providerAvailability);
             value.put("pingType", current.pingType);
+            value.put("dualCore", current.dualCore);
+            value.put("dualCoreActive", NativeCoreRuntime.dualCoreEnabled());
             // Never expose a custom identifier in a screen-state snapshot
             // which can outlive the editor dialog.
             value.put("customHwidSet", !current.customHwid.isEmpty());
@@ -755,8 +764,11 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             // actions/notifications are intentionally deferred to a separate
             // release even though this iteration removes every core control.
             CoreFamily loadedFamily = nativeCore.loadedFamily();
-            value.put("restartRequired", restartRequired
-                    || CoreProcessState.requiresRestart(loadedFamily, requiredCore));
+            // With the experiment on, the other family is mapped on demand,
+            // so a mismatch is not a restart the user has to perform.
+            value.put("restartRequired", (restartRequired
+                    || CoreProcessState.requiresRestart(loadedFamily, requiredCore))
+                    && !NativeCoreRuntime.canMapAnotherFamily());
             value.put("customUrlCount", subscriptions.customUrlCount());
             CoreInstallSession.Snapshot coreInstall = coreInstallSession.snapshot();
             value.put("coreInstall", new JSONObject()
