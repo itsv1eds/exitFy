@@ -1959,4 +1959,29 @@ public class ProtocolParserTest {
         for (int i = 0; i < count; i++) result.append(value);
         return result.toString();
     }
+    @Test
+    public void placeholderEntriesNeverBecomeServers() throws Exception {
+        // A subscription that does not recognise the client answers with
+        // entries whose names carry a message and whose address cannot be
+        // dialled. Counting those would report servers that never connect.
+        String uuid = "00000000-0000-0000-0000-000000000000";
+        for (String host : new String[]{"0.0.0.0", "[::]"}) {
+            String uri = "vless://" + uuid + "@" + host
+                    + ":1?encryption=none&type=tcp&security=none#unsupported";
+            try {
+                ProtocolParser.parse(uri);
+                throw new AssertionError("placeholder accepted: " + host);
+            } catch (IllegalArgumentException expected) {
+                assertEquals("invalid neutral proxy server", expected.getMessage());
+            }
+        }
+
+        // Loopback stays usable: a hand-written node may point at a local proxy.
+        assertFalse(ProtocolParser.isUnreachableServer("127.0.0.1"));
+        assertFalse(ProtocolParser.isUnreachableServer("localhost"));
+        assertFalse(ProtocolParser.isUnreachableServer("example.invalid"));
+        assertTrue(ProtocolParser.isUnreachableServer("0.0.0.0"));
+        assertTrue(ProtocolParser.isUnreachableServer("  ::  "));
+    }
+
 }

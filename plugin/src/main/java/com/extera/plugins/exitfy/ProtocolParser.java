@@ -1670,12 +1670,11 @@ final class ProtocolParser {
         String lower = value.toLowerCase(Locale.US);
         int zone = lower.indexOf('%');
         if (zone >= 0) lower = lower.substring(0, zone);
-        if (lower.equals("0.0.0.0") || lower.equals("::") || lower.equals("::0")
-                || lower.equals("0:0:0:0:0:0:0:0")) {
-            return true;
-        }
-        return lower.equals("localhost") || lower.equals("::1")
-                || lower.equals("0:0:0:0:0:0:0:1") || lower.startsWith("127.");
+        // Only the unspecified address is rejected. It is what the placeholder
+        // entries use and it can never be dialled, while loopback is left alone
+        // so a hand-written node pointing at a local proxy still works.
+        return lower.equals("0.0.0.0") || lower.equals("::") || lower.equals("::0")
+                || lower.equals("0:0:0:0:0:0:0:0");
     }
 
     static void validateNeutralOutbound(JSONObject outbound) {
