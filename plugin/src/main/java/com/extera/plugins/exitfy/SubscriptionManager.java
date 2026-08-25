@@ -1629,24 +1629,41 @@ final class SubscriptionManager implements Closeable {
         return value == null || value.length() > MAX_PROFILE_HEADER_CHARS ? "" : value;
     }
 
+    private static String decodeBase64Title(String encoded) {
+        if (encoded.isEmpty()) return "";
+        for (Base64.Decoder decoder
+                : new Base64.Decoder[]{Base64.getDecoder(), Base64.getUrlDecoder()}) {
+            try {
+                return SubscriptionParser.decodeStrictUtf8(decoder.decode(encoded));
+            } catch (Exception ignored) {
+            }
+        }
+        return "";
+    }
+
     private static String cleanTitle(String value) {
         String result = value == null ? "" : value.trim();
         if (result.length() > MAX_PROFILE_HEADER_CHARS) return "";
         if (result.isEmpty()) return "";
-        try {
-            result = URLDecoder.decode(result, "UTF-8");
-        } catch (Exception ignored) {
-        }
+        // The base64 prefix is examined before any URL decoding: standard
+        // base64 uses '+', which percent-decoding turns into a space and so
+        // destroys the payload before it can be read.
         if (result.toLowerCase(Locale.US).startsWith("base64:")) {
-            try {
-                result = SubscriptionParser.decodeStrictUtf8(
-                        Base64.getDecoder().decode(result.substring(7)));
-            } catch (Exception first) {
+            String encoded = result.substring(7).trim();
+            String decoded = decodeBase64Title(encoded);
+            if (decoded.isEmpty()) {
+                // A source may percent-encode the payload as well.
                 try {
-                    result = SubscriptionParser.decodeStrictUtf8(
-                            Base64.getUrlDecoder().decode(result.substring(7)));
+                    decoded = decodeBase64Title(
+                            URLDecoder.decode(encoded, "UTF-8").trim());
                 } catch (Exception ignored) {
                 }
+            }
+            if (!decoded.isEmpty()) result = decoded;
+        } else {
+            try {
+                result = URLDecoder.decode(result, "UTF-8");
+            } catch (Exception ignored) {
             }
         }
         result = result.replace('\r', ' ').replace('\n', ' ').trim();

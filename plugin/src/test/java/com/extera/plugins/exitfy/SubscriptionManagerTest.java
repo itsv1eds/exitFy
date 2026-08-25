@@ -1655,4 +1655,29 @@ public class SubscriptionManagerTest {
             try { worker.join(500); } catch (InterruptedException error) { Thread.currentThread().interrupt(); }
         }
     }
+
+    @Test
+    public void aBase64TitleSurvivesItsPlusCharacters() {
+        // Verbatim header from a live subscription. Standard base64 uses '+',
+        // and percent-decoding before the prefix is examined turns it into a
+        // space, which destroyed the payload and left the raw header on screen.
+        Map<String, String> headers = new HashMap<>();
+        headers.put("profile-title", "base64:8J+TsSBJLlNocmltcCBMVEU=");
+        LimitedHttpClient.Response response = new LimitedHttpClient.Response(
+                200, new byte[0], headers);
+
+        assertEquals("\uD83D\uDCF1 I.Shrimp LTE",
+                SubscriptionManager.responseTitle(response, "https://example.invalid/sub"));
+    }
+
+    @Test
+    public void aTitleWithoutBase64StillGetsPercentDecoded() {
+        Map<String, String> headers = new HashMap<>();
+        headers.put("profile-title", "My%20Source");
+        LimitedHttpClient.Response response = new LimitedHttpClient.Response(
+                200, new byte[0], headers);
+
+        assertEquals("My Source",
+                SubscriptionManager.responseTitle(response, "https://example.invalid/sub"));
+    }
 }

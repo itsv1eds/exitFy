@@ -1472,7 +1472,17 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 // A page probe must not turn into an unbounded core download.
                 // The one process-wide Go family must already be mapped by a
                 // connection attempt.
-                CoreFamily family = chooseProbeFamily();
+                CoreFamily family = nativeCore.loadedFamily();
+                if (family == null) {
+                    // Say so on every row: silently clearing the statuses left
+                    // the user with no idea why nothing was measured.
+                    for (ProtocolParser.Node node : nodes) {
+                        subscriptions.setProbeResult(
+                                node.normalizedKey, "connect_required", -1L);
+                        pingCompleted++;
+                    }
+                    return;
+                }
                 pauseAttempted = true;
                 resumeGuard = pauseConnectionForProbe(
                         absoluteDeadline, token, runtimeOperation);
@@ -1557,6 +1567,10 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                                 restoreHandled && !deferredRestore));
                 probePausing = false;
                 if (isPingCurrent(token)) {
+                    // No exit path may leave rows pending: a return taken
+                    // before the loop used to strand them on "Checking…"
+                    // with nothing left running to resolve them.
+                    subscriptions.cancelPendingProbes(nodes);
                     pingState = "completed";
                     invalidateSettings();
                 }
@@ -1671,14 +1685,6 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             subscriptions.setProbeResult(node.normalizedKey, "guard_unavailable", -1L);
             pingCompleted++;
         }
-    }
-
-    private CoreFamily chooseProbeFamily() {
-        CoreFamily loadedFamily = nativeCore.loadedFamily();
-        if (loadedFamily != null) return loadedFamily;
-        throw new IllegalStateException(I18n.t(
-                "Сначала установите подключение",
-                "Establish a connection before Proxy GET"));
     }
 
     private void restoreConnectionAfterPing(RuntimeOperationToken operation) {

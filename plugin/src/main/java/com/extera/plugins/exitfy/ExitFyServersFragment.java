@@ -936,6 +936,11 @@ final class ExitFyServersFragment
         if ("restart_required".equals(node.pingStatus)) {
             return I18n.t("Недоступен", "Unavailable");
         }
+        if ("connect_required".equals(node.pingStatus)) {
+            return I18n.t(
+                    "Сначала подключитесь",
+                    "Connect first");
+        }
         if ("tcp_failed_quic".equals(node.pingStatus)) {
             return I18n.t(
                     "TCP-проверка неприменима",

@@ -1,11 +1,11 @@
-# exitFy 4.0.0-beta.25 device checklist
+# exitFy 4.0.0-beta.26 device checklist
 
 Device testing is performed by the beta tester after receiving
 `exitfy.plugin`. Use real `arm64-v8a` hardware only:
 
 - One Android 10/API 29 arm64 device and one current Android arm64 device.
 - exteraGram 12.5.1 (`e17f1bde…`) and 12.8.1 (`ab284232…`).
-- Confirm the plugin is `exitFy_v2`, version `4.0.0-beta.25`, schema 6, and an
+- Confirm the plugin is `exitFy_v2`, version `4.0.0-beta.26`, schema 6, and an
   upgrade preserves settings, subscriptions and nodes. Legacy string, numeric
   and malformed `core_policy` values must become the inert `auto` tombstone;
   no core policy may reach DEX or appear in UI.
