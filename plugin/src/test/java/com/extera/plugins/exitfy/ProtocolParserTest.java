@@ -988,8 +988,12 @@ public class ProtocolParserTest {
         assertEquals("0-60000", renderedExtra.getString("scMinPostsIntervalMs"));
         assertTrue(renderedExtra.getBoolean("noSSEHeader"));
 
+        // An unknown scalar is carried through: sources name padding, sequence
+        // and session options this client does not enumerate, and refusing one
+        // discarded every server they offered.
+        ProtocolParser.parse(xhttpUri(new JSONObject().put("unknown", 1)));
+
         JSONObject[] invalid = new JSONObject[]{
-                new JSONObject().put("unknown", 1),
                 new JSONObject().put("xPaddingBytes", "0-10"),
                 new JSONObject().put("xPaddingBytes", "10-1"),
                 new JSONObject().put("scMaxEachPostBytes", 8 * 1024 * 1024 + 1),
@@ -1984,4 +1988,46 @@ public class ProtocolParserTest {
         assertTrue(ProtocolParser.isUnreachableServer("  ::  "));
     }
 
+
+    @Test
+    public void realWorldXhttpAndGrpcOptionsStayUsable() throws Exception {
+        // Shapes taken from a live subscription. Padding, sequence and session
+        // options are named by the source, not by us, so rejecting an unknown
+        // one discarded every server the source offered.
+        ProtocolParser.Node xhttp = ProtocolParser.parse("vless://00000000-0000-0000-0000-000000000000@example.invalid:443?encryption=none&security=tls&sni=a.invalid&fp=firefox&type=xhttp&mode=packet-up&path=%2Fp&host=a.invalid&extra=%7B%22seqKey%22%3A%22offset%22%2C%22noSSEHeader%22%3Afalse%2C%22xPaddingKey%22%3A%22q%22%2C%22seqPlacement%22%3A%22query%22%2C%22sessionIDKey%22%3A%22sid%22%2C%22xPaddingBytes%22%3A%2248-256%22%2C%22xPaddingMethod%22%3A%22tokenish%22%2C%22uplinkHTTPMethod%22%3A%22DELETE%22%2C%22xPaddingObfsMode%22%3Atrue%2C%22xPaddingPlacement%22%3A%22query%22%2C%22scMaxEachPostBytes%22%3A4000000%2C%22sessionIDPlacement%22%3A%22query%22%2C%22scMinPostsIntervalMs%22%3A0%2C%22serverMaxHeaderBytes%22%3A8192%7D#node");
+        assertTrue(xhttp.supports(CoreFamily.XRAY));
+
+        // "gun" is the plain gRPC mode subscriptions state explicitly.
+        ProtocolParser.Node grpc = ProtocolParser.parse("vless://00000000-0000-0000-0000-000000000000@example.invalid:443?encryption=none&security=reality&sni=a.invalid&fp=firefox&type=grpc&mode=gun&serviceName=%2F&pbk=Zo1uT3ivgn6XzVcv2BnGyyU1BjWWB3DcV5vTuwo8SEY&sid=b2a8c903ef11d56a#node");
+        assertTrue(grpc.supports(CoreFamily.XRAY));
+
+        // Multiplexed gRPC is a different transport and stays refused.
+        try {
+            ProtocolParser.parse("vless://00000000-0000-0000-0000-000000000000@example.invalid:443?encryption=none&security=reality&sni=a.invalid&fp=firefox&type=grpc&mode=gun&serviceName=%2F&pbk=Zo1uT3ivgn6XzVcv2BnGyyU1BjWWB3DcV5vTuwo8SEY&sid=b2a8c903ef11d56a#node".replace("mode=gun", "mode=multi"));
+            throw new AssertionError("multiplexed gRPC accepted");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("gRPC transport mode"));
+        }
+    }
+
+    @Test
+    public void xhttpExtraStillRejectsNestedAndOversizedValues() {
+        String base = "vless://00000000-0000-0000-0000-000000000000@example.invalid:443?"
+                + "encryption=none&security=tls&sni=a.invalid&type=xhttp&mode=auto&path=%2Fp&extra=";
+        StringBuilder oversized = new StringBuilder();
+        for (int index = 0; index < 300; index++) oversized.append('x');
+        String[] rejected = {
+                "{\"nested\":{\"a\":1}}",
+                "{\"listed\":[1,2]}",
+                "{\"long\":\"" + oversized + "\"}",
+        };
+        for (String extra : rejected) {
+            try {
+                ProtocolParser.parse(base + java.net.URLEncoder.encode(extra, "UTF-8"));
+                throw new AssertionError("accepted unsafe XHTTP extra: " + extra);
+            } catch (Exception expected) {
+                assertTrue(expected.getMessage().toLowerCase().contains("xhttp"));
+            }
+        }
+    }
 }

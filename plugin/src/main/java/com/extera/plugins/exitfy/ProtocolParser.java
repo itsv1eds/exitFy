@@ -838,7 +838,15 @@ final class ProtocolParser {
         }
         if (network.equals("grpc")) {
             rejectPresent(params, "gRPC", "host", "headers", "ed", "eh",
-                    "earlyDataHeaderName", "early_data_header_name", "mode", "extra");
+                    "earlyDataHeaderName", "early_data_header_name", "extra");
+            // "gun" is the plain single-stream mode this outbound already
+            // describes, and subscriptions state it explicitly. Multiplexed
+            // gRPC is a different transport that is not represented here.
+            String grpcMode = value(params, "mode", "gun").toLowerCase(Locale.US);
+            if (!grpcMode.equals("gun")) {
+                throw new IllegalArgumentException(
+                        "unsupported gRPC transport mode: " + grpcMode);
+            }
             rejectAliasConflict(params, "gRPC service", "serviceName", "path");
             JSONObject value = new JSONObject().put("type", "grpc");
             String serviceName = nonEmpty(value(params, "serviceName", ""),
@@ -987,6 +995,9 @@ final class ProtocolParser {
         }
     }
 
+    private static final int MAX_XHTTP_EXTRA_FIELDS = 32;
+    private static final int MAX_XHTTP_EXTRA_VALUE_CHARS = 256;
+
     static void validateXhttpExtra(JSONObject extra) {
         if (extra == null) return;
         try {
@@ -994,15 +1005,36 @@ final class ProtocolParser {
         } catch (IllegalArgumentException boundedFailure) {
             throw new IllegalArgumentException("invalid or oversized XHTTP extra (64 KiB maximum)");
         }
-        java.util.HashSet<String> allowed = new java.util.HashSet<>();
-        Collections.addAll(allowed, "scMaxEachPostBytes", "scMinPostsIntervalMs",
+        // The four fields below carry ranges this client depends on, so they
+        // keep their exact checks. Everything else is bounded by shape instead
+        // of by name: real subscriptions carry padding, sequence and session
+        // options that an allow-list of names cannot keep up with, and
+        // rejecting one unknown key discards the whole server.
+        java.util.HashSet<String> ranged = new java.util.HashSet<>();
+        Collections.addAll(ranged, "scMaxEachPostBytes", "scMinPostsIntervalMs",
                 "xPaddingBytes", "noSSEHeader");
+        int fields = 0;
         Iterator<String> keys = extra.keys();
         while (keys.hasNext()) {
             String key = keys.next();
             Object value = extra.opt(key);
-            if (!allowed.contains(key) || value == null || value == JSONObject.NULL) {
+            if (value == null || value == JSONObject.NULL) {
                 throw new IllegalArgumentException("unsupported XHTTP extra field: " + key);
+            }
+            if (++fields > MAX_XHTTP_EXTRA_FIELDS || key.length() > 64) {
+                throw new IllegalArgumentException("unsupported XHTTP extra field: " + key);
+            }
+            if (!ranged.contains(key)) {
+                // Nested structures would let a source reach past this field.
+                if (value instanceof JSONObject || value instanceof org.json.JSONArray) {
+                    throw new IllegalArgumentException(
+                            "unsupported XHTTP extra field: " + key);
+                }
+                if (value instanceof String
+                        && ((String) value).length() > MAX_XHTTP_EXTRA_VALUE_CHARS) {
+                    throw new IllegalArgumentException("invalid XHTTP extra field: " + key);
+                }
+                continue;
             }
             if (key.equals("noSSEHeader")) {
                 if (!(value instanceof Boolean)) {
