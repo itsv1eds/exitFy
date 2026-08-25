@@ -1654,12 +1654,36 @@ final class ProtocolParser {
         if (headers.length() == 0) transport.remove("headers");
     }
 
+    /**
+     * Rejects addresses that can never carry a tunnel. Subscriptions gate on
+     * the client User-Agent and answer an unrecognised one with entries whose
+     * names spell out a message and whose address is the unspecified one, so
+     * accepting them would report a server count made entirely of nodes that
+     * cannot connect.
+     */
+    static boolean isUnreachableServer(String server) {
+        String value = server == null ? "" : server.trim();
+        if (value.startsWith("[") && value.endsWith("]") && value.length() > 2) {
+            value = value.substring(1, value.length() - 1);
+        }
+        if (value.isEmpty()) return true;
+        String lower = value.toLowerCase(Locale.US);
+        int zone = lower.indexOf('%');
+        if (zone >= 0) lower = lower.substring(0, zone);
+        if (lower.equals("0.0.0.0") || lower.equals("::") || lower.equals("::0")
+                || lower.equals("0:0:0:0:0:0:0:0")) {
+            return true;
+        }
+        return lower.equals("localhost") || lower.equals("::1")
+                || lower.equals("0:0:0:0:0:0:0:1") || lower.startsWith("127.");
+    }
+
     static void validateNeutralOutbound(JSONObject outbound) {
         if (outbound == null) throw new IllegalArgumentException("neutral outbound is missing");
         AtomicStore.jsonUtf8Size(outbound, AtomicStore.MAX_JSON_BYTES);
         String protocol = neutralString(outbound, "type", true, false, 32);
         String server = neutralString(outbound, "server", true, false, 1024);
-        if (containsWhitespaceOrControl(server)) {
+        if (containsWhitespaceOrControl(server) || isUnreachableServer(server)) {
             throw new IllegalArgumentException("invalid neutral proxy server");
         }
         neutralInteger(outbound, "server_port", true, 1, 65535);

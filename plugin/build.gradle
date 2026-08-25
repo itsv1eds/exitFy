@@ -93,8 +93,13 @@ def forbiddenThirdPartyCoreTokens = [
         ["lib", "_singbox"].join(""),
         ["libvless", "-"].join(""),
 ]
+// Catalog slot order, mirrored from tools/generate_provider_catalog.py.
+def providerSlotIds = ["shrimp", "elix", "sworkle"]
+def providerSlotCount = providerSlotIds.size()
+
+// The provider itself was reinstated by the maintainer; only its retired
+// endpoint stays forbidden so a stale path cannot creep back in.
 def forbiddenRemovedProviderTokens = [
-        ["swork", "le"].join(""),
         ["s3.too", "step.top/sub/exitfy"].join(""),
 ]
 def forbiddenSensitiveSubscriptionTokens = [
@@ -378,10 +383,10 @@ def privateProviderUrls = {
         throw new GradleException("providers.private.json contract is invalid")
     }
     Map providers = (Map) parsed.providers
-    if (!(providers.keySet() as Set).every { it in ["elix", "shrimp"] }) {
+    if (!(providers.keySet() as Set).every { it in providerSlotIds }) {
         throw new GradleException("providers.private.json contains an unknown provider")
     }
-    ["elix", "shrimp"].collect { providers[it] }.findAll { it instanceof String }
+    providerSlotIds.collect { providers[it] }.findAll { it instanceof String }
 }
 
 def providerSecretNeedles = { Collection<String> urls ->
@@ -2053,10 +2058,11 @@ tasks.register("verifyPluginArtifact") {
             sizeMethod.setAccessible(true)
             enabledMethod.setAccessible(true)
             Object rawSize = sizeMethod.invoke(null)
-            if (!(rawSize instanceof Number) || ((Number) rawSize).intValue() != 2) {
+            if (!(rawSize instanceof Number)
+                    || ((Number) rawSize).intValue() != providerSlotCount) {
                 throw new GradleException("R8-obfuscated provider catalog has an invalid slot count")
             }
-            for (int index = 0; index < 2; index++) {
+            for (int index = 0; index < providerSlotCount; index++) {
                 Object rawEnabled = enabledMethod.invoke(null, index)
                 if (!(rawEnabled instanceof Boolean)) {
                     throw new GradleException("R8-obfuscated provider state is invalid")

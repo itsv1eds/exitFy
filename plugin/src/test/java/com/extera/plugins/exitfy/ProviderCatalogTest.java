@@ -14,7 +14,7 @@ import static org.junit.Assert.assertTrue;
 public class ProviderCatalogTest {
     @Test
     public void enabledEndpointsDecodeWithStrictHttpsShape() throws Exception {
-        assertEquals(2, ProviderCatalog.size());
+        assertEquals(SettingsModel.CUSTOM_PROVIDER_ID, ProviderCatalog.size());
         ProviderCatalog.verify();
         Set<String> decoded = new HashSet<>();
         for (int index = 0; index < ProviderCatalog.size(); index++) {

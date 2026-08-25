@@ -52,7 +52,8 @@ class ProviderCatalogGeneratorTest(unittest.TestCase):
             {"ProviderCatalogData.java", "CatalogMaterialA.java", "CatalogMaterialB.java"},
             set(generated),
         )
-        self.assertIn("{true, false}", generated["ProviderCatalogData.java"])
+        # Elix sits second in the v3 order, so its slot is the enabled one.
+        self.assertIn("{false, true, false}", generated["ProviderCatalogData.java"])
         self.assertFalse(any(first in source for source in generated.values()))
 
         self.generator.generate(self.private_file, self.output_dir)
@@ -68,12 +69,13 @@ class ProviderCatalogGeneratorTest(unittest.TestCase):
         self._write({})
         self.generator.generate(self.private_file, self.output_dir)
         data = self._sources()["ProviderCatalogData.java"]
-        self.assertIn("{false, false}", data)
+        self.assertIn("{false, false, false}", data)
 
+        # Shrimp leads the catalog, so only its slot comes back enabled.
         self._write({"shrimp": "https://subscriptions.example/shrimp-token-123456"})
         self.generator.generate(self.private_file, self.output_dir)
         data = self._sources()["ProviderCatalogData.java"]
-        self.assertIn("{false, true}", data)
+        self.assertIn("{true, false, false}", data)
 
     def test_invalid_contract_fails_without_echoing_secret_url(self):
         secret = "http://subscriptions.example/should-not-be-echoed-123456"

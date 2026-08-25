@@ -5,7 +5,7 @@ import org.json.JSONObject;
 import java.util.Objects;
 
 final class SettingsModel {
-    static final int CUSTOM_PROVIDER_ID = 2;
+    static final int CUSTOM_PROVIDER_ID = 3;
     private static final int MAX_HWID_INPUT_CODE_POINTS = 4_096;
     private static final int MAX_HWID_CODE_POINTS = 256;
     private static final int MAX_HWID_UTF8_BYTES = 1_024;

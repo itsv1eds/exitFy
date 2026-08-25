@@ -86,6 +86,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
     private View activeOpenArea;
     private TextView pingButton;
     private View advancedCard;
+    private View providerPageCard;
 
     @Override
     public boolean onFragmentCreate() {
@@ -125,6 +126,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
         content.addView(createConnectionCard(context), sectionParams());
         content.addView(createActiveServerCard(context), sectionParams());
         content.addView(createSourceCard(context), sectionParams());
+        content.addView(createProviderPageCard(context), sectionParams());
         content.addView(createAdvancedCard(context), sectionParams());
 
         applyState(latestState);
@@ -345,6 +347,32 @@ final class ExitFyDashboardFragment extends BaseFragment {
         return card;
     }
 
+    private View createProviderPageCard(Context context) {
+        LinearLayout card = card(context, true);
+        providerPageCard = card;
+        card.setOnClickListener(view -> openProviderPage());
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        String label = I18n.t("Открыть страницу провайдера", "Open provider page");
+        String summary = I18n.t("Позволяет включить интернет везде",
+                "Lets you turn the internet on anywhere");
+        card.addView(iconBadge(context, R.drawable.msg_info, label, 48),
+                fixed(dp(48), dp(48)));
+        LinearLayout labels = new LinearLayout(context);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        TextView title = text(context, 17, Theme.key_windowBackgroundWhiteBlackText, true);
+        title.setText(label);
+        labels.addView(title, matchWrap());
+        TextView hint = text(context, 13, Theme.key_windowBackgroundWhiteGrayText, false);
+        hint.setText(summary);
+        labels.addView(hint, topMargin(2));
+        LinearLayout.LayoutParams labelsParams = weighted();
+        labelsParams.leftMargin = dp(13);
+        card.addView(labels, labelsParams);
+        card.setContentDescription(label + ". " + summary);
+        return card;
+    }
+
     private View createAdvancedCard(Context context) {
         LinearLayout card = card(context, true);
         advancedCard = card;
@@ -451,6 +479,10 @@ final class ExitFyDashboardFragment extends BaseFragment {
                     + (state.pingProgress().isEmpty() ? "" : " · " + state.pingProgress())
                 : I18n.t("Проверить задержку", "Check latency"));
 
+        // A custom source has no provider page to open.
+        boolean builtInProvider = state.providerId != SettingsModel.CUSTOM_PROVIDER_ID;
+        providerPageCard.setVisibility(builtInProvider ? View.VISIBLE : View.GONE);
+        setActionEnabled(providerPageCard, commandIdle && builtInProvider);
         setActionEnabled(advancedCard, commandIdle);
 
         updateCoreInstallUi(state);
@@ -816,6 +848,11 @@ final class ExitFyDashboardFragment extends BaseFragment {
     }
 
     private void runCommand(CommandFactory factory, boolean showSuccess) {
+        runCommand(factory, showSuccess, null);
+    }
+
+    private void runCommand(CommandFactory factory, boolean showSuccess,
+                            ResultHandler onSuccess) {
         ExecutorService executor = worker;
         if (!alive || executor == null || executor.isShutdown()) return;
         if (!commandRunning.compareAndSet(false, true)) {
@@ -848,6 +885,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
                 if (!postToUi(() -> {
                     commandRunning.set(false);
                     if (!alive) return;
+                    if (completed.ok && onSuccess != null) onSuccess.handle(completed);
                     if (!completed.ok || showSuccess) {
                         showToast(completed.message.isEmpty()
                                 ? (completed.ok
@@ -864,6 +902,24 @@ final class ExitFyDashboardFragment extends BaseFragment {
             commandRunning.set(false);
             requestRefresh();
         }
+    }
+
+    private interface ResultHandler {
+        void handle(ExitFyCommandResult result);
+    }
+
+    private void openProviderPage() {
+        if (latestState != null
+                && latestState.providerId == SettingsModel.CUSTOM_PROVIDER_ID) {
+            return;
+        }
+        runCommand(() -> new JSONObject().put("command", "provider_referral"),
+                false, result -> {
+                    Context context = getParentActivity();
+                    if (context != null) {
+                        ExitFyServersFragment.openValidatedUrl(context, result.data);
+                    }
+                });
     }
 
     private void openServers() {

@@ -140,8 +140,9 @@ final class ExitFyDashboardState {
     }
 
     static String providerName(int id) {
-        if (id == 0) return "Elix";
-        if (id == 1) return "Shrimp";
+        if (id == 0) return "Shrimp";
+        if (id == 1) return "Elix";
+        if (id == 2) return "Sworkle";
         return I18n.t("Пользовательский", "Custom");
     }
 

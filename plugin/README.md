@@ -11,6 +11,16 @@ and updates remain automatic. Whenever either connection component is missing,
 the dashboard exposes one generic action which installs/checks both components
 and reports combined progress; it never exposes family names, versions,
 selection or per-family update controls.
+A subscription that answers an unrecognised client with placeholder entries
+instead of servers is retried once under a second widely accepted user agent,
+and entries pointing at an address that can never carry a tunnel are rejected
+rather than counted. Reordering the catalog moves stored subscriptions,
+selections and the saved provider choice with their provider, so nothing
+reappears under whichever provider now owns that index.
+
+The dashboard offers the provider page directly, and links open through
+Telegram's own opener so t.me targets stay inside the app.
+
 The connection card carries one line of guidance: it explains that the
 connection files are downloaded once when a component is missing, and points at
 the server source when nothing is selected yet. A running install or a
@@ -89,7 +99,7 @@ longer sent to DEX or exposed by Android UI. The migration also erases the four
 obsolete transient dialog/filter keys from beta.16 because they may contain a
 URI, subscription URL, search text or HWID after an interrupted edit. The
 provider catalog
-contains Elix, Shrimp and Custom; the removed legacy built-in slot falls back
+contains Shrimp, Elix, Sworkle and Custom; the removed legacy built-in slot falls back
 to Elix while the previous Custom slot and its cached data migrate to the new
 index. Each built-in cache carries an opaque catalog revision: replacing or
 disabling its private endpoint invalidates only that source's cached nodes and
@@ -175,7 +185,7 @@ observe any endpoint and configuration which the client must use.
 Maintainers edit the normal endpoint values only in the local
 `providers.private.json`, created from `providers.private.example.json` and kept
 with file mode `0600`. The file is ignored by git and never packaged. Its fixed
-keys are `elix` and `shrimp`; replacing a string replaces that endpoint, while
+keys are `shrimp`, `elix` and `sworkle`, in catalog order; replacing a string replaces that endpoint, while
 removing a key or assigning `null` disables the corresponding slot without
 renumbering saved provider IDs. `generateProviderCatalog` converts the private
 file into the encrypted `ProviderCatalogData` and split material classes. Normal

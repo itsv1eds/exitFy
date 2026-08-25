@@ -1,5 +1,6 @@
 package com.extera.plugins.exitfy;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
@@ -131,8 +132,8 @@ final class ExitFyServersFragment
 
         referralRow = settingRow(context, R.drawable.msg_info,
                 I18n.t("Открыть страницу провайдера", "Open provider page"),
-                I18n.t("Реферальная ссылка выбранного встроенного источника",
-                        "Referral link for the selected built-in source"));
+                I18n.t("Позволяет включить интернет везде",
+                        "Lets you turn the internet on anywhere"));
         setSafeClick(referralRow.view, this::openProviderReferral);
         content.addView(referralRow.view, sectionParams());
 
@@ -806,6 +807,21 @@ final class ExitFyServersFragment
     }
 
     private void openValidatedReferral(String value) {
+        Context context = getParentActivity();
+        if (context == null) return;
+        if (!openValidatedUrl(context, value)) {
+            showToast(I18n.t(
+                    "Не удалось открыть страницу провайдера",
+                    "Could not open the provider page"), false);
+        }
+    }
+
+    /**
+     * Opens a provider page only when the runtime returned a web or Telegram
+     * link. The value crosses the bridge as text, so it is re-validated here
+     * rather than trusted because of where it came from.
+     */
+    static boolean openValidatedUrl(Context context, String value) {
         try {
             String raw = value == null ? "" : value.trim();
             if (raw.length() == 0 || raw.length() > 2048) {
@@ -822,14 +838,32 @@ final class ExitFyServersFragment
             if (!web && !telegram) {
                 throw new IllegalArgumentException("invalid referral");
             }
-            Context context = getParentActivity();
-            if (context == null) return;
-            context.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(raw)));
+            openExternalUrl(context, raw);
+            return true;
         } catch (Throwable ignored) {
-            showToast(I18n.t(
-                    "Не удалось открыть страницу провайдера",
-                    "Could not open the provider page"), false);
+            return false;
         }
+    }
+
+    /**
+     * Hands the link to Telegram's own opener, which keeps t.me targets inside
+     * the app and honours the user's browser preference. A direct view intent
+     * is only the fallback for a host that does not expose it.
+     */
+    private static void openExternalUrl(Context context, String url) {
+        try {
+            Class<?> browser = Class.forName("org.telegram.messenger.browser.Browser");
+            browser.getMethod("openUrl", Context.class, String.class)
+                    .invoke(null, context, url);
+            return;
+        } catch (Throwable ignored) {
+            // Fall through to the platform intent below.
+        }
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+        if (!(context instanceof Activity)) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        context.startActivity(intent);
     }
 
     private void confirm(CharSequence title, CharSequence message,

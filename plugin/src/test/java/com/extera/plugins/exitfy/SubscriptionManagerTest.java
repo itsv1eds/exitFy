@@ -1159,7 +1159,7 @@ public class SubscriptionManagerTest {
                     .put("activeKeys", new JSONObject()
                             .put("0", "legacy-zero")
                             .put("1", "legacy-one"))
-                    .put("meta", new JSONObject().put("providerLayout", 2));
+                    .put("meta", new JSONObject().put("providerLayout", 3));
             AtomicStore store = new AtomicStore(root);
             store.writeJson("subscriptions.json", seeded);
 
@@ -1169,8 +1169,8 @@ public class SubscriptionManagerTest {
             String serialized = persisted.toString();
             assertFalse(serialized.contains(first));
             assertFalse(serialized.contains(second));
-            String[] names = {"Elix", "Shrimp"};
-            for (int providerId = 0; providerId < 2; providerId++) {
+            String[] names = {"Shrimp", "Elix", "Sworkle"};
+            for (int providerId = 0; providerId < ProviderCatalog.size(); providerId++) {
                 JSONArray sources = persisted.getJSONObject("providers")
                         .getJSONObject(String.valueOf(providerId)).getJSONArray("sources");
                 if (ProviderCatalog.isEnabled(providerId)) {
@@ -1222,7 +1222,7 @@ public class SubscriptionManagerTest {
                     .put("customUrls", new JSONArray())
                     .put("activeKeys", new JSONObject()
                             .put(String.valueOf(providerId), "retained-selection"))
-                    .put("meta", new JSONObject().put("providerLayout", 2));
+                    .put("meta", new JSONObject().put("providerLayout", 3));
             AtomicStore store = new AtomicStore(root);
             store.writeJson("subscriptions.json", seeded);
 
@@ -1269,7 +1269,7 @@ public class SubscriptionManagerTest {
                     .put("customUrls", new JSONArray())
                     .put("activeKeys", new JSONObject()
                             .put(String.valueOf(providerId), "stale-selection"))
-                    .put("meta", new JSONObject().put("providerLayout", 2));
+                    .put("meta", new JSONObject().put("providerLayout", 3));
             AtomicStore store = new AtomicStore(root);
             store.writeJson("subscriptions.json", seeded);
 
@@ -1321,13 +1321,20 @@ public class SubscriptionManagerTest {
             manager = new SubscriptionManager(new AtomicStore(root), http);
 
             JSONObject migrated = store.readJsonStrict("subscriptions.json");
-            assertEquals(2, migrated.getJSONObject("meta").getInt("providerLayout"));
-            assertFalse(migrated.getJSONObject("providers").has("3"));
-            assertFalse(migrated.getJSONObject("activeKeys").has("3"));
+            assertEquals(3, migrated.getJSONObject("meta").getInt("providerLayout"));
+            // Custom now lives one slot further along. Slot 2 belongs to a
+            // built-in again, so what matters is that the removed provider
+            // left nothing of its own behind on it.
+            String custom = String.valueOf(SettingsModel.CUSTOM_PROVIDER_ID);
+            assertFalse(migrated.toString().contains("removed.example"));
+            assertFalse(migrated.getJSONObject("activeKeys").has("2"));
+            assertEquals(ProviderCatalog.storageKey(2),
+                    migrated.getJSONObject("providers").getJSONObject("2")
+                            .getJSONArray("sources").getJSONObject(0).getString("url"));
             assertEquals("custom-selection",
-                    migrated.getJSONObject("activeKeys").getString("2"));
+                    migrated.getJSONObject("activeKeys").getString(custom));
             assertEquals(customUrl, migrated.getJSONObject("providers")
-                    .getJSONObject("2").getJSONArray("sources")
+                    .getJSONObject(custom).getJSONArray("sources")
                     .getJSONObject(0).getString("url"));
             assertEquals(1, manager.nodes(SettingsModel.CUSTOM_PROVIDER_ID).size());
         } finally {
@@ -1347,7 +1354,8 @@ public class SubscriptionManagerTest {
             JSONObject providers = new JSONObject()
                     .put("0", seededBuiltInProvider(0, 0, 4_000))
                     .put("1", seededBuiltInProvider(1, 4_000, 4_000))
-                    .put("2", seededProvider(customUrl, 8_000, 2_001));
+                    .put(String.valueOf(SettingsModel.CUSTOM_PROVIDER_ID),
+                            seededProvider(customUrl, 8_000, 2_001));
             JSONObject seeded = new JSONObject().put("providers", providers)
                     .put("manual", new JSONArray())
                     .put("customUrls", new JSONArray().put(new JSONObject()
@@ -1355,7 +1363,7 @@ public class SubscriptionManagerTest {
                             .put("url", customUrl)
                             .put("title", "Large custom source")))
                     .put("activeKeys", new JSONObject())
-                    .put("meta", new JSONObject().put("providerLayout", 2));
+                    .put("meta", new JSONObject().put("providerLayout", 3));
             new AtomicStore(root).writeJson("subscriptions.json", seeded);
 
             manager = new SubscriptionManager(new AtomicStore(root), http);
@@ -1369,7 +1377,8 @@ public class SubscriptionManagerTest {
                     + (ProviderCatalog.isEnabled(1) ? 4_000 : 0);
             int expectedCustom = Math.min(2_001, 10_000 - builtInCount);
             assertEquals(builtInCount + expectedCustom, total);
-            assertEquals(expectedCustom, manager.nodeCountFast(2));
+            assertEquals(expectedCustom,
+                    manager.nodeCountFast(SettingsModel.CUSTOM_PROVIDER_ID));
         } finally {
             if (manager != null) manager.close();
             http.close();

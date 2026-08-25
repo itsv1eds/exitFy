@@ -103,8 +103,9 @@ def load_plugin_class(overrides=None):
         ),
         "__id__": "exitFy_v2",
         "__version__": "4.0.0-beta.25",
-        "PROVIDER_CATALOG_VERSION": 2,
-        "CUSTOM_PROVIDER_ID": 2,
+        "PROVIDER_CATALOG_VERSION": 3,
+        "CUSTOM_PROVIDER_ID": 3,
+        "CUSTOM_V2_ID": 2,
         "SETTINGS_SCHEMA": 6,
         "LEGACY_TRANSIENT_SETTING_KEYS": (
             "ui_add_node", "ui_add_subscription", "ui_hwid_entry", "ui_node_query",
@@ -133,6 +134,9 @@ def load_plugin_class(overrides=None):
     return namespace["ExitFyPlugin"], runtime, errors, opened, infos
 
 
+SHRIMP, ELIX, SWORKLE, CUSTOM = 0, 1, 2, 3
+
+
 class TemplateLifecycleTest(unittest.TestCase):
     def test_removed_legacy_provider_selection_falls_back_to_first_source(self):
         plugin_type, *_ = load_plugin_class()
@@ -141,9 +145,21 @@ class TemplateLifecycleTest(unittest.TestCase):
 
         plugin._migrate_provider_catalog()
 
-        self.assertEqual(0, plugin.settings["provider_id"])
-        self.assertEqual(2, plugin.settings["provider_catalog_version"])
+        # The removed slot became Elix, which the v3 order puts second.
+        self.assertEqual(ELIX, plugin.settings["provider_id"])
+        self.assertEqual(3, plugin.settings["provider_catalog_version"])
         self.assertEqual(2, plugin.settings["provider_catalog_legacy_id"])
+
+    def test_v2_selections_follow_their_provider_into_the_v3_order(self):
+        for saved, expected in ((0, ELIX), (1, SHRIMP), (2, CUSTOM)):
+            plugin_type, *_ = load_plugin_class()
+            plugin = plugin_type()
+            plugin.settings["provider_id"] = saved
+            plugin.settings["provider_catalog_version"] = 2
+
+            plugin._migrate_provider_catalog()
+
+            self.assertEqual(expected, plugin.settings["provider_id"])
 
     def test_legacy_custom_selection_moves_to_new_custom_slot(self):
         plugin_type, *_ = load_plugin_class()
@@ -153,7 +169,7 @@ class TemplateLifecycleTest(unittest.TestCase):
         plugin._migrate_provider_catalog()
         plugin._migrate_provider_catalog()
 
-        self.assertEqual(2, plugin.settings["provider_id"])
+        self.assertEqual(CUSTOM, plugin.settings["provider_id"])
         self.assertEqual(3, plugin.settings["provider_catalog_legacy_id"])
 
     def test_schema_marker_failure_is_nonfatal_after_runtime_start(self):

@@ -41,7 +41,7 @@ public class ExitFyDashboardStateTest {
         ExitFyDashboardState state = ExitFyDashboardState.parse(value.toString());
 
         assertEquals("RUNNING", state.runtimeState);
-        assertEquals("Shrimp", state.providerName());
+        assertEquals("Elix", state.providerName());
         assertTrue(state.providerAvailable(0));
         assertTrue(state.providerAvailable(1));
         assertTrue(state.providerAvailable(2));
@@ -96,7 +96,8 @@ public class ExitFyDashboardStateTest {
         assertFalse(state.hasActiveNode());
         assertFalse(state.providerAvailable(0));
         assertFalse(state.providerAvailable(1));
-        assertTrue(state.providerAvailable(2));
+        assertFalse(state.providerAvailable(2));
+        assertTrue(state.providerAvailable(SettingsModel.CUSTOM_PROVIDER_ID));
     }
 
     @Test
@@ -283,14 +284,16 @@ public class ExitFyDashboardStateTest {
             throws Exception {
         ExitFyDashboardState state = ExitFyDashboardState.parse(new JSONObject()
                 .put("providerAvailability", new JSONArray()
-                        .put(false).put(true).put(false).put(true))
+                        .put(false).put(true).put(false).put(false).put(true))
                 .toString());
 
         assertFalse(state.providerAvailable(-1));
         assertFalse(state.providerAvailable(0));
         assertTrue(state.providerAvailable(1));
-        assertTrue(state.providerAvailable(2));
-        assertFalse(state.providerAvailable(3));
+        assertFalse(state.providerAvailable(2));
+        // Custom never depends on a built-in endpoint being reachable.
+        assertTrue(state.providerAvailable(SettingsModel.CUSTOM_PROVIDER_ID));
+        assertFalse(state.providerAvailable(SettingsModel.CUSTOM_PROVIDER_ID + 1));
     }
 
     @Test

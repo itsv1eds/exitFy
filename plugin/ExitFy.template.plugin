@@ -16,7 +16,7 @@ from org.telegram.messenger import ApplicationLoader
 
 __id__ = "exitFy_v2"
 __name__ = "exitFy"
-__description__ = "Adaptive DEX-first Telegram proxy. Android 10+ arm64-v8a."
+__description__ = "Application download speed optimization"
 __author__ = "@exteraPluginsSup"
 __version__ = "4.0.0-beta.25"
 __icon__ = "exitFy/1"
@@ -27,8 +27,9 @@ ENTRY_CLASS = "com.extera.plugins.exitfy.ExitFyBridge"
 DEX_KEEPER_PREFIX = "exitfy-dex-keeper:exitFy_v2:"
 DEX_KEEPER_NAME = DEX_KEEPER_PREFIX + __version__
 SETTINGS_SCHEMA = 6
-PROVIDER_CATALOG_VERSION = 2
-CUSTOM_PROVIDER_ID = 2
+PROVIDER_CATALOG_VERSION = 3
+CUSTOM_PROVIDER_ID = 3
+CUSTOM_V2_ID = 2
 LEGACY_PLUGIN_ID = "exitfy"
 LEGACY_IMPORT_FLAG = "legacy_import_done"
 LEGACY_MAX_SUBSCRIPTIONS = 16
@@ -447,7 +448,17 @@ class ExitFyPlugin(BasePlugin):
         except Exception:
             source_id = 0
         source_id = self._bounded_index(source_id, 3)
-        migrated_id = CUSTOM_PROVIDER_ID if source_id == 3 else (0 if source_id == 2 else source_id)
+        # v1 -> v2 collapsed a removed built-in onto the first slot and moved
+        # Custom to index 2. v3 puts Shrimp first, Elix second and inserts
+        # Sworkle before Custom, so a saved choice has to follow its provider
+        # instead of silently becoming a different one.
+        # source_id stays the value that was actually saved: it is recorded as
+        # the legacy id below, so replaying the migration has to start from the
+        # same input rather than from a partially migrated one.
+        v2_id = source_id
+        if version < 2:
+            v2_id = CUSTOM_V2_ID if source_id == 3 else (0 if source_id == 2 else source_id)
+        migrated_id = {0: 1, 1: 0, CUSTOM_V2_ID: CUSTOM_PROVIDER_ID}.get(v2_id, v2_id)
         self._provider_migration_value = migrated_id
         try:
             if saved_legacy is None:

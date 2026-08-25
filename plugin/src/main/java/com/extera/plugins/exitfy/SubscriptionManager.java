@@ -28,6 +28,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class SubscriptionManager implements Closeable {
+    private static final String SUBSCRIPTION_USER_AGENT = "v2rayN/6.23";
+    // Ordered: the long-standing agent first, so a provider that already
+    // answers it keeps returning exactly what it returns today.
+    private static final String[] SUBSCRIPTION_USER_AGENTS = {
+            SUBSCRIPTION_USER_AGENT, "clash-verge/1.0",
+    };
     private static final String STORE_FILE = "subscriptions.json";
     private static final long CACHE_TTL_MS = 6L * 60L * 60L * 1000L;
     static final int MAX_TOTAL_NODES = 10_000;
@@ -37,7 +43,8 @@ final class SubscriptionManager implements Closeable {
     static final int MAX_CUSTOM_URLS = 256;
     private static final int CUSTOM_PROVIDER_ID = SettingsModel.CUSTOM_PROVIDER_ID;
     private static final int MAX_PROVIDER_ID = CUSTOM_PROVIDER_ID;
-    private static final int PROVIDER_LAYOUT_VERSION = 2;
+    private static final int PROVIDER_LAYOUT_VERSION = 3;
+    private static final int LEGACY_V2_CUSTOM_ID = 2;
     private static final int MAX_PROFILE_HEADER_CHARS = 16 * 1024;
     private static final Pattern HTTP_URL = Pattern.compile("(?i)https?://[^\\s\\\"'<>]+", Pattern.MULTILINE);
     private static final Pattern FILE_NAME = Pattern.compile(
@@ -47,14 +54,17 @@ final class SubscriptionManager implements Closeable {
         return offset >= 0 && offset <= MAX_TOTAL_NODES
                 && limit > 0 && limit <= MAX_PAGE_SIZE;
     }
-    private static final String[] PROVIDER_NAMES = {"Elix", "Shrimp"};
+    private static final String[] PROVIDER_NAMES = {"Shrimp", "Elix", "Sworkle"};
     private static final Set<String> UI_PROTOCOLS = Collections.unmodifiableSet(
             new LinkedHashSet<>(java.util.Arrays.asList(
                     "all", "vless", "vmess", "trojan", "shadowsocks",
                     "hysteria", "hysteria2", "tuic")));
+    // Ordered like the catalog. Sworkle publishes this contact in its own
+    // subscription response; replace it if a referral link is issued.
     private static final String[] REFERRALS = {
+            "https://t.me/invisibleshrimpbot?start=exitfy",
             "https://t.me/elixrobot?start=utm_exteragram",
-            "https://t.me/invisibleshrimpbot?start=exitfy"
+            "https://t.me/sworklevpnsupportbot"
     };
 
     private final AtomicStore store;
@@ -339,14 +349,23 @@ final class SubscriptionManager implements Closeable {
         Exception last = null;
         for (String candidate : subscriptionCandidateUrls(originalUrl)) {
             try {
-                LimitedHttpClient.Response response = http.get(
-                        candidate, requestHeaders(settings), requestScope);
-                if (response.status < 200 || response.status >= 300) {
-                    throw new IllegalStateException("HTTP " + response.status);
+                SubscriptionParser.ParseResult parsed = null;
+                LimitedHttpClient.Response response = null;
+                // Some providers answer an unrecognised client with a list of
+                // unusable placeholder entries instead of servers. Retrying
+                // under a second widely accepted agent recovers those without
+                // changing what every other provider already returns.
+                for (String agent : SUBSCRIPTION_USER_AGENTS) {
+                    response = http.get(candidate,
+                            requestHeaders(settings, agent), requestScope);
+                    if (response.status < 200 || response.status >= 300) {
+                        throw new IllegalStateException("HTTP " + response.status);
+                    }
+                    parsed = SubscriptionParser.parseDetailed(
+                            SubscriptionParser.decodeStrictUtf8(response.body));
+                    if (!parsed.nodes.isEmpty()) break;
                 }
-                String body = SubscriptionParser.decodeStrictUtf8(response.body);
-                SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(body);
-                if (parsed.nodes.isEmpty()) {
+                if (parsed == null || parsed.nodes.isEmpty()) {
                     throw new IllegalStateException(I18n.t(
                             "Подписка не содержит поддерживаемых серверов",
                             "Subscription contains no supported servers"));
@@ -832,8 +851,12 @@ final class SubscriptionManager implements Closeable {
     }
 
     private Map<String, String> requestHeaders(SettingsModel settings) {
+        return requestHeaders(settings, SUBSCRIPTION_USER_AGENT);
+    }
+
+    private Map<String, String> requestHeaders(SettingsModel settings, String userAgent) {
         Map<String, String> headers = new HashMap<>();
-        headers.put("User-Agent", "v2rayN/6.23");
+        headers.put("User-Agent", userAgent);
         headers.put("X-Device-Locale", I18n.isRussian() ? "ru" : "en");
         headers.put("X-Device-model", safeHeaderValue(deviceModel(), "Android"));
         headers.put("X-Device-OS", "Android");
@@ -1266,34 +1289,61 @@ final class SubscriptionManager implements Closeable {
                 ? ProviderCatalog.storageKey(bounded) : networkUrl;
     }
 
+    /**
+     * Moves stored data whenever the catalog order changes, so a saved
+     * subscription keeps belonging to the provider it was added under instead
+     * of silently reappearing under whichever provider now owns that index.
+     */
     private boolean migrateProviderLayoutLocked() throws Exception {
         JSONObject providers = data.optJSONObject("providers");
         JSONObject activeKeys = data.optJSONObject("activeKeys");
         JSONObject meta = data.optJSONObject("meta");
-        String legacyCustomKey = "3";
-        String customKey = String.valueOf(CUSTOM_PROVIDER_ID);
-        boolean changed = false;
+        int layout = meta.optInt("providerLayout", 0);
+        if (layout >= PROVIDER_LAYOUT_VERSION) return false;
 
-        if (meta.optInt("providerLayout", 0) < PROVIDER_LAYOUT_VERSION) {
-            JSONObject legacyCustom = providers.optJSONObject(legacyCustomKey);
-            providers.remove(customKey);
-            if (legacyCustom != null) providers.put(customKey, legacyCustom);
+        if (layout < 2) {
+            // v1 kept Custom at index 3; v2 moved it onto index 2.
+            remapProviderSlots(providers, activeKeys,
+                    new int[][]{{3, LEGACY_V2_CUSTOM_ID}});
+        }
+        // v3 leads with Shrimp, puts Elix second, inserts Sworkle third and
+        // moves Custom to the slot after it.
+        remapProviderSlots(providers, activeKeys,
+                new int[][]{{0, 1}, {1, 0},
+                        {LEGACY_V2_CUSTOM_ID, CUSTOM_PROVIDER_ID}});
+        meta.put("providerLayout", PROVIDER_LAYOUT_VERSION);
+        return true;
+    }
 
-            String legacySelection = activeKeys.optString(legacyCustomKey, "");
-            activeKeys.remove(customKey);
-            if (!legacySelection.isEmpty()) activeKeys.put(customKey, legacySelection);
-            meta.put("providerLayout", PROVIDER_LAYOUT_VERSION);
-            changed = true;
+    private static void remapProviderSlots(JSONObject providers,
+                                           JSONObject activeKeys, int[][] moves)
+            throws Exception {
+        JSONObject movedProviders = new JSONObject();
+        JSONObject movedKeys = new JSONObject();
+        for (int[] move : moves) {
+            String from = String.valueOf(move[0]);
+            String to = String.valueOf(move[1]);
+            JSONObject provider = providers.optJSONObject(from);
+            if (provider != null) movedProviders.put(to, provider);
+            String selection = activeKeys.optString(from, "");
+            if (!selection.isEmpty()) movedKeys.put(to, selection);
         }
-        if (providers.has(legacyCustomKey)) {
-            providers.remove(legacyCustomKey);
-            changed = true;
+        // Every source slot is cleared before anything lands, so a swap cannot
+        // overwrite the half that has not been read yet.
+        for (int[] move : moves) {
+            providers.remove(String.valueOf(move[0]));
+            activeKeys.remove(String.valueOf(move[0]));
+            providers.remove(String.valueOf(move[1]));
+            activeKeys.remove(String.valueOf(move[1]));
         }
-        if (activeKeys.has(legacyCustomKey)) {
-            activeKeys.remove(legacyCustomKey);
-            changed = true;
+        for (java.util.Iterator<String> keys = movedProviders.keys(); keys.hasNext(); ) {
+            String key = keys.next();
+            providers.put(key, movedProviders.get(key));
         }
-        return changed;
+        for (java.util.Iterator<String> keys = movedKeys.keys(); keys.hasNext(); ) {
+            String key = keys.next();
+            activeKeys.put(key, movedKeys.get(key));
+        }
     }
 
     private void persist() throws Exception {

@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 
 SCHEMA = 1
-FIXED_PROVIDERS = ("elix", "shrimp")
+FIXED_PROVIDERS = ("shrimp", "elix", "sworkle")
 MAX_PRIVATE_FILE_BYTES = 32 * 1024
 MAX_ENDPOINT_BYTES = 4096
 PACKAGE = "com.extera.plugins.exitfy"
