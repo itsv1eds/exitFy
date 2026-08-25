@@ -170,6 +170,21 @@ public class ExitFyDashboardStateTest {
     }
 
     @Test
+    public void everyCatalogSlotHasItsOwnName() {
+        // The chooser is built from these names. When a name and its position
+        // disagree, tapping an entry selects a different provider than the one
+        // that was read, which is exactly what a hard-coded list caused.
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (int index = 0; index <= SettingsModel.CUSTOM_PROVIDER_ID; index++) {
+            String name = ExitFyDashboardState.providerName(index);
+            assertFalse("slot " + index + " has no name", name.isEmpty());
+            assertTrue("duplicate name at slot " + index, seen.add(name));
+        }
+        assertEquals("Shrimp", ExitFyDashboardState.providerName(0));
+        assertEquals(ProviderCatalog.size(), SettingsModel.CUSTOM_PROVIDER_ID);
+    }
+
+    @Test
     public void tellsAFirstTimeUserWhatToDoNext() throws Exception {
         ExitFyDashboardState missing = ExitFyDashboardState.parse(new JSONObject()
                 .put("coreInstall", new JSONObject()

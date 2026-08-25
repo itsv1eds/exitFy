@@ -35,6 +35,13 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class CoreUpdaterTest {
+
+    static {
+        // These fixtures exercise digest, ELF and asset-set handling. Signature
+        // behaviour has its own test, and signing every fixture would need the
+        // private half of the release key, which never reaches the tree.
+        CoreUpdater.useDefaultManifestPublicKeyForTests("");
+    }
     @Test
     public void updateObserverReceivesOrderedStagesAndAdvertisedDownloadProgress()
             throws Exception {
@@ -551,6 +558,48 @@ public class CoreUpdaterTest {
             assertEquals("sb-v1.13.14-w1007", singUpdater.version());
             assertEquals("xray-v26.7.11-w1007", xrayUpdater.version());
         } finally {
+            http.close();
+            TestFiles.deleteRecursively(root);
+        }
+    }
+
+    @Test
+    public void aConfiguredKeyMakesTheManifestSignatureMandatory() throws Exception {
+        java.security.KeyPairGenerator generator =
+                java.security.KeyPairGenerator.getInstance("EC");
+        generator.initialize(new java.security.spec.ECGenParameterSpec("secp256r1"));
+        java.security.KeyPair pair = generator.generateKeyPair();
+        String publicKey = java.util.Base64.getEncoder()
+                .encodeToString(pair.getPublic().getEncoded());
+
+        byte[] core = fakeCore((byte) 41);
+        CoreServer signed = new CoreServer(core).sign(pair.getPrivate());
+        File root = Files.createTempDirectory("exitfy-signed-release").toFile();
+        LimitedHttpClient http = new LimitedHttpClient();
+        try {
+            CoreUpdater updater = new CoreUpdater(new AtomicStore(root), http,
+                    "arm64-v8a", CoreFamily.XRAY, signed.baseUrl() + "/releases");
+            updater.useManifestPublicKey(publicKey);
+            assertTrue(updater.checkForUpdate(true));
+            assertArrayEquals(core,
+                    Files.readAllBytes(updater.prepareForFirstLoad().toPath()));
+
+            // The same release is refused by a client holding a different key.
+            File other = Files.createTempDirectory("exitfy-foreign-key").toFile();
+            CoreUpdater foreign = new CoreUpdater(new AtomicStore(other), http,
+                    "arm64-v8a", CoreFamily.XRAY, signed.baseUrl() + "/releases");
+            foreign.useManifestPublicKey(java.util.Base64.getEncoder()
+                    .encodeToString(generator.generateKeyPair().getPublic().getEncoded()));
+            try {
+                foreign.checkForUpdate(true);
+                throw new AssertionError("foreign key accepted a signed release");
+            } catch (Exception expected) {
+                assertTrue(expected instanceof java.security.GeneralSecurityException
+                        || expected.getCause() instanceof java.security.GeneralSecurityException);
+            }
+            TestFiles.deleteRecursively(other);
+        } finally {
+            signed.close();
             http.close();
             TestFiles.deleteRecursively(root);
         }
@@ -1731,13 +1780,32 @@ public class CoreUpdaterTest {
         private final Thread worker;
         private final byte[] core;
         private final byte[] manifest;
-        private final byte[] releases;
+        private byte[] releases;
+        private byte[] manifestSignature;
         private final byte[] sourceBundle = "corresponding source fixture".getBytes(
                 StandardCharsets.UTF_8);
         private volatile boolean running = true;
 
         CoreServer(byte[] core) throws Exception {
             this(core, CoreFamily.XRAY, null);
+        }
+
+        /** Serves a detached manifest signature made by the supplied key. */
+        CoreServer sign(java.security.PrivateKey key) throws Exception {
+            java.security.Signature signer =
+                    java.security.Signature.getInstance("SHA256withECDSA");
+            signer.initSign(key);
+            signer.update(manifest);
+            manifestSignature = signer.sign();
+            JSONArray parsed = new JSONArray(new String(releases, StandardCharsets.UTF_8));
+            parsed.getJSONObject(0).getJSONArray("assets")
+                    .put(new JSONObject().put("id", 30)
+                            .put("name", "manifest.json.sig")
+                            .put("size", manifestSignature.length)
+                            .put("digest", "sha256:" + sha256(manifestSignature))
+                            .put("browser_download_url", baseUrl() + "/signature"));
+            releases = parsed.toString().getBytes(StandardCharsets.UTF_8);
+            return this;
         }
 
         CoreServer(byte[] core, CoreFamily family, ManifestMutation mutation) throws Exception {
@@ -1827,6 +1895,9 @@ public class CoreUpdaterTest {
                     int status;
                     if (path.equals("/releases") || path.startsWith("/releases?")) {
                         body = releases;
+                        status = 200;
+                    } else if (path.equals("/signature")) {
+                        body = manifestSignature;
                         status = 200;
                     } else if (path.equals("/manifest")) {
                         body = manifest;

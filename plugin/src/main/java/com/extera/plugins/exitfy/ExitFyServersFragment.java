@@ -318,16 +318,16 @@ final class ExitFyServersFragment
     }
 
     private void showProviderDialog() {
-        CharSequence[] labels = {
-                "Elix",
-                "Shrimp",
-                I18n.t("Пользовательский", "Custom"),
-        };
-        boolean[] available = {
-                state.providerAvailable(0),
-                state.providerAvailable(1),
-                state.providerAvailable(SettingsModel.CUSTOM_PROVIDER_ID),
-        };
+        // Built from the catalog itself: a hard-coded list silently drifts when
+        // the order changes, and an entry whose position no longer matches its
+        // name selects a different provider than the one that was tapped.
+        int count = SettingsModel.CUSTOM_PROVIDER_ID + 1;
+        CharSequence[] labels = new CharSequence[count];
+        boolean[] available = new boolean[count];
+        for (int index = 0; index < count; index++) {
+            labels[index] = ExitFyDashboardState.providerName(index);
+            available[index] = state.providerAvailable(index);
+        }
         showChoiceDialog(I18n.t("Провайдер", "Provider"), labels,
                 state.providerId, available, index -> {
                     if (index < 0 || index >= available.length

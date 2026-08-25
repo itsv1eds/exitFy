@@ -11,6 +11,7 @@ import java.util.Base64;
 
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 public class ManifestSignatureTest {
 
@@ -37,11 +38,32 @@ public class ManifestSignatureTest {
                 CoreUpdater.verifyManifestSignature(OPENSSL_KEY, tampered, signature));
     }
 
+    // Signed by the release key itself. If the embedded public key is ever
+    // replaced by one the publisher does not hold, every release would be
+    // refused on device; this fails the build instead.
+    private static final String RELEASE_KEY_PROBE =
+            "exitFy manifest signing key check";
+    private static final String RELEASE_KEY_PROBE_SIGNATURE =
+            "MEQCIAysANAGpYuWmUucxTtIeE0gUbP1XkIdY7Ibcxo+WcCsAiAagsRdSdr1z0cCgtjl"
+                    + "MQi9uBnJkHVK7lSRgADDO/KMTg==";
+
     @Test
-    public void unsetKeyKeepsThePreviousBehaviour() throws Exception {
-        assertEquals("", CoreUpdater.MANIFEST_PUBLIC_KEY);
-        // Nothing is claimed and nothing is rejected while no key is configured.
-        CoreUpdater.verifyManifestSignature(null, null);
+    public void theEmbeddedKeyIsTheOneThePublisherSignsWith() throws Exception {
+        assertFalse(CoreUpdater.MANIFEST_PUBLIC_KEY.isEmpty());
+        byte[] probe = RELEASE_KEY_PROBE.getBytes(StandardCharsets.UTF_8);
+        CoreUpdater.verifyManifestSignature(probe,
+                Base64.getDecoder().decode(RELEASE_KEY_PROBE_SIGNATURE));
+
+        byte[] tampered = (RELEASE_KEY_PROBE + " ").getBytes(StandardCharsets.UTF_8);
+        assertThrows(Exception.class, () -> CoreUpdater.verifyManifestSignature(
+                tampered, Base64.getDecoder().decode(RELEASE_KEY_PROBE_SIGNATURE)));
+        // An unsigned release must no longer pass now that a key is configured.
+        assertThrows(Exception.class,
+                () -> CoreUpdater.verifyManifestSignature(probe, null));
+    }
+
+    @Test
+    public void anUnconfiguredKeyClaimsNothing() throws Exception {
         CoreUpdater.verifyManifestSignature("", null, null);
     }
 

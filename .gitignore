@@ -9,3 +9,8 @@ dist-repro/
 
 # plugin build output; rebuild instead of committing a stale copy
 /exitfy.plugin
+
+# signing keys never belong in the tree
+*.pem
+*.key
+core-signing*

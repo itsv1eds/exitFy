@@ -50,11 +50,11 @@ class CoreUpdater {
     // mirror cannot substitute content; it can only observe the request, which
     // is why they are tried after the direct URL and never before it.
     // Base64 X.509 SubjectPublicKeyInfo of the P-256 key that signs manifests.
-    // While this is empty the updater behaves exactly as it did before and
-    // claims no signature guarantee, so an unsigned release is never presented
-    // as verified. Setting it makes a valid signature mandatory: releases
-    // published without one stop being accepted, which is the point.
-    static final String MANIFEST_PUBLIC_KEY = "";
+    // A valid signature is mandatory while this is set: releases published
+    // without one are refused, which is the point of setting it.
+    static final String MANIFEST_PUBLIC_KEY =
+            "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEQgYwW6QW8laTZBHcUesdFXIfnt+Vvnyr"
+                    + "XJjq2/q+AsI+NFgT38XkT5gjT3qPPFCT/xSH54jsmMejrbaNkA5oAQ==";
     private static final String MANIFEST_SIGNATURE_ASSET = "manifest.json.sig";
     private static final int MAX_SIGNATURE_BYTES = 1024;
 
@@ -84,6 +84,10 @@ class CoreUpdater {
     private final String abi;
     private final CoreFamily family;
     private final String releaseApi;
+    // Defaults to the embedded release key. Tests replace it so they can sign
+    // their own fixtures without the private half of the real one.
+    private static String defaultManifestPublicKey = MANIFEST_PUBLIC_KEY;
+    private String manifestPublicKey = defaultManifestPublicKey;
     private final ReentrantLock updateLock;
     private final ReentrantLock transactionLock;
     private final CommitHook commitHook;
@@ -476,7 +480,7 @@ class CoreUpdater {
         Set<String> expected = new HashSet<>();
         expected.add(assetName(ANDROID_ABI));
         expected.add("manifest.json");
-        if (!MANIFEST_PUBLIC_KEY.isEmpty()) expected.add(MANIFEST_SIGNATURE_ASSET);
+        if (!manifestPublicKey.isEmpty()) expected.add(MANIFEST_SIGNATURE_ASSET);
         if (family == CoreFamily.SING_BOX) {
             ReleaseVersion version = ReleaseVersion.parse(
                     release.optString("tag_name", ""), family);
@@ -510,7 +514,7 @@ class CoreUpdater {
      * exists.
      */
     private byte[] downloadManifestSignature(JSONObject release) throws Exception {
-        if (MANIFEST_PUBLIC_KEY.isEmpty()) return null;
+        if (manifestPublicKey.isEmpty()) return null;
         JSONObject asset = findAsset(release.optJSONArray("assets"),
                 MANIFEST_SIGNATURE_ASSET);
         if (asset == null) throw new IllegalStateException(
@@ -598,7 +602,7 @@ class CoreUpdater {
             throw lastFailure != null ? lastFailure : new IllegalStateException(
                     family.displayName + " manifest download failed");
         }
-        verifyManifestSignature(response.body,
+        verifyManifestSignature(manifestPublicKey, response.body,
                 downloadManifestSignature(release));
         JSONObject manifest = JsonGuard.object(
                 new String(response.body, StandardCharsets.UTF_8));
@@ -810,6 +814,16 @@ class CoreUpdater {
             if (!values.contains(candidate)) values.add(candidate);
         }
         return values;
+    }
+
+    /** Test seam: fixtures are signed by a key the test owns, not the release key. */
+    static void useDefaultManifestPublicKeyForTests(String value) {
+        defaultManifestPublicKey = value == null ? "" : value;
+    }
+
+    /** Test seam: lets a fixture be signed by a key the test owns. */
+    void useManifestPublicKey(String value) {
+        manifestPublicKey = value == null ? "" : value;
     }
 
     void markStartSuccess() {
