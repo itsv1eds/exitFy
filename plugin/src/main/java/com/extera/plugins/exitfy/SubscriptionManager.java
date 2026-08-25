@@ -59,12 +59,11 @@ final class SubscriptionManager implements Closeable {
             new LinkedHashSet<>(java.util.Arrays.asList(
                     "all", "vless", "vmess", "trojan", "shadowsocks",
                     "hysteria", "hysteria2", "tuic")));
-    // Ordered like the catalog. Sworkle publishes this contact in its own
-    // subscription response; replace it if a referral link is issued.
+    // Ordered like the catalog.
     private static final String[] REFERRALS = {
             "https://t.me/invisibleshrimpbot?start=exitfy",
             "https://t.me/elixrobot?start=utm_exteragram",
-            "https://t.me/sworklevpnsupportbot"
+            "https://t.me/sworklevpnbot?start=ref_2XJEM5CS"
     };
 
     private final AtomicStore store;
