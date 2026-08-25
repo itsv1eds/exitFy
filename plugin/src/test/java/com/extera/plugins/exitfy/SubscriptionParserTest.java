@@ -3122,14 +3122,19 @@ public class SubscriptionParserTest {
     }
 
     @Test
-    public void placeholderNodesFromARefusingSourceAreRejectedWithTheirOwnReason() {
-        // Verbatim shape of what a source returns when it does not accept the
-        // client: routable-looking URIs whose address can never be dialled.
-        String body = "dmxlc3M6Ly8wMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDBAMC4wLjAuMDoxP2VuY3J5cHRpb249bm9uZSZ0eXBlPXRjcCZzZWN1cml0eT1ub25lIyVFMiU5RCU4Qwp2bGVzczovLzAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwMDAwMEAwLjAuMC4wOjE/ZW5jcnlwdGlvbj1ub25lJnR5cGU9dGNwJnNlY3VyaXR5PW5vbmUjSGFwcA==";
+    public void aRefusingSourceKeepsTheNoticeItPutOnTheDeadEntries() {
+        // Verbatim shape of a refusal: routable-looking URIs whose address can
+        // never be dialled, carrying the explanation in their names.
+        String body = "dmxlc3M6Ly8wMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDBAMC4wLjAuMDoxP2VuY3J5cHRpb249bm9uZSZ0eXBlPXRjcCZzZWN1cml0eT1ub25lIyVFMiU5RCU4QyUyMCVEMCU5RiVEMSU4MCVEMCVCOCVEMCVCQiVEMCVCRSVEMCVCNiVEMCVCNSVEMCVCRCVEMCVCOCVEMCVCNSUyMCVEMCVCRCVEMCVCNSUyMCVEMCVCRiVEMCVCRSVEMCVCNCVEMCVCNCVEMCVCNSVEMSU4MCVEMCVCNiVEMCVCOCVEMCVCMiVEMCVCMCVEMCVCNSVEMSU4MiVEMSU4MSVEMSU4Rgp2bGVzczovLzAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwMDAwMEAwLjAuMC4wOjE/ZW5jcnlwdGlvbj1ub25lJnR5cGU9dGNwJnNlY3VyaXR5PW5vbmUjJUUyJUFEJTkwJUVGJUI4JThGJTIwJUQwJUEwJUQwJUI1JUQwJUJBJUQwJUJFJUQwJUJDJUQwJUI1JUQwJUJEJUQwJUI0JUQwJUJFJUQwJUIyJUQwJUIwJUQwJUJEJUQwJUJEJUQxJThCJUQwJUI1JTNBJTIwSGFwcCUyQyUyMFRocm9uZQ==";
         SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(body);
 
         assertTrue(parsed.nodes.isEmpty());
         assertEquals(2, parsed.rejected);
         assertTrue(parsed.reasons.contains(SubscriptionParser.UNREACHABLE_ONLY));
+        // The reason the source gave has to survive, or the user is told
+        // nothing while the answer was sitting in the response.
+        assertEquals(2, parsed.notices.size());
+        assertTrue(parsed.notices.get(0).contains("не поддерживается"));
+        assertTrue(parsed.notices.get(1).contains("Happ"));
     }
 }

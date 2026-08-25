@@ -130,11 +130,14 @@ final class SubscriptionParser {
                     addExactBounded(exact, ProtocolParser.parse(link), rejections);
                 }
             } catch (Exception error) {
-                rejections.reject(reasonCode(error));
+                String reason = reasonCode(error);
+                rejections.reject(reason);
+                if (UNREACHABLE_ONLY.equals(reason)) rejections.notice(link);
             }
         }
         return new ParseResult(new ArrayList<>(exact.values()), rejections.rejected,
-                new ArrayList<>(rejections.reasons));
+                new ArrayList<>(rejections.reasons),
+                new ArrayList<>(rejections.notices));
     }
 
     private static void addExactBounded(Map<String, ProtocolParser.Node> values,
@@ -3592,17 +3595,55 @@ final class SubscriptionParser {
         final List<ProtocolParser.Node> nodes;
         final int rejected;
         final List<String> reasons;
+        /**
+         * Text a source put in the names of unreachable entries. It is the only
+         * place such a source states why it refused, so it is carried out rather
+         * than discarded with the entries themselves.
+         */
+        final List<String> notices;
 
         ParseResult(List<ProtocolParser.Node> nodes, int rejected, List<String> reasons) {
+            this(nodes, rejected, reasons, new ArrayList<>());
+        }
+
+        ParseResult(List<ProtocolParser.Node> nodes, int rejected, List<String> reasons,
+                    List<String> notices) {
             this.nodes = nodes;
             this.rejected = rejected;
             this.reasons = reasons;
+            this.notices = notices;
         }
     }
 
     private static final class RejectionTracker {
+        private static final int MAX_NOTICES = 6;
+        private static final int MAX_NOTICE_CHARS = 120;
         int rejected;
         final LinkedHashSet<String> reasons = new LinkedHashSet<>();
+        final LinkedHashSet<String> notices = new LinkedHashSet<>();
+
+        /** Keeps the readable name a refusing source put on a dead entry. */
+        void notice(String link) {
+            if (notices.size() >= MAX_NOTICES || link == null) return;
+            int hash = link.indexOf('#');
+            if (hash < 0 || hash + 1 >= link.length()) return;
+            String text;
+            try {
+                text = java.net.URLDecoder.decode(
+                        link.substring(hash + 1), StandardCharsets.UTF_8.name());
+            } catch (Exception invalid) {
+                return;
+            }
+            StringBuilder cleaned = new StringBuilder(Math.min(text.length(), MAX_NOTICE_CHARS));
+            for (int index = 0; index < text.length()
+                    && cleaned.length() < MAX_NOTICE_CHARS; index++) {
+                char value = text.charAt(index);
+                if (value == '\n' || value == '\r' || value == '\t') value = ' ';
+                if (!Character.isISOControl(value)) cleaned.append(value);
+            }
+            String result = cleaned.toString().trim();
+            if (!result.isEmpty()) notices.add(result);
+        }
 
         void reject(String reason) {
             rejected++;

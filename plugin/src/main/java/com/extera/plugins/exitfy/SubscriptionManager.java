@@ -371,16 +371,20 @@ final class SubscriptionManager implements Closeable {
                     // user at their own configuration instead of the refusal.
                     boolean refused = parsed != null && parsed.rejected > 0
                             && parsed.reasons.contains(SubscriptionParser.UNREACHABLE_ONLY);
-                    throw new IllegalStateException(refused
+                    if (!refused) {
+                        throw new IllegalStateException(I18n.t(
+                                "Подписка не содержит поддерживаемых серверов",
+                                "Subscription contains no supported servers"));
+                    }
+                    // The source stated its reason in the names of the dead
+                    // entries. Repeating it verbatim tells the user far more
+                    // than any wording of ours, so it is shown when present.
+                    String notice = joinNotices(parsed.notices);
+                    throw new IllegalStateException(notice.isEmpty()
                             ? I18n.t(
-                            "Источник не отдаёт серверы этому приложению. "
-                                    + "Используйте встроенный источник или попросите "
-                                    + "провайдера разрешить exitFy",
-                            "This source refuses to serve this app. Use a built-in "
-                                    + "source, or ask the provider to allow exitFy")
-                            : I18n.t(
-                            "Подписка не содержит поддерживаемых серверов",
-                            "Subscription contains no supported servers"));
+                            "Источник не отдаёт серверы этому приложению",
+                            "This source refuses to serve this app")
+                            : I18n.t("Ответ источника: ", "The source answered: ") + notice);
                 }
                 int bounded = boundedProvider(providerId);
                 String title = bounded < ProviderCatalog.size()
@@ -860,6 +864,18 @@ final class SubscriptionManager implements Closeable {
         } catch (Exception error) {
             return false;
         }
+    }
+
+    private static String joinNotices(List<String> notices) {
+        if (notices == null || notices.isEmpty()) return "";
+        StringBuilder output = new StringBuilder();
+        for (String notice : notices) {
+            if (notice == null || notice.trim().isEmpty()) continue;
+            if (output.length() > 0) output.append(' ');
+            output.append(notice.trim());
+            if (output.length() > 400) break;
+        }
+        return ErrorSanitizer.clean(output.toString());
     }
 
     private Map<String, String> requestHeaders(SettingsModel settings) {
