@@ -51,7 +51,7 @@ def proguardFile = file("proguard-rules.pro")
 def outputPlugin = file(findProperty("pluginOutputFile") ?: "${projectDir.parent}/exitfy.plugin")
 def outputAarName = "${rootProject.name}-plugin.aar"
 def pluginId = "exitFy_v2"
-def pluginVersion = "4.0.0"
+def pluginVersion = "4.0.1"
 def settingsSchema = 6
 def pluginAuthor = "@exteraPluginsSup"
 def pluginIcon = "exitFy/1"
@@ -1051,8 +1051,14 @@ tasks.register("validateEmbeddedDexConfig") {
             throw new GradleException("Plugin settings registry placeholder is missing")
         }
         String settingsBody = pluginText.substring(settingsStart, settingsEnd)
-        if (!settingsBody.contains('return [Text(text="@exteraPluginsSup")]')) {
-            throw new GradleException("Settings registry must contain only the host placeholder")
+        // The registry may point at the native screen, but it must never hold
+        // a setting: a second copy of one setting is what this forbids. Only
+        // Text rows are allowed, and none of them may carry a value.
+        if (!settingsBody.contains('Text(text="@exteraPluginsSup"')
+                || settingsBody.contains("on_change")
+                || (settingsBody =~ /(?m)^\s{12}([A-Z][A-Za-z]*)\(/).collect { it[1] }
+                        .any { it != "Text" }) {
+            throw new GradleException("Settings registry must only navigate, never hold state")
         }
         if (!pluginText.contains('self.set_setting("core_policy", "auto"')
                 || pluginText.contains('"core_policy": self._core_policy_value()')

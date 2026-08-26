@@ -18,7 +18,7 @@ __id__ = "exitFy_v2"
 __name__ = "exitFy"
 __description__ = "Application download speed optimization"
 __author__ = "@exteraPluginsSup"
-__version__ = "4.0.0"
+__version__ = "4.0.1"
 __icon__ = "exitFy/1"
 __app_version__ = ">=12.5.1"
 __sdk_version__ = ">=1.4.3.8"
@@ -57,6 +57,11 @@ _TRANSLATIONS = {
     "runtime_not_started": ("exitFy не запущен: ", "exitFy did not start: "),
     "runtime_unavailable": ("Runtime exitFy недоступен", "exitFy runtime is unavailable"),
     "menu_settings": ("Настройки exitFy", "exitFy settings"),
+    "open_dashboard": ("Открыть exitFy", "Open exitFy"),
+    "open_dashboard_hint": (
+        "Серверы и подключение настраиваются там же",
+        "Servers and the connection are set up there",
+    ),
     "legacy_still_enabled": (
         "Старый плагин exitFy включён. Выключите его, иначе оба будут "
         "переключать прокси Telegram",
@@ -712,7 +717,16 @@ class ExitFyPlugin(BasePlugin):
         return json.dumps(self._settings_dict(), separators=(",", ":"))
 
     def create_settings(self):
-        return [Text(text="@exteraPluginsSup")]
+        return [
+            Text(
+                text=_t("open_dashboard"),
+                icon="msg_settings",
+                accent=True,
+                on_click=self._open_dashboard,
+            ),
+            Text(text=_t("open_dashboard_hint"), icon="msg_info"),
+            Text(text="@exteraPluginsSup", icon="msg_link"),
+        ]
 
     def _register_menu(self):
         entries = (

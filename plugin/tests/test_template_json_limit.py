@@ -23,7 +23,7 @@ def load_template_static_method(name):
 
 
 class TemplateSettingsContractTest(unittest.TestCase):
-    def test_settings_ast_contains_only_the_registry_placeholder(self):
+    def test_settings_registry_only_navigates_and_never_holds_state(self):
         source = TEMPLATE.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(TEMPLATE))
         plugin = next(node for node in tree.body
@@ -32,10 +32,11 @@ class TemplateSettingsContractTest(unittest.TestCase):
             node.name: node for node in plugin.body if isinstance(node, ast.FunctionDef)
         }
         settings = methods["create_settings"]
-        calls = [node for node in ast.walk(settings) if isinstance(node, ast.Call)]
-        self.assertEqual(1, len(calls))
-        self.assertIsInstance(calls[0].func, ast.Name)
-        self.assertEqual("Text", calls[0].func.id)
+        # The registry may point at the native screen but must never hold a
+        # setting itself: two copies of one setting is what this forbids.
+        calls = [node for node in ast.walk(settings)
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)]
+        self.assertEqual({"Text", "_t"}, {call.func.id for call in calls})
         self.assertNotIn("_create_native_settings", methods)
         self.assertNotIn("_create_servers_settings", methods)
         for token in ("Header(", "Switch(", "Selector(", "Custom(", "Divider(",

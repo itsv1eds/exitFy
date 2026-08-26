@@ -102,7 +102,7 @@ def load_plugin_class(overrides=None):
             "/private/exitfy", "/private/bridge.so", "arm64-v8a"
         ),
         "__id__": "exitFy_v2",
-        "__version__": "4.0.0",
+        "__version__": "4.0.1",
         "PROVIDER_CATALOG_VERSION": 3,
         "CUSTOM_PROVIDER_ID": 3,
         "CUSTOM_V2_ID": 2,
@@ -209,14 +209,18 @@ class TemplateLifecycleTest(unittest.TestCase):
         self.assertEqual(1, runtime.stops)
         self.assertTrue(errors)
 
-    def test_settings_registry_contains_only_author_placeholder(self):
-        plugin_type, *_ = load_plugin_class()
-        rows = plugin_type().create_settings()
+    def test_settings_registry_opens_the_dashboard(self):
+        plugin_type, _runtime, _errors, opened, _infos = load_plugin_class()
+        plugin = plugin_type()
+        plugin._runtime_ready = True
+        rows = plugin.create_settings()
 
-        self.assertEqual(1, len(rows))
-        self.assertEqual("Text", type(rows[0]).__name__)
-        self.assertEqual("@exteraPluginsSup", rows[0].text)
-        self.assertEqual({"text"}, set(vars(rows[0])))
+        self.assertEqual(["Text", "Text", "Text"],
+                         [type(row).__name__ for row in rows])
+        self.assertEqual("@exteraPluginsSup", rows[2].text)
+
+        rows[0].on_click(None)
+        self.assertEqual(1, len(opened))
 
     def test_both_menu_entries_open_dashboard_directly(self):
         plugin_type, runtime, _errors, opened, _infos = load_plugin_class()
