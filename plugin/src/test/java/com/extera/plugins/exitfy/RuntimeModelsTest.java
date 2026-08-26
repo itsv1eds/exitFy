@@ -225,7 +225,7 @@ public class RuntimeModelsTest {
         try {
             String valid = new org.json.JSONObject()
                     .put("pluginId", "exitFy_v2")
-                    .put("pluginVersion", "4.0.0-beta.29")
+                    .put("pluginVersion", "4.0.0")
                     .put("settingsSchema", 6)
                     .put("dataDir", root.getAbsolutePath())
                     .put("nativeBridgePath", bridge.getAbsolutePath())
@@ -247,13 +247,13 @@ public class RuntimeModelsTest {
             }
             try {
                 BootstrapConfig.parse(valid.replace(
-                        "4.0.0-beta.29", "4.0.0-beta.23"));
+                        "4.0.0", "4.0.0-beta.23"));
                 throw new AssertionError("old bootstrap version accepted");
             } catch (IllegalArgumentException expected) {
                 assertTrue(expected.getMessage().contains("version"));
             }
             File versionedBridge = new File(root,
-                    "bridge/4.0.0-beta.29/arm64-v8a/libexitfy_bridge.so");
+                    "bridge/4.0.0/arm64-v8a/libexitfy_bridge.so");
             assertTrue(versionedBridge.getParentFile().mkdirs());
             assertTrue(versionedBridge.createNewFile());
             try {
