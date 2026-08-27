@@ -51,7 +51,7 @@ def proguardFile = file("proguard-rules.pro")
 def outputPlugin = file(findProperty("pluginOutputFile") ?: "${projectDir.parent}/exitfy.plugin")
 def outputAarName = "${rootProject.name}-plugin.aar"
 def pluginId = "exitFy_v2"
-def pluginVersion = "4.0.1"
+def pluginVersion = "4.0.2"
 def settingsSchema = 6
 def pluginAuthor = "@exteraPluginsSup"
 def pluginIcon = "exitFy/1"
@@ -924,7 +924,7 @@ tasks.register("validateEmbeddedDexConfig") {
                 "plugin author"      : "__author__ = \"${pluginAuthor}\"",
                 "plugin icon"        : "__icon__ = \"${pluginIcon}\"",
                 "minimum app"        : "__app_version__ = \">=12.5.1\"",
-                "minimum sdk"        : "__sdk_version__ = \">=1.4.3.8\"",
+                "minimum sdk"        : "__sdk_version__ = \">=1.4.3.3\"",
                 "entry class"        : "ENTRY_CLASS = \"${dexEntryClass}\"",
                 "DEX keeper prefix"  : "DEX_KEEPER_PREFIX = \"exitfy-dex-keeper:exitFy_v2:\"",
                 "DEX keeper reuse"   : "retained = self._find_retained_dex()",
@@ -1883,7 +1883,7 @@ tasks.register("verifyPluginArtifact") {
                 "__author__ = \"${pluginAuthor}\"",
                 "__icon__ = \"${pluginIcon}\"",
                 "__app_version__ = \">=12.5.1\"",
-                "__sdk_version__ = \">=1.4.3.8\"",
+                "__sdk_version__ = \">=1.4.3.3\"",
         ].each { metadata ->
             if (!text.contains(metadata)) throw new GradleException("Generated metadata is invalid: ${metadata}")
         }
