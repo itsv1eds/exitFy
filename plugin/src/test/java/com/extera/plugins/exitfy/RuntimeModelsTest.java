@@ -1818,14 +1818,36 @@ public class RuntimeModelsTest {
     }
 
     @Test
+    public void theScheduledCheckPeriodOnlyAcceptsOfferedValues() {
+        SettingsModel base = SettingsModel.defaults();
+        assertEquals(0, base.autoCheckMinutes);
+        assertFalse(base.refreshOnOpen);
+        assertEquals(60, base.withSetting("auto_check_minutes", 60).autoCheckMinutes);
+        for (Object rejected : new Object[]{7, -15, 1440, 1.5d, "60"}) {
+            try {
+                base.withSetting("auto_check_minutes", rejected);
+                throw new AssertionError("unexpected period accepted: " + rejected);
+            } catch (IllegalArgumentException expected) {
+                assertTrue(expected.getMessage().contains("auto_check_minutes"));
+            }
+        }
+        // A stored value outside the offered set falls back to off rather than
+        // scheduling something nobody chose.
+        assertEquals(0, SettingsModel.fromJson(
+                "{\"auto_check_minutes\":3}").autoCheckMinutes);
+    }
+
+    @Test
     public void normalizingAProviderKeepsEverySetting() {
         SettingsModel value = new SettingsModel(true, 0, "hwid", 6,
-                SettingsModel.PING_TCP, true, true);
+                SettingsModel.PING_TCP, true, true, true, 60);
         SettingsModel rebuilt = value.withSetting("provider_id", 1);
 
         assertTrue(rebuilt.dualCore);
         assertTrue(rebuilt.failover);
         assertEquals(SettingsModel.PING_TCP, rebuilt.pingType);
         assertEquals("hwid", rebuilt.customHwid);
+        assertTrue(rebuilt.refreshOnOpen);
+        assertEquals(60, rebuilt.autoCheckMinutes);
     }
 }

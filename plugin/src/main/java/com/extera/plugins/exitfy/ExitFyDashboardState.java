@@ -27,6 +27,8 @@ final class ExitFyDashboardState {
     final String pingType;
     final boolean dualCore;
     final boolean failover;
+    final boolean refreshOnOpen;
+    final int autoCheckMinutes;
     final boolean dualCoreActive;
     final boolean customHwidSet;
     final String defaultHwid;
@@ -62,6 +64,8 @@ final class ExitFyDashboardState {
                 ? SettingsModel.PING_TCP : SettingsModel.PING_PROXY_GET;
         dualCore = value.optBoolean("dualCore", false);
         failover = value.optBoolean("failover", false);
+        refreshOnOpen = value.optBoolean("refreshOnOpen", false);
+        autoCheckMinutes = value.optInt("autoCheckMinutes", 0);
         dualCoreActive = value.optBoolean("dualCoreActive", false);
         customHwidSet = value.optBoolean("customHwidSet", false);
         defaultHwid = safeLabel(value.optString("defaultHwid", ""), 32, "");
@@ -205,6 +209,10 @@ final class ExitFyDashboardState {
             return I18n.t(
                     "TCP-проверка неприменима",
                     "TCP check not applicable");
+        }
+        if ("proxy_busy".equals(activePingStatus)) {
+            return I18n.t("Прокси Telegram занят другим приложением",
+                    "Another app owns the Telegram proxy");
         }
         if ("cancelled".equals(activePingStatus)) {
             return I18n.t("Проверка отменена", "Check cancelled");

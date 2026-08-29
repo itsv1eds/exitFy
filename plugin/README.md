@@ -78,6 +78,13 @@ switching does not require the server screen. That screen lists 50 servers per
 page by default and can show 200; probing stays capped at 50 regardless, since
 listing and probing cost different things.
 
+The `refresh_on_open` setting reloads a stale source when the app comes back,
+and `auto_check_minutes` measures the current source on a schedule. Scheduled
+checks are always TCP: the full-path check borrows Telegram's proxy for its
+duration, which is not something to do to a working connection on a timer. When
+that borrow is refused because another app owns the proxy, every row now says
+so instead of reporting the check as cancelled.
+
 The `failover` setting, off by default, moves to the next server of the source
 after the selected one fails to carry the connection twice in a row. Only a
 failure to connect counts: a subscription that will not refresh leaves the

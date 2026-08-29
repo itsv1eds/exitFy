@@ -196,6 +196,11 @@ Device testing is performed by the beta tester after receiving
   next server of the source is selected after the second failure and not
   before. Confirm a subscription that fails to refresh never moves the
   selection. With failover off, the selection must never change on its own.
+- Configure a Telegram proxy outside exitFy and run the full-path check.
+  Every row must state that the proxy is in use, not that the check was
+  cancelled. Turn on refresh-on-open and a check period, background the app and
+  return: the source refreshes when stale and the scheduled check runs over TCP
+  without dropping a live connection.
 - Confirm Advanced reports both component versions, and that no screen outside
   Advanced names an engine.
 - With the experiment on, connect on an XHTTP server and then on a Hysteria

@@ -22,6 +22,8 @@ final class ExitFyPreferencesFragment
     private SettingRow coreVersionRow;
     private String coreVersions = "";
     private SettingRow failoverRow;
+    private SettingRow refreshOnOpenRow;
+    private SettingRow autoCheckRow;
     private boolean commandBusy;
 
     @Override
@@ -45,6 +47,20 @@ final class ExitFyPreferencesFragment
                 "HWID", "");
         setSafeClick(customHwidRow.view, this::showCustomHwidDialog);
         content.addView(customHwidRow.view, sectionParams());
+
+        refreshOnOpenRow = settingRow(context, R.drawable.msg_download,
+                I18n.t("Обновлять подписки при входе", "Refresh subscriptions on open"),
+                I18n.t("При открытии клиента, если списки устарели",
+                        "When the app opens and the lists are stale"));
+        setSafeClick(refreshOnOpenRow.view, this::showRefreshOnOpenDialog);
+        content.addView(refreshOnOpenRow.view, sectionParams());
+
+        autoCheckRow = settingRow(context, R.drawable.msg_speed,
+                I18n.t("Автопроверка задержки", "Automatic latency check"),
+                I18n.t("Периодически и всегда по TCP, чтобы не прерывать подключение",
+                        "On a schedule, always over TCP so the connection is not interrupted"));
+        setSafeClick(autoCheckRow.view, this::showAutoCheckDialog);
+        content.addView(autoCheckRow.view, sectionParams());
 
         failoverRow = settingRow(context, R.drawable.msg_retry,
                 I18n.t("Менять сервер при обрыве", "Switch server on failure"), "");
@@ -75,7 +91,8 @@ final class ExitFyPreferencesFragment
         state = next;
         if (pingTypeRow == null || customHwidRow == null
                 || dualCoreRow == null || coreVersionRow == null
-                || failoverRow == null) {
+                || failoverRow == null || refreshOnOpenRow == null
+                || autoCheckRow == null) {
             return;
         }
         if (next.runtimeAvailable) {
@@ -88,6 +105,9 @@ final class ExitFyPreferencesFragment
                     ? I18n.t("Загрузка…", "Loading…") : coreVersions);
             failoverRow.setValue(next.failover
                     ? I18n.t("Включено", "On") : I18n.t("Выключено", "Off"));
+            refreshOnOpenRow.setValue(next.refreshOnOpen
+                    ? I18n.t("Включено", "On") : I18n.t("Выключено", "Off"));
+            autoCheckRow.setValue(autoCheckLabel(next.autoCheckMinutes));
         } else {
             String unavailable = I18n.t("Runtime недоступен", "Runtime unavailable");
             pingTypeRow.setValue(unavailable);
@@ -95,6 +115,8 @@ final class ExitFyPreferencesFragment
             dualCoreRow.setValue(unavailable);
             coreVersionRow.setValue(unavailable);
             failoverRow.setValue(unavailable);
+            refreshOnOpenRow.setValue(unavailable);
+            autoCheckRow.setValue(unavailable);
         }
         updateRowsEnabled();
     }
@@ -111,6 +133,8 @@ final class ExitFyPreferencesFragment
         if (customHwidRow != null) customHwidRow.setEnabled(enabled);
         if (dualCoreRow != null) dualCoreRow.setEnabled(enabled);
         if (failoverRow != null) failoverRow.setEnabled(enabled);
+        if (refreshOnOpenRow != null) refreshOnOpenRow.setEnabled(enabled);
+        if (autoCheckRow != null) autoCheckRow.setEnabled(enabled);
     }
 
     private void showPingTypeDialog() {
@@ -167,6 +191,44 @@ final class ExitFyPreferencesFragment
                             "Серверы обоих типов теперь работают без перезапуска",
                             "Servers of both kinds now work without a restart"), true);
                 });
+    }
+
+    private void showRefreshOnOpenDialog() {
+        CharSequence[] labels = {
+                I18n.t("Выключено", "Off"),
+                I18n.t("Включено", "On"),
+        };
+        showChoiceDialog(
+                I18n.t("Обновлять подписки при входе", "Refresh subscriptions on open"),
+                labels, state.refreshOnOpen ? 1 : 0, index -> {
+                    boolean value = index == 1;
+                    if (value != state.refreshOnOpen) setSetting("refresh_on_open", value);
+                });
+    }
+
+    private void showAutoCheckDialog() {
+        int[] choices = SettingsModel.AUTO_CHECK_CHOICES;
+        CharSequence[] labels = new CharSequence[choices.length];
+        int selected = 0;
+        for (int index = 0; index < choices.length; index++) {
+            labels[index] = autoCheckLabel(choices[index]);
+            if (choices[index] == state.autoCheckMinutes) selected = index;
+        }
+        showChoiceDialog(I18n.t("Автопроверка задержки", "Automatic latency check"),
+                labels, selected, index -> {
+                    if (index < 0 || index >= choices.length) return;
+                    if (choices[index] == state.autoCheckMinutes) return;
+                    setSetting("auto_check_minutes", choices[index]);
+                });
+    }
+
+    private static String autoCheckLabel(int minutes) {
+        if (minutes <= 0) return I18n.t("Выключено", "Off");
+        if (minutes % 60 == 0) {
+            return I18n.t("Каждые ", "Every ") + (minutes / 60)
+                    + I18n.t(" ч", " h");
+        }
+        return I18n.t("Каждые ", "Every ") + minutes + I18n.t(" мин", " min");
     }
 
     private void showFailoverDialog() {

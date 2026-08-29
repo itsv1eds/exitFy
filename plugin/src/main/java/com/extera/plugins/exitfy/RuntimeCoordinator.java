@@ -231,6 +231,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         safeScheduleWithFixedDelay(this::scheduledCoreCheck,
                 24L * 60L * 60L, 24L * 60L * 60L, TimeUnit.SECONDS);
         safeScheduleWithFixedDelay(this::healthTick, 60, 60, TimeUnit.SECONDS);
+        safeScheduleWithFixedDelay(this::runScheduledLatencyCheck, 300, 300, TimeUnit.SECONDS);
     }
 
     void updateSettings(String json) {
@@ -341,6 +342,12 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         }
         if (previous.failover != next.failover) {
             settingPersistenceRevisions.record("failover", revision);
+        }
+        if (previous.refreshOnOpen != next.refreshOnOpen) {
+            settingPersistenceRevisions.record("refresh_on_open", revision);
+        }
+        if (previous.autoCheckMinutes != next.autoCheckMinutes) {
+            settingPersistenceRevisions.record("auto_check_minutes", revision);
         }
     }
 
@@ -765,6 +772,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             value.put("pingType", current.pingType);
             value.put("dualCore", current.dualCore);
             value.put("failover", current.failover);
+            value.put("refreshOnOpen", current.refreshOnOpen);
+            value.put("autoCheckMinutes", current.autoCheckMinutes);
             value.put("dualCoreActive", NativeCoreRuntime.dualCoreEnabled());
             // Never expose a custom identifier in a screen-state snapshot
             // which can outlive the editor dialog.
@@ -812,7 +821,47 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
 
     void onAppResume() {
         if (!loaded) return;
-        safeExecute(() -> checkRuntimeAndProxy("app_resume"));
+        safeExecute(() -> {
+            checkRuntimeAndProxy("app_resume");
+            refreshSubscriptionsOnOpen();
+        });
+    }
+
+    /**
+     * Reloads the selected source when the app comes back, for people who
+     * would otherwise refresh by hand every time. Off unless asked for: it is
+     * a network request the user did not initiate.
+     */
+    private void refreshSubscriptionsOnOpen() {
+        if (!settings.refreshOnOpen || !loaded) return;
+        try {
+            if (!subscriptions.isStale(settings.providerId)) return;
+            requestSubscriptionRefresh(false, revisionGate.currentToken(), false);
+        } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * Measures the current page of servers on a schedule. Always TCP: the
+     * full-path check has to take Telegram's proxy away for the duration, and
+     * doing that to a working connection on a timer is not something anyone
+     * asked for.
+     */
+    private void runScheduledLatencyCheck() {
+        try {
+            int minutes = settings.autoCheckMinutes;
+            if (minutes <= 0 || !loaded) return;
+            long now = System.currentTimeMillis();
+            if (now - lastAutoCheckAt < minutes * 60_000L) return;
+            if (!"idle".equals(pingState) && !"completed".equals(pingState)) return;
+            List<ProtocolParser.Node> nodes = subscriptions.nodes(settings.providerId);
+            if (nodes.isEmpty()) return;
+            List<ProtocolParser.Node> batch = nodes.size() <= SubscriptionManager.MAX_PING_KEYS
+                    ? nodes : new ArrayList<>(nodes.subList(0, SubscriptionManager.MAX_PING_KEYS));
+            lastAutoCheckAt = now;
+            startManualPing(batch, SettingsModel.PING_TCP);
+        } catch (Exception ignored) {
+        }
     }
 
     @Override
@@ -912,7 +961,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         SettingsModel previous = settings;
         SettingsModel disabled = new SettingsModel(false, previous.providerId,
                 previous.customHwid, previous.schemaVersion, previous.pingType,
-                previous.dualCore, previous.failover);
+                previous.dualCore, previous.failover,
+                previous.refreshOnOpen, previous.autoCheckMinutes);
         long persistRevision;
         synchronized (settingsRequestLock) {
             synchronized (subscriptionRefreshControl) {
@@ -936,7 +986,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         SettingsModel previous = settings;
         SettingsModel custom = new SettingsModel(previous.enabled, SettingsModel.CUSTOM_PROVIDER_ID,
                 previous.customHwid, previous.schemaVersion, previous.pingType,
-                previous.dualCore, previous.failover);
+                previous.dualCore, previous.failover,
+                previous.refreshOnOpen, previous.autoCheckMinutes);
         long persistRevision;
         synchronized (settingsRequestLock) {
             synchronized (subscriptionRefreshControl) {
@@ -1244,6 +1295,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         } catch (Exception ignored) {
         }
     }
+
+    private volatile long lastAutoCheckAt;
 
     private void fail(Exception error) {
         String message = ErrorSanitizer.clean(error == null ? ""
@@ -1610,7 +1663,14 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 subscriptions.cancelPendingProbes(nodes);
             } catch (ProxySession.ExternalProxyChangeException externalChange) {
                 externalProxyChanged = true;
-                subscriptions.cancelPendingProbes(nodes);
+                // The full-path check has to borrow Telegram's proxy setting.
+                // Something else owns it, and reporting that as "cancelled"
+                // told the user nothing about what to do next.
+                for (ProtocolParser.Node node : nodes) {
+                    subscriptions.setProbeResult(
+                            node.normalizedKey, "proxy_busy", -1L);
+                    pingCompleted++;
+                }
             } catch (Exception error) {
                 if (pauseAttempted && resumeGuard == null) {
                     markProbeGuardUnavailable(nodes);

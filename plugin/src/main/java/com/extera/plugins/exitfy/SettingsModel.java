@@ -19,6 +19,9 @@ final class SettingsModel {
     final String pingType;
     final boolean dualCore;
     final boolean failover;
+    final boolean refreshOnOpen;
+    /** Minutes between automatic latency checks; 0 keeps them off. */
+    final int autoCheckMinutes;
 
     SettingsModel(boolean enabled, int providerId, String customHwid,
                   int schemaVersion, String pingType) {
@@ -28,6 +31,13 @@ final class SettingsModel {
     SettingsModel(boolean enabled, int providerId, String customHwid,
                   int schemaVersion, String pingType, boolean dualCore,
                   boolean failover) {
+        this(enabled, providerId, customHwid, schemaVersion, pingType, dualCore,
+                failover, false, 0);
+    }
+
+    SettingsModel(boolean enabled, int providerId, String customHwid,
+                  int schemaVersion, String pingType, boolean dualCore,
+                  boolean failover, boolean refreshOnOpen, int autoCheckMinutes) {
         this.enabled = enabled;
         this.providerId = Math.max(0, Math.min(providerId, CUSTOM_PROVIDER_ID));
         this.customHwid = normalizeCustomHwid(customHwid);
@@ -35,6 +45,8 @@ final class SettingsModel {
         this.pingType = normalizePingType(pingType);
         this.dualCore = dualCore;
         this.failover = failover;
+        this.refreshOnOpen = refreshOnOpen;
+        this.autoCheckMinutes = normalizeAutoCheckMinutes(autoCheckMinutes);
     }
 
     static SettingsModel defaults() {
@@ -51,7 +63,9 @@ final class SettingsModel {
                     object.optInt("schema_version", 6),
                     object.optString("ping_type", PING_PROXY_GET),
                     object.optBoolean("dual_core", false),
-                    object.optBoolean("failover", false)
+                    object.optBoolean("failover", false),
+                    object.optBoolean("refresh_on_open", false),
+                    object.optInt("auto_check_minutes", 0)
             );
         } catch (Exception ignored) {
             return defaults();
@@ -68,6 +82,8 @@ final class SettingsModel {
             object.put("ping_type", pingType);
             object.put("dual_core", dualCore);
             object.put("failover", failover);
+            object.put("refresh_on_open", refreshOnOpen);
+            object.put("auto_check_minutes", autoCheckMinutes);
         } catch (Exception ignored) {
         }
         return object;
@@ -81,7 +97,8 @@ final class SettingsModel {
                     throw new IllegalArgumentException("enabled must be boolean");
                 }
                 return new SettingsModel((Boolean) value, providerId, customHwid,
-                        schemaVersion, pingType, dualCore, failover);
+                        schemaVersion, pingType, dualCore, failover,
+                        refreshOnOpen, autoCheckMinutes);
             case "provider_id":
                 if (!(value instanceof Number)) {
                     throw new IllegalArgumentException("provider_id must be integer");
@@ -99,20 +116,23 @@ final class SettingsModel {
                 }
                 int provider = (int) providerValue;
                 return new SettingsModel(enabled, provider, customHwid,
-                        schemaVersion, pingType, dualCore, failover);
+                        schemaVersion, pingType, dualCore, failover,
+                        refreshOnOpen, autoCheckMinutes);
             case "ping_type":
                 if (!(value instanceof String)
                         || !(PING_PROXY_GET.equals(value) || PING_TCP.equals(value))) {
                     throw new IllegalArgumentException("invalid ping_type");
                 }
                 return new SettingsModel(enabled, providerId, customHwid,
-                        schemaVersion, (String) value, dualCore, failover);
+                        schemaVersion, (String) value, dualCore, failover,
+                        refreshOnOpen, autoCheckMinutes);
             case "custom_hwid":
                 if (!(value instanceof String)) {
                     throw new IllegalArgumentException("custom_hwid must be string");
                 }
                 return new SettingsModel(enabled, providerId, (String) value,
-                        schemaVersion, pingType, dualCore, failover);
+                        schemaVersion, pingType, dualCore, failover,
+                        refreshOnOpen, autoCheckMinutes);
             case "dual_core":
                 if (!(value instanceof Boolean)) {
                     throw new IllegalArgumentException("dual_core must be boolean");
@@ -124,7 +144,27 @@ final class SettingsModel {
                     throw new IllegalArgumentException("failover must be boolean");
                 }
                 return new SettingsModel(enabled, providerId, customHwid,
-                        schemaVersion, pingType, dualCore, (Boolean) value);
+                        schemaVersion, pingType, dualCore, (Boolean) value,
+                        refreshOnOpen, autoCheckMinutes);
+            case "refresh_on_open":
+                if (!(value instanceof Boolean)) {
+                    throw new IllegalArgumentException("refresh_on_open must be boolean");
+                }
+                return new SettingsModel(enabled, providerId, customHwid,
+                        schemaVersion, pingType, dualCore, failover,
+                        (Boolean) value, autoCheckMinutes);
+            case "auto_check_minutes":
+                if (!(value instanceof Number)) {
+                    throw new IllegalArgumentException("auto_check_minutes must be integer");
+                }
+                double minutes = ((Number) value).doubleValue();
+                if (!Double.isFinite(minutes) || minutes != Math.rint(minutes)
+                        || normalizeAutoCheckMinutes((int) minutes) != (int) minutes) {
+                    throw new IllegalArgumentException("auto_check_minutes is not allowed");
+                }
+                return new SettingsModel(enabled, providerId, customHwid,
+                        schemaVersion, pingType, dualCore, failover,
+                        refreshOnOpen, (int) minutes);
             default:
                 throw new IllegalArgumentException("unsupported setting key");
         }
@@ -144,6 +184,10 @@ final class SettingsModel {
                 return dualCore;
             case "failover":
                 return failover;
+            case "refresh_on_open":
+                return refreshOnOpen;
+            case "auto_check_minutes":
+                return autoCheckMinutes;
             default:
                 throw new IllegalArgumentException("unsupported setting key");
         }
@@ -220,12 +264,23 @@ final class SettingsModel {
                 && Objects.equals(customHwid, value.customHwid)
                 && Objects.equals(pingType, value.pingType)
                 && dualCore == value.dualCore
-                && failover == value.failover;
+                && failover == value.failover
+                && refreshOnOpen == value.refreshOnOpen
+                && autoCheckMinutes == value.autoCheckMinutes;
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(enabled, providerId, customHwid, schemaVersion,
-                pingType, dualCore, failover);
+                pingType, dualCore, failover, refreshOnOpen, autoCheckMinutes);
+    }
+
+    static final int[] AUTO_CHECK_CHOICES = {0, 15, 60, 360};
+
+    private static int normalizeAutoCheckMinutes(int value) {
+        for (int choice : AUTO_CHECK_CHOICES) {
+            if (choice == value) return choice;
+        }
+        return 0;
     }
 }

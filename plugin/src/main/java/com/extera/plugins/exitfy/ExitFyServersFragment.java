@@ -976,6 +976,10 @@ final class ExitFyServersFragment
         if ("cancelled".equals(node.pingStatus)) {
             return I18n.t("Проверка отменена", "Check cancelled");
         }
+        if ("proxy_busy".equals(node.pingStatus)) {
+            return I18n.t("Прокси Telegram занят",
+                    "Telegram proxy is in use");
+        }
         if ("restart_required".equals(node.pingStatus)) {
             return I18n.t("Недоступен", "Unavailable");
         }
