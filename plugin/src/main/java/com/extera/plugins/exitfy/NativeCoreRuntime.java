@@ -431,6 +431,15 @@ final class NativeCoreRuntime implements Closeable {
         return processDualCore && processLoadedFamilies.size() < CoreFamily.values().length;
     }
 
+    /** The installed release tag of one family, empty when nothing is installed. */
+    String coreVersion(CoreFamily family) {
+        try {
+            return updater(family).version();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
     boolean hasUsableCore(CoreFamily family) {
         return updater(family).hasUsableCore();
     }

@@ -37,7 +37,11 @@ final class SubscriptionManager implements Closeable {
     private static final String STORE_FILE = "subscriptions.json";
     private static final long CACHE_TTL_MS = 6L * 60L * 60L * 1000L;
     static final int MAX_TOTAL_NODES = 10_000;
-    static final int MAX_PAGE_SIZE = 50;
+    // Listing and probing are bounded separately: people asked to see a whole
+    // source at once, while probing that many servers is a different cost.
+    static final int MAX_PAGE_SIZE = 200;
+    static final int DEFAULT_PAGE_SIZE = 50;
+    static final int MAX_PING_KEYS = 50;
     static final int MAX_UI_QUERY_CODE_POINTS = 128;
     static final int MAX_UI_QUERY_UTF8_BYTES = 512;
     static final int MAX_CUSTOM_URLS = 256;
@@ -585,7 +589,7 @@ final class SubscriptionManager implements Closeable {
     }
 
     JSONObject uiState(int providerId) {
-        return uiState(providerId, 0, MAX_PAGE_SIZE);
+        return uiState(providerId, 0, DEFAULT_PAGE_SIZE);
     }
 
     JSONObject uiState(int providerId, int requestedOffset, int requestedLimit) {
@@ -800,7 +804,10 @@ final class SubscriptionManager implements Closeable {
 
     synchronized List<ProtocolParser.Node> nodesByKeys(int providerId, List<String> keys) {
         if (keys == null || keys.isEmpty()) return new ArrayList<>();
-        if (keys.size() > MAX_PAGE_SIZE) throw new IllegalArgumentException("at most 50 node keys are allowed");
+        if (keys.size() > MAX_PING_KEYS) {
+            throw new IllegalArgumentException("at most " + MAX_PING_KEYS
+                    + " node keys are allowed");
+        }
         LinkedHashSet<String> requested = new LinkedHashSet<>();
         for (String key : keys) {
             if (key == null || key.isEmpty() || !requested.add(key)) {

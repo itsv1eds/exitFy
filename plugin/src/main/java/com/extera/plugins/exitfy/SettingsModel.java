@@ -18,20 +18,23 @@ final class SettingsModel {
     final int schemaVersion;
     final String pingType;
     final boolean dualCore;
+    final boolean failover;
 
     SettingsModel(boolean enabled, int providerId, String customHwid,
                   int schemaVersion, String pingType) {
-        this(enabled, providerId, customHwid, schemaVersion, pingType, false);
+        this(enabled, providerId, customHwid, schemaVersion, pingType, false, false);
     }
 
     SettingsModel(boolean enabled, int providerId, String customHwid,
-                  int schemaVersion, String pingType, boolean dualCore) {
+                  int schemaVersion, String pingType, boolean dualCore,
+                  boolean failover) {
         this.enabled = enabled;
         this.providerId = Math.max(0, Math.min(providerId, CUSTOM_PROVIDER_ID));
         this.customHwid = normalizeCustomHwid(customHwid);
         this.schemaVersion = schemaVersion;
         this.pingType = normalizePingType(pingType);
         this.dualCore = dualCore;
+        this.failover = failover;
     }
 
     static SettingsModel defaults() {
@@ -47,7 +50,8 @@ final class SettingsModel {
                     object.optString("custom_hwid", ""),
                     object.optInt("schema_version", 6),
                     object.optString("ping_type", PING_PROXY_GET),
-                    object.optBoolean("dual_core", false)
+                    object.optBoolean("dual_core", false),
+                    object.optBoolean("failover", false)
             );
         } catch (Exception ignored) {
             return defaults();
@@ -63,6 +67,7 @@ final class SettingsModel {
             object.put("schema_version", schemaVersion);
             object.put("ping_type", pingType);
             object.put("dual_core", dualCore);
+            object.put("failover", failover);
         } catch (Exception ignored) {
         }
         return object;
@@ -76,7 +81,7 @@ final class SettingsModel {
                     throw new IllegalArgumentException("enabled must be boolean");
                 }
                 return new SettingsModel((Boolean) value, providerId, customHwid,
-                        schemaVersion, pingType, dualCore);
+                        schemaVersion, pingType, dualCore, failover);
             case "provider_id":
                 if (!(value instanceof Number)) {
                     throw new IllegalArgumentException("provider_id must be integer");
@@ -94,26 +99,32 @@ final class SettingsModel {
                 }
                 int provider = (int) providerValue;
                 return new SettingsModel(enabled, provider, customHwid,
-                        schemaVersion, pingType, dualCore);
+                        schemaVersion, pingType, dualCore, failover);
             case "ping_type":
                 if (!(value instanceof String)
                         || !(PING_PROXY_GET.equals(value) || PING_TCP.equals(value))) {
                     throw new IllegalArgumentException("invalid ping_type");
                 }
                 return new SettingsModel(enabled, providerId, customHwid,
-                        schemaVersion, (String) value, dualCore);
+                        schemaVersion, (String) value, dualCore, failover);
             case "custom_hwid":
                 if (!(value instanceof String)) {
                     throw new IllegalArgumentException("custom_hwid must be string");
                 }
                 return new SettingsModel(enabled, providerId, (String) value,
-                        schemaVersion, pingType, dualCore);
+                        schemaVersion, pingType, dualCore, failover);
             case "dual_core":
                 if (!(value instanceof Boolean)) {
                     throw new IllegalArgumentException("dual_core must be boolean");
                 }
                 return new SettingsModel(enabled, providerId, customHwid,
-                        schemaVersion, pingType, (Boolean) value);
+                        schemaVersion, pingType, (Boolean) value, failover);
+            case "failover":
+                if (!(value instanceof Boolean)) {
+                    throw new IllegalArgumentException("failover must be boolean");
+                }
+                return new SettingsModel(enabled, providerId, customHwid,
+                        schemaVersion, pingType, dualCore, (Boolean) value);
             default:
                 throw new IllegalArgumentException("unsupported setting key");
         }
@@ -131,6 +142,8 @@ final class SettingsModel {
                 return customHwid;
             case "dual_core":
                 return dualCore;
+            case "failover":
+                return failover;
             default:
                 throw new IllegalArgumentException("unsupported setting key");
         }
@@ -206,12 +219,13 @@ final class SettingsModel {
                 && schemaVersion == value.schemaVersion
                 && Objects.equals(customHwid, value.customHwid)
                 && Objects.equals(pingType, value.pingType)
-                && dualCore == value.dualCore;
+                && dualCore == value.dualCore
+                && failover == value.failover;
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(enabled, providerId, customHwid, schemaVersion,
-                pingType, dualCore);
+                pingType, dualCore, failover);
     }
 }

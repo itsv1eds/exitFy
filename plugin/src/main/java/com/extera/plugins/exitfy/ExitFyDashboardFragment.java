@@ -385,7 +385,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
         top.setMinimumHeight(dp(48));
         top.setClickable(true);
         top.setFocusable(true);
-        top.setOnClickListener(view -> openServers());
+        top.setOnClickListener(view -> showQuickServerSwitch());
         bindBackground(top, BackgroundRole.ACCENT_SURFACE, dp(14), 0);
         applyThemeBinding(top);
         top.addView(iconBadge(context, R.drawable.msg_speed,
@@ -897,6 +897,57 @@ final class ExitFyDashboardFragment extends BaseFragment {
             showToast(I18n.t("Не удалось запустить проверку",
                     "Could not start latency check"), false);
         }
+    }
+
+    /**
+     * Switching servers used to mean opening the server screen and paging
+     * through it. The active server card now offers the current source's
+     * servers directly, which is how the previous plugin worked.
+     */
+    private void showQuickServerSwitch() {
+        runCommand(() -> new JSONObject()
+                        .put("command", "list_nodes")
+                        .put("offset", 0)
+                        .put("limit", SubscriptionManager.DEFAULT_PAGE_SIZE),
+                false, this::presentServerChoices);
+    }
+
+    private void presentServerChoices(ExitFyCommandResult result) {
+        ExitFyServerPage page = ExitFyServerPage.parse(result.data);
+        if (!page.valid || page.nodes.isEmpty()) {
+            openServers();
+            return;
+        }
+        ExitFyDashboardState current = latestState;
+        CharSequence[] labels = new CharSequence[page.nodes.size()];
+        for (int index = 0; index < page.nodes.size(); index++) {
+            ExitFyServerPage.Node node = page.nodes.get(index);
+            String name = TextUtils.isEmpty(node.name)
+                    ? I18n.t("Сервер без названия", "Unnamed server") : node.name;
+            String suffix = node.latency > 0 ? " · " + node.latency + " ms" : "";
+            boolean active = current != null && node.key.equals(current.activeKey);
+            labels[index] = (active ? "• " : "") + name + suffix;
+        }
+        Activity activity = getParentActivity();
+        if (activity == null) return;
+        AlertDialog.Builder builder = new AlertDialog.Builder(activity);
+        builder.setTitle(page.total > page.nodes.size()
+                ? I18n.t("Сервер", "Server") + " (" + page.nodes.size()
+                + I18n.t(" из ", " of ") + page.total + ")"
+                : I18n.t("Сервер", "Server"));
+        builder.setItems(labels, (dialog, index) -> {
+            if (index < 0 || index >= page.nodes.size()) return;
+            selectServer(page.nodes.get(index).key);
+        });
+        builder.setNegativeButton(I18n.t("Все серверы", "All servers"),
+                (dialog, which) -> openServers());
+        showDialog(builder.create());
+    }
+
+    private void selectServer(String key) {
+        runCommand(() -> new JSONObject()
+                .put("command", "select_node")
+                .put("key", key), true);
     }
 
     private void runCurrentPing(String expectedPingType) {

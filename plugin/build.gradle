@@ -51,7 +51,7 @@ def proguardFile = file("proguard-rules.pro")
 def outputPlugin = file(findProperty("pluginOutputFile") ?: "${projectDir.parent}/exitfy.plugin")
 def outputAarName = "${rootProject.name}-plugin.aar"
 def pluginId = "exitFy_v2"
-def pluginVersion = "4.0.3"
+def pluginVersion = "4.1.0"
 def settingsSchema = 6
 def pluginAuthor = "@exteraPluginsSup"
 def pluginIcon = "exitFy/1"
@@ -118,13 +118,16 @@ def forbiddenDiagnosticsTokens = [
         "importdiagnostics",
         "safelog",
 ]
+// Node switching was removed because it moved people between exit countries
+// without asking. Users asked for it back, so it exists again as "failover":
+// stored off, and it only ever runs for someone who turned it on. The old
+// setting key stays removed -- its stored values meant something else -- and
+// the guard below now checks the rule that mattered instead of the words.
 def forbiddenNodeSelectionTokens = [
         ["auto", "_switch"].join(""),
         ["auto", "switch"].join(""),
         ["automatic", "switch"].join(""),
         ["auto", "-switch"].join(""),
-        ["automatic node ", "switching"].join(""),
-        ["авто", "переключ"].join(""),
 ]
 def forbiddenLocalArtifactTokens = [
         "/users/",
@@ -1696,6 +1699,30 @@ tasks.register("lintPluginTemplate") {
     }
 }
 
+tasks.register("verifyFailoverStaysOptIn") {
+    group = "verification"
+    description = "Server switching must never start without the user asking for it"
+    def settingsFile = file("src/main/java/com/extera/plugins/exitfy/SettingsModel.java")
+    def coordinatorFile = file(
+            "src/main/java/com/extera/plugins/exitfy/RuntimeCoordinator.java")
+    inputs.files(settingsFile, coordinatorFile)
+    outputs.upToDateWhen { false }
+    doLast {
+        String settingsText = settingsFile.text
+        if (!settingsText.contains('object.optBoolean("failover", false)')) {
+            throw new GradleException("Stored failover must default to off")
+        }
+        if (!settingsText.contains(
+                "this(enabled, providerId, customHwid, schemaVersion, pingType, false, false);")) {
+            throw new GradleException("Settings built without the flags must leave them off")
+        }
+        String coordinatorText = coordinatorFile.text
+        if (!coordinatorText.contains("if (!settings.failover")) {
+            throw new GradleException("Server rotation must be gated by the stored setting")
+        }
+    }
+}
+
 tasks.register("verifyManifestSigningKey") {
     group = "verification"
     description = "Keeps the embedded manifest key equal to the key the release pipeline signs with"
@@ -1726,6 +1753,7 @@ tasks.register("verifyManifestSigningKey") {
 tasks.matching { it.name == "lintPlugin" }.configureEach {
     dependsOn tasks.named("lintPluginTemplate")
     dependsOn tasks.named("verifyManifestSigningKey")
+    dependsOn tasks.named("verifyFailoverStaysOptIn")
 }
 
 tasks.register("pythonTemplateTests") {

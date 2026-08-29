@@ -269,8 +269,10 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 value.providerId, available, subscriptions.hasCustomConfiguration(), value.enabled);
         boolean enabled = value.enabled && !decision.disable;
         if (decision.providerId == value.providerId && enabled == value.enabled) return value;
+        // Carry every field: rebuilding with the short constructor silently
+        // reset the settings this method does not name.
         return new SettingsModel(enabled, decision.providerId, value.customHwid,
-                value.schemaVersion, value.pingType);
+                value.schemaVersion, value.pingType, value.dualCore, value.failover);
     }
 
     private String setSettingFromUi(String key, Object rawValue) {
@@ -337,6 +339,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         if (previous.dualCore != next.dualCore) {
             settingPersistenceRevisions.record("dual_core", revision);
         }
+        if (previous.failover != next.failover) {
+            settingPersistenceRevisions.record("failover", revision);
+        }
     }
 
     private void finishSettingsUpdate(SettingsUpdate update) {
@@ -398,6 +403,17 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                     MAX_COMMAND_TOKEN_UTF8_BYTES, MAX_COMMAND_JSON_UTF8_BYTES);
             String command = request.optString("command", "");
             if (mutatesNodeSelection(command)) cancelPing(true);
+            if ("core_versions".equals(command)) {
+                // Kept off the dashboard on purpose: which engine runs is not
+                // something the main screen asks anyone to think about. People
+                // who want the number open the advanced screen.
+                return response(true, "", new JSONObject()
+                        .put("xray", CoreVersionLabel.describe(
+                                nativeCore.coreVersion(CoreFamily.XRAY)))
+                        .put("singBox", CoreVersionLabel.describe(
+                                nativeCore.coreVersion(CoreFamily.SING_BOX)))
+                        .toString()).toString();
+            }
             if ("provider_referral".equals(command)) {
                 String referral = subscriptions.referral(settings.providerId);
                 return referral.isEmpty()
@@ -443,11 +459,11 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             }
             if ("list_nodes".equals(command)) {
                 int offset = request.optInt("offset", 0);
-                int limit = request.optInt("limit", SubscriptionManager.MAX_PAGE_SIZE);
+                int limit = request.optInt("limit", SubscriptionManager.DEFAULT_PAGE_SIZE);
                 if (!SubscriptionManager.validPageRequest(offset, limit)) {
                     return response(false, I18n.t(
-                            "Страница должна содержать от 1 до 50 серверов",
-                            "A page must contain between 1 and 50 nodes"), "").toString();
+                            "Недопустимый размер страницы",
+                            "Invalid page size"), "").toString();
                 }
                 String query = SubscriptionManager.requireUiQuery(
                         request.optString("query", ""));
@@ -748,6 +764,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             value.put("providerAvailability", providerAvailability);
             value.put("pingType", current.pingType);
             value.put("dualCore", current.dualCore);
+            value.put("failover", current.failover);
             value.put("dualCoreActive", NativeCoreRuntime.dualCoreEnabled());
             // Never expose a custom identifier in a screen-state snapshot
             // which can outlive the editor dialog.
@@ -894,7 +911,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         if (!settings.enabled) return;
         SettingsModel previous = settings;
         SettingsModel disabled = new SettingsModel(false, previous.providerId,
-                previous.customHwid, previous.schemaVersion, previous.pingType);
+                previous.customHwid, previous.schemaVersion, previous.pingType,
+                previous.dualCore, previous.failover);
         long persistRevision;
         synchronized (settingsRequestLock) {
             synchronized (subscriptionRefreshControl) {
@@ -917,7 +935,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         if (settings.providerId == SettingsModel.CUSTOM_PROVIDER_ID) return;
         SettingsModel previous = settings;
         SettingsModel custom = new SettingsModel(previous.enabled, SettingsModel.CUSTOM_PROVIDER_ID,
-                previous.customHwid, previous.schemaVersion, previous.pingType);
+                previous.customHwid, previous.schemaVersion, previous.pingType,
+                previous.dualCore, previous.failover);
         long persistRevision;
         synchronized (settingsRequestLock) {
             synchronized (subscriptionRefreshControl) {
@@ -1058,6 +1077,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                     restartRequired = false;
                     coreSelectionBlocked = false;
                     reconnectBackoff.reset();
+                    failoverFailures = 0;
+                    failoverFailedKey = "";
                     reconnectAt = 0;
                     transition(RuntimeState.RUNNING);
                 }
@@ -1099,6 +1120,10 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             proxySession.restore(boundedWait(absoluteDeadline, 2_000L));
             if (!current || !revisionGate.isCurrent(operation, loaded, settings.enabled)) return false;
             fail(error);
+            // Only a server that failed to carry the connection is rotated.
+            // A subscription that would not refresh is a different failure and
+            // must not move anyone off the server they chose.
+            rotateServerAfterFailure();
             if (!restartRequired && !coreSelectionBlocked) {
                 scheduleReconnect(operation, nextReconnectDelay());
             }
@@ -1178,6 +1203,45 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             long timeout = boundedWait(absoluteDeadline, 3_000L);
             nativeCore.stop(timeout);
         } catch (Throwable ignored) {
+        }
+    }
+
+    private static final int FAILOVER_ATTEMPTS = 2;
+    private String failoverFailedKey = "";
+    private int failoverFailures;
+
+    /**
+     * Moves to the next server of the current source once the selected one has
+     * failed repeatedly. Off unless asked for: people who pick a server on
+     * purpose do not want it changed under them, and switching also changes
+     * the exit country.
+     */
+    private void rotateServerAfterFailure() {
+        if (!settings.failover || !settings.enabled || !loaded) return;
+        if (restartRequired || coreSelectionBlocked) return;
+        try {
+            ProtocolParser.Node active = subscriptions.selected(settings.providerId);
+            if (active == null) return;
+            if (!active.normalizedKey.equals(failoverFailedKey)) {
+                failoverFailedKey = active.normalizedKey;
+                failoverFailures = 0;
+            }
+            if (++failoverFailures < FAILOVER_ATTEMPTS) return;
+            List<ProtocolParser.Node> candidates = subscriptions.nodes(settings.providerId);
+            String next = RuntimePolicy.nextServerAfterFailure(
+                    candidates, active.normalizedKey);
+            if (next.isEmpty()) return;
+            failoverFailures = 0;
+            failoverFailedKey = next;
+            if (subscriptions.setSelectedKey(settings.providerId, next)) {
+                connectionIssue = I18n.t(
+                        "Сервер не отвечал, выбран следующий",
+                        "The server did not respond; the next one was selected");
+                resetCoreRepairBackoff();
+                cancelCorePreparation(true);
+                requestReconnect("node_selected");
+            }
+        } catch (Exception ignored) {
         }
     }
 
@@ -1869,8 +1933,10 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     }
 
     private static List<String> parseNodeKeys(JSONArray values) {
-        if (values == null || values.length() <= 0 || values.length() > SubscriptionManager.MAX_PAGE_SIZE) {
-            throw new IllegalArgumentException("ping_nodes requires between 1 and 50 exact keys");
+        if (values == null || values.length() <= 0
+                || values.length() > SubscriptionManager.MAX_PING_KEYS) {
+            throw new IllegalArgumentException("ping_nodes requires between 1 and "
+                    + SubscriptionManager.MAX_PING_KEYS + " exact keys");
         }
         List<String> result = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();

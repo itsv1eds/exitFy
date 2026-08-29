@@ -5,7 +5,7 @@ import org.json.JSONObject;
 import java.io.File;
 
 final class BootstrapConfig {
-    private static final String PLUGIN_VERSION = "4.0.3";
+    private static final String PLUGIN_VERSION = "4.1.0";
     private static final int SETTINGS_SCHEMA = 6;
 
     final String pluginId;

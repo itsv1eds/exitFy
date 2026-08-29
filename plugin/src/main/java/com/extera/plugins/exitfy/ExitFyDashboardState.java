@@ -26,6 +26,7 @@ final class ExitFyDashboardState {
     final boolean restartRequired;
     final String pingType;
     final boolean dualCore;
+    final boolean failover;
     final boolean dualCoreActive;
     final boolean customHwidSet;
     final String defaultHwid;
@@ -60,6 +61,7 @@ final class ExitFyDashboardState {
                 SettingsModel.PING_PROXY_GET))
                 ? SettingsModel.PING_TCP : SettingsModel.PING_PROXY_GET;
         dualCore = value.optBoolean("dualCore", false);
+        failover = value.optBoolean("failover", false);
         dualCoreActive = value.optBoolean("dualCoreActive", false);
         customHwidSet = value.optBoolean("customHwidSet", false);
         defaultHwid = safeLabel(value.optString("defaultHwid", ""), 32, "");

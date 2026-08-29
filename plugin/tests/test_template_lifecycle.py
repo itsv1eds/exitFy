@@ -102,7 +102,7 @@ def load_plugin_class(overrides=None):
             "/private/exitfy", "/private/bridge.so", "arm64-v8a"
         ),
         "__id__": "exitFy_v2",
-        "__version__": "4.0.3",
+        "__version__": "4.1.0",
         "PROVIDER_CATALOG_VERSION": 3,
         "CUSTOM_PROVIDER_ID": 3,
         "CUSTOM_V2_ID": 2,

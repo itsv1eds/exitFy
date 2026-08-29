@@ -1,4 +1,4 @@
-# exitFy 4.0.3
+# exitFy 4.1.0
 
 `ExitFy.template.plugin` is the thin Python loader and lifecycle layer. Drawer
 and chat-action entries open a compact Telegram-native dashboard implemented as
@@ -72,6 +72,21 @@ selected automatically for configurations such as XHTTP and mKCP which cannot
 be represented by sing-box. Only one Go core family may be mapped in a process. An incompatible mapped
 family keeps the existing restart-required fail-closed state; opening or
 starting one family never falls back to the other in the same process.
+
+The active server card opens the current source's servers directly, so
+switching does not require the server screen. That screen lists 50 servers per
+page by default and can show 200; probing stays capped at 50 regardless, since
+listing and probing cost different things.
+
+The `failover` setting, off by default, moves to the next server of the source
+after the selected one fails to carry the connection twice in a row. Only a
+failure to connect counts: a subscription that will not refresh leaves the
+selection alone. Node switching was removed once because it moved people
+between exit countries unasked, which is why this stays stored-off and why the
+build refuses a version of it that is not gated by the setting.
+
+Component versions are reported by the `core_versions` command and shown under
+Advanced. The dashboard still never names an engine.
 
 The `dual_core` setting, off by default and offered as an experiment under
 Advanced, lifts that restriction: the JNI bridge holds one slot per family and

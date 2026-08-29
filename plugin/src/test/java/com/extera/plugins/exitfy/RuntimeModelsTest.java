@@ -212,7 +212,11 @@ public class RuntimeModelsTest {
         assertFalse(SubscriptionManager.validPageRequest(
                 SubscriptionManager.MAX_TOTAL_NODES + 1, 50));
         assertFalse(SubscriptionManager.validPageRequest(0, 0));
-        assertFalse(SubscriptionManager.validPageRequest(0, 51));
+        assertFalse(SubscriptionManager.validPageRequest(
+                0, SubscriptionManager.MAX_PAGE_SIZE + 1));
+        // Probing stays bounded where it was even though listing grew.
+        assertEquals(50, SubscriptionManager.MAX_PING_KEYS);
+        assertEquals(50, SubscriptionManager.DEFAULT_PAGE_SIZE);
     }
 
     @Test
@@ -225,7 +229,7 @@ public class RuntimeModelsTest {
         try {
             String valid = new org.json.JSONObject()
                     .put("pluginId", "exitFy_v2")
-                    .put("pluginVersion", "4.0.3")
+                    .put("pluginVersion", "4.1.0")
                     .put("settingsSchema", 6)
                     .put("dataDir", root.getAbsolutePath())
                     .put("nativeBridgePath", bridge.getAbsolutePath())
@@ -247,13 +251,13 @@ public class RuntimeModelsTest {
             }
             try {
                 BootstrapConfig.parse(valid.replace(
-                        "4.0.3", "4.0.0-beta.23"));
+                        "4.1.0", "4.0.0-beta.23"));
                 throw new AssertionError("old bootstrap version accepted");
             } catch (IllegalArgumentException expected) {
                 assertTrue(expected.getMessage().contains("version"));
             }
             File versionedBridge = new File(root,
-                    "bridge/4.0.3/arm64-v8a/libexitfy_bridge.so");
+                    "bridge/4.1.0/arm64-v8a/libexitfy_bridge.so");
             assertTrue(versionedBridge.getParentFile().mkdirs());
             assertTrue(versionedBridge.createNewFile());
             try {
@@ -1768,5 +1772,60 @@ public class RuntimeModelsTest {
         assertTrue(RuntimePolicy.activeConfigurationChanged(before, moved));
         assertTrue(RuntimePolicy.activeConfigurationChanged(null, before));
         assertTrue(RuntimePolicy.activeConfigurationChanged(before, null));
+    }
+
+    @Test
+    public void failoverMovesToTheNextServerAndWrapsAround() throws Exception {
+        String base = "vless://33333333-3333-3333-3333-333333333333@edge.example:443"
+                + "?security=tls&sni=edge.example";
+        ProtocolParser.Node first = ProtocolParser.parse(base + "#One");
+        ProtocolParser.Node second = ProtocolParser.parse(
+                base.replace("edge.example:443", "second.example:443") + "#Two");
+        ProtocolParser.Node third = ProtocolParser.parse(
+                base.replace("edge.example:443", "third.example:443") + "#Three");
+        java.util.List<ProtocolParser.Node> nodes =
+                java.util.Arrays.asList(first, second, third);
+
+        assertEquals(second.normalizedKey,
+                RuntimePolicy.nextServerAfterFailure(nodes, first.normalizedKey));
+        assertEquals(first.normalizedKey,
+                RuntimePolicy.nextServerAfterFailure(nodes, third.normalizedKey));
+    }
+
+    @Test
+    public void failoverStaysPutWhenThereIsNowhereToGo() throws Exception {
+        ProtocolParser.Node only = ProtocolParser.parse(
+                "vless://33333333-3333-3333-3333-333333333333@edge.example:443"
+                        + "?security=tls&sni=edge.example#Only");
+        // One server cannot be "switched" onto itself, and an unknown key must
+        // not silently move the user somewhere they did not choose.
+        assertEquals("", RuntimePolicy.nextServerAfterFailure(
+                java.util.Collections.singletonList(only), only.normalizedKey));
+        assertEquals("", RuntimePolicy.nextServerAfterFailure(
+                java.util.Arrays.asList(only, only), "missing-key"));
+        assertEquals("", RuntimePolicy.nextServerAfterFailure(null, only.normalizedKey));
+    }
+
+    @Test
+    public void failoverAndTheCoreExperimentAreOffUntilAskedFor() {
+        // Switching servers changes the exit country under the user, and the
+        // second core maps a runtime that cannot be unmapped.
+        assertFalse(SettingsModel.defaults().failover);
+        assertFalse(SettingsModel.defaults().dualCore);
+        assertFalse(SettingsModel.fromJson("{}").failover);
+        assertFalse(SettingsModel.fromJson("{\"failover\":\"yes\"}").failover);
+        assertTrue(SettingsModel.fromJson("{\"failover\":true}").failover);
+    }
+
+    @Test
+    public void normalizingAProviderKeepsEverySetting() {
+        SettingsModel value = new SettingsModel(true, 0, "hwid", 6,
+                SettingsModel.PING_TCP, true, true);
+        SettingsModel rebuilt = value.withSetting("provider_id", 1);
+
+        assertTrue(rebuilt.dualCore);
+        assertTrue(rebuilt.failover);
+        assertEquals(SettingsModel.PING_TCP, rebuilt.pingType);
+        assertEquals("hwid", rebuilt.customHwid);
     }
 }

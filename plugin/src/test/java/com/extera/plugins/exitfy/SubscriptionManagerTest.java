@@ -202,13 +202,20 @@ public class SubscriptionManagerTest {
 
             JSONObject page = manager.uiState(SettingsModel.CUSTOM_PROVIDER_ID, 50, 500);
             assertEquals(120, page.getInt("total"));
-            assertEquals(50, page.getInt("limit"));
-            assertEquals(50, page.getJSONArray("nodes").length());
+            // An oversized request is clamped to the maximum page, which now
+            // holds a whole ordinary source at once.
+            assertEquals(SubscriptionManager.MAX_PAGE_SIZE, page.getInt("limit"));
+            assertEquals(70, page.getJSONArray("nodes").length());
             assertTrue(page.getBoolean("hasPrevious"));
-            assertTrue(page.getBoolean("hasNext"));
+            assertFalse(page.getBoolean("hasNext"));
+
+            JSONObject firstFifty = manager.uiState(
+                    SettingsModel.CUSTOM_PROVIDER_ID, 50, SubscriptionManager.DEFAULT_PAGE_SIZE);
+            assertEquals(50, firstFifty.getJSONArray("nodes").length());
+            assertTrue(firstFifty.getBoolean("hasNext"));
 
             List<String> keys = new ArrayList<>();
-            JSONArray values = page.getJSONArray("nodes");
+            JSONArray values = firstFifty.getJSONArray("nodes");
             for (int i = 0; i < values.length(); i++) {
                 keys.add(values.getJSONObject(i).getString("key"));
             }

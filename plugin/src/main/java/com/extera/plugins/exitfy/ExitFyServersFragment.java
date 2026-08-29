@@ -30,7 +30,11 @@ import java.util.Locale;
  */
 final class ExitFyServersFragment
         extends ExitFySubscreenFragment<ExitFyDashboardState> {
-    private static final int PAGE_SIZE = SubscriptionManager.MAX_PAGE_SIZE;
+    private static final int[] PAGE_SIZES = {
+            SubscriptionManager.DEFAULT_PAGE_SIZE, 100, SubscriptionManager.MAX_PAGE_SIZE,
+    };
+
+    private int pageSize = SubscriptionManager.DEFAULT_PAGE_SIZE;
     private static final int MAX_SUBSCRIPTION_CHARS = 4096;
 
     private static final String[] PROTOCOL_VALUES = {
@@ -64,6 +68,7 @@ final class ExitFyServersFragment
     private SettingRow pageStatusRow;
     private SettingRow previousPageRow;
     private SettingRow nextPageRow;
+    private SettingRow pageSizeRow;
     private TextView customSourcesLabel;
     private LinearLayout nodesContainer;
     private LinearLayout customSourcesContainer;
@@ -181,15 +186,25 @@ final class ExitFyServersFragment
 
         previousPageRow = settingRow(context, R.drawable.msg_arrow_back,
                 I18n.t("Предыдущая страница", "Previous page"),
-                I18n.t("До 50 серверов на странице", "Up to 50 servers per page"));
+                pageSizeSummary());
         setSafeClick(previousPageRow.view, this::goToPreviousPage);
         content.addView(previousPageRow.view, sectionParams());
 
         nextPageRow = settingRow(context, R.drawable.msg_arrowright,
                 I18n.t("Следующая страница", "Next page"),
-                I18n.t("До 50 серверов на странице", "Up to 50 servers per page"));
+                pageSizeSummary());
         setSafeClick(nextPageRow.view, this::goToNextPage);
         content.addView(nextPageRow.view, sectionParams());
+
+        // The subtitles of the paging rows keep the size they were built with;
+        // the value on this row is what changes.
+        pageSizeRow = settingRow(context, R.drawable.msg_folders,
+                I18n.t("Серверов на странице", "Servers per page"),
+                I18n.t("Больше серверов сразу, без перелистывания",
+                        "See more of a source without paging"));
+        pageSizeRow.setValue(String.valueOf(pageSize));
+        setSafeClick(pageSizeRow.view, this::showPageSizeDialog);
+        content.addView(pageSizeRow.view, sectionParams());
 
         renderUiState(state);
     }
@@ -420,7 +435,7 @@ final class ExitFyServersFragment
         executeCommand(() -> new JSONObject()
                         .put("command", "list_nodes")
                         .put("offset", requestedOffset)
-                        .put("limit", PAGE_SIZE)
+                        .put("limit", pageSize)
                         .put("query", requestedQuery)
                         .put("protocol", requestedProtocol),
                 false, result -> {
@@ -750,11 +765,37 @@ final class ExitFyServersFragment
         }
     }
 
+    private String pageSizeSummary() {
+        return I18n.t("До ", "Up to ") + pageSize
+                + I18n.t(" серверов на странице", " servers per page");
+    }
+
+    private void showPageSizeDialog() {
+        CharSequence[] labels = new CharSequence[PAGE_SIZES.length];
+        int selected = 0;
+        for (int index = 0; index < PAGE_SIZES.length; index++) {
+            labels[index] = String.valueOf(PAGE_SIZES[index]);
+            if (PAGE_SIZES[index] == pageSize) selected = index;
+        }
+        showChoiceDialog(I18n.t("Серверов на странице", "Servers per page"),
+                labels, selected, index -> {
+                    if (index < 0 || index >= PAGE_SIZES.length) return;
+                    if (PAGE_SIZES[index] == pageSize) return;
+                    pageSize = PAGE_SIZES[index];
+                    offset = 0;
+                    if (pageSizeRow != null) {
+                        pageSizeRow.setValue(String.valueOf(pageSize));
+                    }
+                    reloadPage();
+                });
+    }
+
     private List<String> pageKeysSnapshot() {
         ArrayList<String> keys = new ArrayList<>();
         if (!page.valid) return keys;
         for (ExitFyServerPage.Node node : page.nodes) {
-            if (keys.size() >= PAGE_SIZE) break;
+            // Probing is capped independently of how much the page shows.
+            if (keys.size() >= SubscriptionManager.MAX_PING_KEYS) break;
             keys.add(node.key);
         }
         return keys;
@@ -765,7 +806,7 @@ final class ExitFyServersFragment
         if (snapshot != null) {
             for (String key : snapshot) keys.put(key);
         }
-        if (keys.length() == 0 || keys.length() > PAGE_SIZE) return;
+        if (keys.length() == 0 || keys.length() > SubscriptionManager.MAX_PING_KEYS) return;
         runMutation(() -> new JSONObject()
                 .put("command", "ping_nodes")
                 .put("keys", keys)

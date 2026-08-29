@@ -21,6 +21,32 @@ final class RuntimePolicy {
         return !active.normalizedKey.equals(reselected.normalizedKey);
     }
 
+    /**
+     * The next server to try after one keeps failing, wrapping around the
+     * source. Empty when there is nothing else to move to, so a single-server
+     * source is never "switched" onto itself.
+     */
+    static String nextServerAfterFailure(java.util.List<ProtocolParser.Node> nodes,
+                                         String failedKey) {
+        if (nodes == null || nodes.size() < 2 || failedKey == null) return "";
+        int current = -1;
+        for (int index = 0; index < nodes.size(); index++) {
+            ProtocolParser.Node node = nodes.get(index);
+            if (node != null && failedKey.equals(node.normalizedKey)) {
+                current = index;
+                break;
+            }
+        }
+        if (current < 0) return "";
+        for (int step = 1; step < nodes.size(); step++) {
+            ProtocolParser.Node candidate = nodes.get((current + step) % nodes.size());
+            if (candidate != null && !failedKey.equals(candidate.normalizedKey)) {
+                return candidate.normalizedKey;
+            }
+        }
+        return "";
+    }
+
     private RuntimePolicy() {
     }
 
