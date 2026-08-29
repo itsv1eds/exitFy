@@ -28,6 +28,7 @@ DEX_KEEPER_PREFIX = "exitfy-dex-keeper:exitFy_v2:"
 DEX_KEEPER_NAME = DEX_KEEPER_PREFIX + __version__
 SETTINGS_SCHEMA = 6
 PROVIDER_CATALOG_VERSION = 3
+AUTO_CHECK_MINUTE_CHOICES = (0, 15, 60, 360)
 CUSTOM_PROVIDER_ID = 3
 CUSTOM_V2_ID = 2
 LEGACY_PLUGIN_ID = "exitfy"
@@ -436,7 +437,20 @@ class ExitFyPlugin(BasePlugin):
             "custom_hwid": normalized_hwid,
             "ping_type": self._ping_type_value(),
             "schema_version": SETTINGS_SCHEMA,
+            "failover": self._as_bool(self.get_setting("failover", False)),
+            "dual_core": self._as_bool(self.get_setting("dual_core", False)),
+            "refresh_on_open": self._as_bool(
+                self.get_setting("refresh_on_open", False)
+            ),
+            "auto_check_minutes": self._auto_check_minutes_value(),
         }
+
+    def _auto_check_minutes_value(self):
+        try:
+            value = int(self.get_setting("auto_check_minutes", 0) or 0)
+        except Exception:
+            return 0
+        return value if value in AUTO_CHECK_MINUTE_CHOICES else 0
 
     def _migrate_provider_catalog(self):
         try:
@@ -707,11 +721,13 @@ class ExitFyPlugin(BasePlugin):
         return "".join(output)
 
     def _ping_type_value(self):
-        value = self.get_setting("ping_type", "proxy_get")
+        value = self.get_setting("ping_type", "tcp")
         if isinstance(value, (int, float)):
+            # A stored index means what it meant when it was written; the
+            # display order of the two choices does not change it.
             return ("proxy_get", "tcp")[self._bounded_index(value, 1)]
-        value = str(value or "proxy_get").strip().lower()
-        return value if value in ("proxy_get", "tcp") else "proxy_get"
+        value = str(value or "tcp").strip().lower()
+        return value if value in ("proxy_get", "tcp") else "tcp"
 
     def _normalize_runtime_setting_storage(self):
         try:

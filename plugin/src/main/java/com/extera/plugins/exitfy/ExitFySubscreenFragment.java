@@ -318,6 +318,27 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
         requestStateRefresh();
     }
 
+    /**
+     * A list of actions, not a choice between values: radio cells would ask
+     * the user to pick a state that nothing here stores.
+     */
+    protected final void showActionDialog(CharSequence title, CharSequence[] labels,
+                                          ChoiceListener listener) {
+        runUiAction(() -> {
+            Context context = getParentActivity();
+            if (context == null || labels == null || labels.length == 0) return;
+            AlertDialog.Builder builder = new AlertDialog.Builder(context, getResourceProvider());
+            builder.setTitle(title);
+            builder.setItems(labels, (dialog, index) -> {
+                if (listener != null && index >= 0 && index < labels.length) {
+                    listener.onChoice(index);
+                }
+            });
+            builder.setNegativeButton(I18n.t("Отмена", "Cancel"), null);
+            showDialog(builder.create());
+        });
+    }
+
     protected final void showChoiceDialog(CharSequence title, CharSequence[] labels,
                                           int selected, ChoiceListener listener) {
         showChoiceDialog(title, labels, selected, null, listener);
@@ -564,8 +585,9 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
         valueView.setEllipsize(TextUtils.TruncateAt.END);
         labels.addView(valueView, topMargin(3));
 
+        TextView summaryView = null;
         if (hasSummary) {
-            TextView summaryView = text(context, 13,
+            summaryView = text(context, 13,
                     Theme.key_windowBackgroundWhiteGrayText2, false);
             summaryView.setText(summary);
             summaryView.setMaxLines(2);
@@ -582,7 +604,7 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
         row.addView(arrow, arrowParams);
 
         return new SettingRow(row, title,
-                hasSummary ? summary : "", valueView);
+                hasSummary ? summary : "", valueView, summaryView);
     }
 
     protected final TextView sectionLabel(Context context, CharSequence label) {
@@ -842,15 +864,17 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
     protected static final class SettingRow {
         final View view;
         private final CharSequence title;
-        private final CharSequence summary;
+        private CharSequence summary;
         private final TextView valueView;
+        private final TextView summaryView;
 
         SettingRow(View view, CharSequence title, CharSequence summary,
-                   TextView valueView) {
+                   TextView valueView, TextView summaryView) {
             this.view = view;
             this.title = title;
             this.summary = summary;
             this.valueView = valueView;
+            this.summaryView = summaryView;
         }
 
         void setValue(CharSequence value) {
@@ -858,6 +882,14 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
             String description = title + ". " + value;
             if (!TextUtils.isEmpty(summary)) description += ". " + summary;
             view.setContentDescription(description);
+        }
+
+        /** A summary that states a number has to follow it. */
+        void setSummary(CharSequence value) {
+            if (summaryView == null) return;
+            summary = value == null ? "" : value;
+            summaryView.setText(summary);
+            setValue(valueView.getText());
         }
 
         void setEnabled(boolean enabled) {

@@ -104,6 +104,7 @@ def load_plugin_class(overrides=None):
         "__id__": "exitFy_v2",
         "__version__": "4.1.0",
         "PROVIDER_CATALOG_VERSION": 3,
+        "AUTO_CHECK_MINUTE_CHOICES": (0, 15, 60, 360),
         "CUSTOM_PROVIDER_ID": 3,
         "CUSTOM_V2_ID": 2,
         "SETTINGS_SCHEMA": 6,
@@ -164,6 +165,44 @@ class TemplateLifecycleTest(unittest.TestCase):
         self.assertEqual(SHRIMP, plugin.get_setting("provider_id", SHRIMP))
         self.assertEqual(3, plugin.settings["provider_catalog_version"])
         self.assertNotIn("provider_catalog_legacy_id", plugin.settings)
+
+    def test_every_stored_setting_reaches_the_runtime(self):
+        plugin_type, *_ = load_plugin_class()
+        plugin = plugin_type()
+        plugin.settings.update({
+            "failover": True,
+            "dual_core": True,
+            "refresh_on_open": True,
+            "auto_check_minutes": 60,
+            "ping_type": "proxy_get",
+        })
+
+        values = plugin._settings_dict()
+
+        # Settings the template does not send come back as defaults on the next
+        # start, which reads as the plugin forgetting them.
+        self.assertTrue(values["failover"])
+        self.assertTrue(values["dual_core"])
+        self.assertTrue(values["refresh_on_open"])
+        self.assertEqual(60, values["auto_check_minutes"])
+        self.assertEqual("proxy_get", values["ping_type"])
+
+    def test_unset_settings_default_to_off_and_tcp(self):
+        plugin_type, *_ = load_plugin_class()
+        values = plugin_type()._settings_dict()
+
+        self.assertEqual("tcp", values["ping_type"])
+        self.assertFalse(values["failover"])
+        self.assertFalse(values["dual_core"])
+        self.assertFalse(values["refresh_on_open"])
+        self.assertEqual(0, values["auto_check_minutes"])
+
+    def test_an_unoffered_check_period_is_treated_as_off(self):
+        plugin_type, *_ = load_plugin_class()
+        plugin = plugin_type()
+        plugin.settings["auto_check_minutes"] = 7
+
+        self.assertEqual(0, plugin._settings_dict()["auto_check_minutes"])
 
     def test_v2_selections_follow_their_provider_into_the_v3_order(self):
         for saved, expected in ((0, ELIX), (1, SHRIMP), (2, CUSTOM)):
@@ -275,7 +314,9 @@ class TemplateLifecycleTest(unittest.TestCase):
                 plugin._normalize_runtime_setting_storage()
 
                 self.assertEqual("auto", plugin.settings["core_policy"])
-                self.assertEqual("proxy_get", plugin.settings["ping_type"])
+                # An unreadable stored value normalizes to the canonical
+                # default, which is now the TCP check.
+                self.assertEqual("tcp", plugin.settings["ping_type"])
                 self.assertNotIn("core_policy", plugin._settings_dict())
 
     def test_load_clears_obsolete_transient_settings_only(self):

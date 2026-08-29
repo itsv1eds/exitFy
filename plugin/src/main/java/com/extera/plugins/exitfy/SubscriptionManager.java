@@ -837,9 +837,15 @@ final class SubscriptionManager implements Closeable {
             Set<String> seen = new LinkedHashSet<>();
             try {
                 JSONArray sources = provider(providerId).optJSONArray("sources");
+                // The list the UI renders comes from here, not from nodes():
+                // filtering only there left hidden sources fully visible.
+                Set<String> hidden = providerId == CUSTOM_PROVIDER_ID
+                        ? hiddenSourceIdsLocked() : Collections.emptySet();
                 for (int i = 0; sources != null && i < sources.length(); i++) {
                     JSONObject source = sources.optJSONObject(i);
-                    if (source == null) continue;
+                    if (source == null || hidden.contains(source.optString("id", ""))) {
+                        continue;
+                    }
                     appendUiNodes(values, source.optJSONArray("nodes"),
                             source.optString("title", ""), false, seen);
                     if (values.size() >= MAX_TOTAL_NODES) break;

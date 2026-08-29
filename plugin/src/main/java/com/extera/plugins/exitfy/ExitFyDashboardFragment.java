@@ -90,6 +90,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
     private View advancedCard;
     private View providerPageCard;
     private View restartCard;
+    private ImageView connectionIconView;
 
     @Override
     public boolean onFragmentCreate() {
@@ -236,9 +237,9 @@ final class ExitFyDashboardFragment extends BaseFragment {
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.addView(iconBadge(context, R.drawable.drawer_proxy_on,
-                I18n.t("Состояние подключения", "Connection status"), 56),
-                fixed(dp(56), dp(56)));
+        connectionIconView = iconBadge(context, R.drawable.drawer_proxy_off,
+                I18n.t("Состояние подключения", "Connection status"), 56);
+        header.addView(connectionIconView, fixed(dp(56), dp(56)));
 
         LinearLayout labels = new LinearLayout(context);
         labels.setOrientation(LinearLayout.VERTICAL);
@@ -508,6 +509,12 @@ final class ExitFyDashboardFragment extends BaseFragment {
         if (connectButton == null) return;
         connectionStatusView.setText(state.connectionTitle());
         connectionStatusView.setTextColor(connectionColor(state.runtimeState));
+        if (connectionIconView != null) {
+            // The icon says the same thing as the words above it, so it has to
+            // follow them rather than always showing a live connection.
+            connectionIconView.setImageResource("RUNNING".equals(state.runtimeState)
+                    ? R.drawable.drawer_proxy_on : R.drawable.drawer_proxy_off);
+        }
         boolean showConnectionIssue = "ERROR".equals(state.runtimeState)
                 && !state.connectionIssue.isEmpty();
         connectionIssueView.setText(showConnectionIssue ? state.connectionIssue : "");

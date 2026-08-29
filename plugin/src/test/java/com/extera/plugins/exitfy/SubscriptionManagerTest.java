@@ -1717,27 +1717,43 @@ public class SubscriptionManagerTest {
 
     @Test
     public void hidingASubscriptionKeepsItButDropsItsServers() throws Exception {
+        AtomicReference<String> firstBody = new AtomicReference<>(A1);
+        AtomicInteger secondStatus = new AtomicInteger(200);
+        MiniServer server = new MiniServer(firstBody, secondStatus);
         File root = Files.createTempDirectory("exitfy-hide").toFile();
         LimitedHttpClient http = new LimitedHttpClient();
         SubscriptionManager manager = new SubscriptionManager(new AtomicStore(root), http);
         try {
-            assertTrue(manager.addCustomUrl("https://first.example/sub"));
-            assertTrue(manager.addCustomUrl("https://second.example/sub"));
+            String base = "http://127.0.0.1:" + server.port();
+            assertTrue(manager.addCustomUrl(base + "/first"));
+            assertTrue(manager.addCustomUrl(base + "/second"));
+            assertEquals(2, manager.refresh(
+                    SettingsModel.CUSTOM_PROVIDER_ID, SettingsModel.defaults()).size());
+
             JSONObject before = manager.uiState(SettingsModel.CUSTOM_PROVIDER_ID);
             assertEquals(2, before.getJSONArray("customSources").length());
+            assertEquals(2, before.getJSONArray("nodes").length());
             String firstId = before.getJSONArray("customSources")
                     .getJSONObject(0).getString("id");
 
             assertTrue(manager.setCustomUrlHidden(firstId, true));
             JSONObject hidden = manager.uiState(SettingsModel.CUSTOM_PROVIDER_ID);
-            // The subscription stays listed, marked hidden, so nothing is lost.
+            // The subscription stays listed and keeps its URL, but the list the
+            // screen renders drops its servers -- that list is a separate
+            // snapshot, so filtering the parsed nodes alone changed nothing.
             assertEquals(2, hidden.getJSONArray("customSources").length());
             assertTrue(hidden.getJSONArray("customSources")
                     .getJSONObject(0).getBoolean("hidden"));
-            assertFalse(manager.setCustomUrlHidden(firstId, true));
+            assertEquals(1, hidden.getJSONArray("nodes").length());
+            assertEquals(1, manager.nodes(SettingsModel.CUSTOM_PROVIDER_ID).size());
+
             assertTrue(manager.setCustomUrlHidden(firstId, false));
+            assertEquals(2, manager.uiState(SettingsModel.CUSTOM_PROVIDER_ID)
+                    .getJSONArray("nodes").length());
+            assertFalse(manager.setCustomUrlHidden(firstId, false));
             assertFalse(manager.setCustomUrlHidden("missing", true));
         } finally {
+            server.close();
             http.close();
             TestFiles.deleteRecursively(root);
         }

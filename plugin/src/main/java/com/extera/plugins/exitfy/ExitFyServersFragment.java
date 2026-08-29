@@ -197,8 +197,6 @@ final class ExitFyServersFragment
         setSafeClick(nextPageRow.view, this::goToNextPage);
         content.addView(nextPageRow.view, sectionParams());
 
-        // The subtitles of the paging rows keep the size they were built with;
-        // the value on this row is what changes.
         pageSizeRow = settingRow(context, R.drawable.msg_stats,
                 I18n.t("Серверов на странице", "Servers per page"),
                 I18n.t("Больше серверов сразу, без перелистывания",
@@ -711,10 +709,10 @@ final class ExitFyServersFragment
                 .put("hidden", !source.hidden)));
         labels.add(I18n.t("Удалить подписку", "Delete subscription"));
         actions.add(() -> confirmDeleteSubscription(source));
-        showChoiceDialog(
+        showActionDialog(
                 TextUtils.isEmpty(source.title)
                         ? I18n.t("Подписка", "Subscription") : source.title,
-                labels.toArray(new CharSequence[0]), -1, index -> {
+                labels.toArray(new CharSequence[0]), index -> {
                     if (index < 0 || index >= actions.size()) return;
                     actions.get(index).run();
                 });
@@ -816,6 +814,11 @@ final class ExitFyServersFragment
         }
     }
 
+    private void applyPageSizeSummaries() {
+        if (previousPageRow != null) previousPageRow.setSummary(pageSizeSummary());
+        if (nextPageRow != null) nextPageRow.setSummary(pageSizeSummary());
+    }
+
     private String pageSizeSummary() {
         return I18n.t("До ", "Up to ") + pageSize
                 + I18n.t(" серверов на странице", " servers per page");
@@ -837,6 +840,7 @@ final class ExitFyServersFragment
                     if (pageSizeRow != null) {
                         pageSizeRow.setValue(String.valueOf(pageSize));
                     }
+                    applyPageSizeSummaries();
                     reloadPage();
                 });
     }
