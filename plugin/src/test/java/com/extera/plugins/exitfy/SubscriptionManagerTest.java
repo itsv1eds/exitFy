@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -1679,5 +1680,31 @@ public class SubscriptionManagerTest {
 
         assertEquals("My Source",
                 SubscriptionManager.responseTitle(response, "https://example.invalid/sub"));
+    }
+
+    @Test
+    public void anInvalidKeyNamesWhatTheParserRefused() {
+        // "Invalid key" alone left people comparing a key another client
+        // accepts against no information at all.
+        assertEquals(I18n.t("этот способ передачи не поддерживается выбранным ядром",
+                        "the selected core cannot run this transport"),
+                RejectionReason.describe("transport_unsupported"));
+        assertNotEquals(RejectionReason.describe("uri_too_large"),
+                RejectionReason.describe("transport_unsupported"));
+        assertEquals(RejectionReason.describe("anything_unmapped"),
+                RejectionReason.describe("something_new_we_did_not_map"));
+        assertEquals("", RejectionReason.describe(null));
+    }
+
+    @Test
+    public void aRefusalSummaryStaysShortAndFreeOfRepeats() {
+        assertEquals("", RejectionReason.summarize(java.util.Collections.emptyList()));
+        assertEquals(RejectionReason.describe("mux_unsupported"),
+                RejectionReason.summarize(java.util.Arrays.asList(
+                        "mux_unsupported", "mux_unsupported")));
+        String many = RejectionReason.summarize(java.util.Arrays.asList(
+                "mux_unsupported", "uri_too_large", "vless_vision_tls_required",
+                "bind_unsupported"));
+        assertEquals(2, many.split("; ", -1).length - 1);
     }
 }

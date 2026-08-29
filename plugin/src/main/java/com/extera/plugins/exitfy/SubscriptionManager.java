@@ -379,9 +379,12 @@ final class SubscriptionManager implements Closeable {
                     boolean refused = parsed != null && parsed.rejected > 0
                             && parsed.reasons.contains(SubscriptionParser.UNREACHABLE_ONLY);
                     if (!refused) {
+                        String cause = parsed == null ? ""
+                                : RejectionReason.summarize(parsed.reasons);
                         throw new IllegalStateException(I18n.t(
                                 "Подписка не содержит поддерживаемых серверов",
-                                "Subscription contains no supported servers"));
+                                "Subscription contains no supported servers")
+                                + (cause.isEmpty() ? "" : ": " + cause));
                     }
                     // The source stated its reason in the names of the dead
                     // entries. Repeating it verbatim tells the user far more
@@ -479,7 +482,14 @@ final class SubscriptionManager implements Closeable {
         ensureWritable();
         SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(
                 value == null ? "" : value.trim());
-        if (parsed.nodes.isEmpty()) throw new IllegalArgumentException(I18n.t("Некорректный ключ", "Invalid key"));
+        if (parsed.nodes.isEmpty()) {
+            // The parser knows exactly what it refused; saying only "invalid
+            // key" left people guessing at a key another client accepts.
+            String cause = RejectionReason.summarize(parsed.reasons);
+            throw new IllegalArgumentException(cause.isEmpty()
+                    ? I18n.t("Некорректный ключ", "Invalid key")
+                    : I18n.t("Некорректный ключ: ", "Invalid key: ") + cause);
+        }
         int added = addManualNodesLocked(parsed.nodes);
         invalidateNodeCachesLocked(CUSTOM_PROVIDER_ID);
         clearProbeResultsLocked();
@@ -619,7 +629,8 @@ final class SubscriptionManager implements Closeable {
                 for (SourceSummary item : snapshot.customSources) {
                     custom.put(new JSONObject()
                             .put("id", item.id)
-                            .put("title", item.title));
+                            .put("title", item.title)
+                            .put("nodeCount", item.nodeCount));
                 }
             }
             result.put("providerId", bounded);
@@ -753,8 +764,14 @@ final class SubscriptionManager implements Closeable {
         for (int i = 0; urls != null && i < urls.length(); i++) {
             JSONObject item = urls.optJSONObject(i);
             if (item == null) continue;
+            // A source that contributes nothing looks identical to a working
+            // one otherwise, which reads as the plugin ignoring it.
+            String sourceUrl = item.optString("url", "");
+            JSONObject stored = sourceForUrlLocked(CUSTOM_PROVIDER_ID, sourceUrl, false);
+            JSONArray storedNodes = stored == null ? null : stored.optJSONArray("nodes");
             customSources.add(new SourceSummary(item.optString("id", ""),
-                    item.optString("title", hostTitle(item.optString("url", "")))));
+                    item.optString("title", hostTitle(sourceUrl)),
+                    storedNodes == null ? 0 : storedNodes.length()));
         }
         viewSnapshot = new ViewSnapshot(providers, selected,
                 Collections.unmodifiableList(customSources));
@@ -1856,10 +1873,12 @@ final class SubscriptionManager implements Closeable {
     private static final class SourceSummary {
         final String id;
         final String title;
+        final int nodeCount;
 
-        SourceSummary(String id, String title) {
+        SourceSummary(String id, String title, int nodeCount) {
             this.id = id == null ? "" : id;
             this.title = title == null ? "" : title;
+            this.nodeCount = Math.max(0, nodeCount);
         }
     }
 

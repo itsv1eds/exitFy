@@ -18,7 +18,7 @@ __id__ = "exitFy_v2"
 __name__ = "exitFy"
 __description__ = "Application download speed optimization"
 __author__ = "@exteraPluginsSup"
-__version__ = "4.0.2"
+__version__ = "4.0.3"
 __icon__ = "exitFy/1"
 __app_version__ = ">=12.5.1"
 __sdk_version__ = ">=1.4.3.3"
@@ -451,8 +451,24 @@ class ExitFyPlugin(BasePlugin):
         except Exception:
             saved_legacy = None
         try:
+            stored_provider = self.get_setting("provider_id", None)
+        except Exception:
+            stored_provider = None
+        # A fresh install has no choice to carry over. Treating its missing
+        # provider_id as a saved 0 remapped every new install onto the second
+        # source, and it kept happening whenever the marker failed to persist.
+        if saved_legacy is None and stored_provider is None:
+            self._provider_migration_value = None
+            try:
+                self.set_setting(
+                    "provider_catalog_version", PROVIDER_CATALOG_VERSION, reload_settings=False
+                )
+            except Exception as exc:
+                self.log("exitFy provider catalog marker failed: " + str(exc))
+            return
+        try:
             source_id = int(saved_legacy) if saved_legacy is not None else int(
-                self.get_setting("provider_id", 0) or 0
+                stored_provider or 0
             )
         except Exception:
             source_id = 0

@@ -582,7 +582,9 @@ final class ExitFyServersFragment
                                 ? I18n.t("Подписка", "Subscription") : source.title,
                         I18n.t("Нажмите, чтобы удалить подписку",
                                 "Tap to remove this subscription"));
-                row.setValue(I18n.t("Сохранена", "Saved"));
+                row.setValue(source.nodeCount > 0
+                        ? I18n.t("Серверов: ", "Servers: ") + source.nodeCount
+                        : I18n.t("Серверов нет", "No servers"));
                 setSafeClick(row.view, () -> confirmDeleteSubscription(source));
                 customSourceRows.add(row);
                 customSourcesContainer.addView(row.view, sectionParams());

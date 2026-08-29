@@ -119,7 +119,8 @@ final class ExitFyServerPage {
                 CustomSource source = new CustomSource(
                         requireIdentity(object, "id", 192, false),
                         ExitFyDashboardState.safeLabel(
-                                requireString(object, "title"), 160, ""));
+                                requireString(object, "title"), 160, ""),
+                        object.optInt("nodeCount", 0));
                 if (!sourceIds.add(source.id)) return INVALID;
                 sources.add(source);
             }
@@ -286,10 +287,12 @@ final class ExitFyServerPage {
     static final class CustomSource {
         final String id;
         final String title;
+        final int nodeCount;
 
-        private CustomSource(String id, String title) {
+        private CustomSource(String id, String title, int nodeCount) {
             this.id = id;
             this.title = title;
+            this.nodeCount = nodeCount;
         }
     }
 }

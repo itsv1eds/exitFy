@@ -102,7 +102,7 @@ def load_plugin_class(overrides=None):
             "/private/exitfy", "/private/bridge.so", "arm64-v8a"
         ),
         "__id__": "exitFy_v2",
-        "__version__": "4.0.2",
+        "__version__": "4.0.3",
         "PROVIDER_CATALOG_VERSION": 3,
         "CUSTOM_PROVIDER_ID": 3,
         "CUSTOM_V2_ID": 2,
@@ -152,6 +152,18 @@ class TemplateLifecycleTest(unittest.TestCase):
         self.assertEqual(ELIX, plugin.settings["provider_id"])
         self.assertEqual(3, plugin.settings["provider_catalog_version"])
         self.assertEqual(2, plugin.settings["provider_catalog_legacy_id"])
+
+    def test_a_fresh_install_keeps_the_first_provider(self):
+        plugin_type, *_ = load_plugin_class()
+        plugin = plugin_type()
+
+        plugin._migrate_provider_catalog()
+
+        # Nothing was saved, so nothing is rewritten: the default stands.
+        self.assertNotIn("provider_id", plugin.settings)
+        self.assertEqual(SHRIMP, plugin.get_setting("provider_id", SHRIMP))
+        self.assertEqual(3, plugin.settings["provider_catalog_version"])
+        self.assertNotIn("provider_catalog_legacy_id", plugin.settings)
 
     def test_v2_selections_follow_their_provider_into_the_v3_order(self):
         for saved, expected in ((0, ELIX), (1, SHRIMP), (2, CUSTOM)):
