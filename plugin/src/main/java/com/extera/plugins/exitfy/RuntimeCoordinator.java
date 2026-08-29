@@ -132,7 +132,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     private long manualSubscriptionRefreshAttempt;
     private volatile PingKind pingKind = PingKind.NONE;
     private volatile String pingState = "idle";
-    private volatile String pingType = SettingsModel.PING_PROXY_GET;
+    private volatile String pingType = SettingsModel.PING_TCP;
     private volatile int pingTotal;
     private volatile int pingCompleted;
     private volatile List<ProtocolParser.Node> pingNodes = new ArrayList<>();
@@ -507,6 +507,34 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                             : I18n.t("Подписка уже сохранена", "Subscription is already saved"), "").toString();
                 });
             }
+            if ("move_subscription".equals(command)) {
+                String id = request.optString("id", "");
+                int delta = request.optInt("delta", 0);
+                return executeSerialized(() -> {
+                    boolean moved = subscriptions.moveCustomUrl(id, delta);
+                    if (moved) invalidateSettings();
+                    return response(moved, moved
+                            ? I18n.t("Порядок изменён", "Order updated")
+                            : I18n.t("Не удалось переместить", "Could not move it"),
+                            "").toString();
+                });
+            }
+            if ("hide_subscription".equals(command)) {
+                String id = request.optString("id", "");
+                boolean hidden = request.optBoolean("hidden", false);
+                return executeSerialized(() -> {
+                    boolean changed = subscriptions.setCustomUrlHidden(id, hidden);
+                    if (changed) {
+                        if (settings.enabled) requestReconnect("subscription_hidden");
+                        invalidateSettings();
+                    }
+                    return response(changed, changed
+                            ? (hidden ? I18n.t("Подписка скрыта", "Subscription hidden")
+                            : I18n.t("Подписка показана", "Subscription shown"))
+                            : I18n.t("Ничего не изменилось", "Nothing changed"),
+                            "").toString();
+                });
+            }
             if ("delete_subscription".equals(command)) {
                 String id = request.optString("id", "");
                 return executeSerialized(() -> {
@@ -751,6 +779,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         return "add_node".equals(command) || "add_subscription".equals(command)
                 || "delete_subscription".equals(command) || "delete_manual_node".equals(command)
                 || "select_node".equals(command) || "clear_nodes".equals(command)
+                || "hide_subscription".equals(command)
                 || "import_text".equals(command) || "refresh_subscriptions".equals(command);
     }
 

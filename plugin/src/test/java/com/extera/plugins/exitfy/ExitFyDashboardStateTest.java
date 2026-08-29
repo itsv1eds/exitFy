@@ -123,7 +123,12 @@ public class ExitFyDashboardStateTest {
                 .put("pingType", "future")
                 .toString());
 
-        assertEquals(SettingsModel.PING_PROXY_GET, state.pingType);
+        // TCP is the canonical default: it measures without taking Telegram's
+        // proxy away, so it works while connected.
+        assertEquals(SettingsModel.PING_TCP, state.pingType);
+        assertEquals(SettingsModel.PING_PROXY_GET, ExitFyDashboardState.parse(
+                new JSONObject().put("pingType", SettingsModel.PING_PROXY_GET)
+                        .toString()).pingType);
     }
 
     @Test

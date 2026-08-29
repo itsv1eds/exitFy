@@ -50,7 +50,7 @@ final class SettingsModel {
     }
 
     static SettingsModel defaults() {
-        return new SettingsModel(false, 0, "", 6, PING_PROXY_GET);
+        return new SettingsModel(false, 0, "", 6, PING_TCP);
     }
 
     static SettingsModel fromJson(String json) {
@@ -61,7 +61,7 @@ final class SettingsModel {
                     boundedInt(object, "provider_id", 0, CUSTOM_PROVIDER_ID),
                     object.optString("custom_hwid", ""),
                     object.optInt("schema_version", 6),
-                    object.optString("ping_type", PING_PROXY_GET),
+                    object.optString("ping_type", PING_TCP),
                     object.optBoolean("dual_core", false),
                     object.optBoolean("failover", false),
                     object.optBoolean("refresh_on_open", false),
@@ -198,8 +198,10 @@ final class SettingsModel {
         return Math.max(minimum, Math.min(value, maximum));
     }
 
+    // TCP is the default: it measures without taking Telegram's proxy away,
+    // so it works while connected and when another app owns that setting.
     private static String normalizePingType(String value) {
-        return PING_TCP.equals(value) ? PING_TCP : PING_PROXY_GET;
+        return PING_PROXY_GET.equals(value) ? PING_PROXY_GET : PING_TCP;
     }
 
     static String normalizeCustomHwid(String value) {

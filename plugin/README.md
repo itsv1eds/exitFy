@@ -78,6 +78,14 @@ switching does not require the server screen. That screen lists 50 servers per
 page by default and can show 200; probing stays capped at 50 regardless, since
 listing and probing cost different things.
 
+TCP is the default latency check and the first option offered: it measures
+without borrowing Telegram's proxy, so it works while connected. Proxy GET
+remains for the full-path measurement.
+
+Saved subscriptions answer a long press with reorder, hide and delete. Hiding
+drops a source's servers from the list without losing the URL. A page holds 10,
+25, 50, 100 or 200 servers.
+
 The `refresh_on_open` setting reloads a stale source when the app comes back,
 and `auto_check_minutes` measures the current source on a schedule. Scheduled
 checks are always TCP: the full-path check borrows Telegram's proxy for its

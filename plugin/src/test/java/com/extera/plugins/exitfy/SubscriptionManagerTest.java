@@ -1714,4 +1714,63 @@ public class SubscriptionManagerTest {
                 "bind_unsupported"));
         assertEquals(2, many.split("; ", -1).length - 1);
     }
+
+    @Test
+    public void hidingASubscriptionKeepsItButDropsItsServers() throws Exception {
+        File root = Files.createTempDirectory("exitfy-hide").toFile();
+        LimitedHttpClient http = new LimitedHttpClient();
+        SubscriptionManager manager = new SubscriptionManager(new AtomicStore(root), http);
+        try {
+            assertTrue(manager.addCustomUrl("https://first.example/sub"));
+            assertTrue(manager.addCustomUrl("https://second.example/sub"));
+            JSONObject before = manager.uiState(SettingsModel.CUSTOM_PROVIDER_ID);
+            assertEquals(2, before.getJSONArray("customSources").length());
+            String firstId = before.getJSONArray("customSources")
+                    .getJSONObject(0).getString("id");
+
+            assertTrue(manager.setCustomUrlHidden(firstId, true));
+            JSONObject hidden = manager.uiState(SettingsModel.CUSTOM_PROVIDER_ID);
+            // The subscription stays listed, marked hidden, so nothing is lost.
+            assertEquals(2, hidden.getJSONArray("customSources").length());
+            assertTrue(hidden.getJSONArray("customSources")
+                    .getJSONObject(0).getBoolean("hidden"));
+            assertFalse(manager.setCustomUrlHidden(firstId, true));
+            assertTrue(manager.setCustomUrlHidden(firstId, false));
+            assertFalse(manager.setCustomUrlHidden("missing", true));
+        } finally {
+            http.close();
+            TestFiles.deleteRecursively(root);
+        }
+    }
+
+    @Test
+    public void movingASubscriptionStaysInsideTheList() throws Exception {
+        File root = Files.createTempDirectory("exitfy-move").toFile();
+        LimitedHttpClient http = new LimitedHttpClient();
+        SubscriptionManager manager = new SubscriptionManager(new AtomicStore(root), http);
+        try {
+            assertTrue(manager.addCustomUrl("https://first.example/sub"));
+            assertTrue(manager.addCustomUrl("https://second.example/sub"));
+            JSONArray sources = manager.uiState(SettingsModel.CUSTOM_PROVIDER_ID)
+                    .getJSONArray("customSources");
+            String firstId = sources.getJSONObject(0).getString("id");
+            String secondId = sources.getJSONObject(1).getString("id");
+
+            assertTrue(manager.moveCustomUrl(firstId, 1));
+            JSONArray moved = manager.uiState(SettingsModel.CUSTOM_PROVIDER_ID)
+                    .getJSONArray("customSources");
+            assertEquals(secondId, moved.getJSONObject(0).getString("id"));
+            assertEquals(firstId, moved.getJSONObject(1).getString("id"));
+
+            // The ends of the list have nowhere to go, and an unknown id is
+            // not silently applied to whatever sits at that position.
+            assertFalse(manager.moveCustomUrl(firstId, 1));
+            assertFalse(manager.moveCustomUrl(secondId, -1));
+            assertFalse(manager.moveCustomUrl("missing", 1));
+            assertFalse(manager.moveCustomUrl(firstId, 0));
+        } finally {
+            http.close();
+            TestFiles.deleteRecursively(root);
+        }
+    }
 }

@@ -1820,6 +1820,7 @@ public class RuntimeModelsTest {
     @Test
     public void theScheduledCheckPeriodOnlyAcceptsOfferedValues() {
         SettingsModel base = SettingsModel.defaults();
+        assertEquals(SettingsModel.PING_TCP, base.pingType);
         assertEquals(0, base.autoCheckMinutes);
         assertFalse(base.refreshOnOpen);
         assertEquals(60, base.withSetting("auto_check_minutes", 60).autoCheckMinutes);

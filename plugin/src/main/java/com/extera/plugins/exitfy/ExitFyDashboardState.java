@@ -58,10 +58,10 @@ final class ExitFyDashboardState {
         serverCount = Math.max(0, value.optInt("serverCount", 0));
         customUrlCount = Math.max(0, value.optInt("customUrlCount", 0));
         restartRequired = value.optBoolean("restartRequired", false);
-        pingType = SettingsModel.PING_TCP.equals(safeToken(
-                value.optString("pingType", SettingsModel.PING_PROXY_GET),
-                SettingsModel.PING_PROXY_GET))
-                ? SettingsModel.PING_TCP : SettingsModel.PING_PROXY_GET;
+        pingType = SettingsModel.PING_PROXY_GET.equals(safeToken(
+                value.optString("pingType", SettingsModel.PING_TCP),
+                SettingsModel.PING_TCP))
+                ? SettingsModel.PING_PROXY_GET : SettingsModel.PING_TCP;
         dualCore = value.optBoolean("dualCore", false);
         failover = value.optBoolean("failover", false);
         refreshOnOpen = value.optBoolean("refreshOnOpen", false);

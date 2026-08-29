@@ -196,6 +196,11 @@ Device testing is performed by the beta tester after receiving
   next server of the source is selected after the second failure and not
   before. Confirm a subscription that fails to refresh never moves the
   selection. With failover off, the selection must never change on its own.
+- Confirm a fresh install checks latency over TCP, and that Proxy GET is still
+  reachable and works when selected. Long-press a saved subscription and
+  reorder, hide and show it: a hidden source keeps its URL, loses its servers
+  from the list, and the selected server is re-picked. Confirm a page can hold
+  10 servers as well as 200.
 - Configure a Telegram proxy outside exitFy and run the full-path check.
   Every row must state that the proxy is in use, not that the check was
   cancelled. Turn on refresh-on-open and a check period, background the app and

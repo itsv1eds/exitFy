@@ -31,7 +31,8 @@ import java.util.Locale;
 final class ExitFyServersFragment
         extends ExitFySubscreenFragment<ExitFyDashboardState> {
     private static final int[] PAGE_SIZES = {
-            SubscriptionManager.DEFAULT_PAGE_SIZE, 100, SubscriptionManager.MAX_PAGE_SIZE,
+            10, 25, SubscriptionManager.DEFAULT_PAGE_SIZE, 100,
+            SubscriptionManager.MAX_PAGE_SIZE,
     };
 
     private int pageSize = SubscriptionManager.DEFAULT_PAGE_SIZE;
@@ -173,7 +174,7 @@ final class ExitFyServersFragment
         content.addView(sectionLabel(context,
                 I18n.t("СЕРВЕРЫ", "SERVERS")), matchWrap());
 
-        pageStatusRow = settingRow(context, R.drawable.msg_folders,
+        pageStatusRow = settingRow(context, R.drawable.msg_list,
                 I18n.t("Список серверов", "Server list"),
                 I18n.t("Нажмите, чтобы перечитать текущую страницу",
                         "Tap to reload the current page"));
@@ -198,7 +199,7 @@ final class ExitFyServersFragment
 
         // The subtitles of the paging rows keep the size they were built with;
         // the value on this row is what changes.
-        pageSizeRow = settingRow(context, R.drawable.msg_folders,
+        pageSizeRow = settingRow(context, R.drawable.msg_stats,
                 I18n.t("Серверов на странице", "Servers per page"),
                 I18n.t("Больше серверов сразу, без перелистывания",
                         "See more of a source without paging"));
@@ -213,7 +214,7 @@ final class ExitFyServersFragment
         LinearLayout value = card(context, false);
         value.setOrientation(LinearLayout.HORIZONTAL);
         value.setGravity(Gravity.CENTER_VERTICAL);
-        value.addView(iconBadge(context, R.drawable.msg_folders,
+        value.addView(iconBadge(context, R.drawable.msg_list,
                 I18n.t("Браузер серверов", "Server browser"), 52),
                 fixed(dp(52), dp(52)));
 
@@ -592,15 +593,23 @@ final class ExitFyServersFragment
                     "There are no saved subscriptions."));
         } else {
             for (ExitFyServerPage.CustomSource source : page.customSources) {
-                SettingRow row = settingRow(context, R.drawable.msg_download,
+                SettingRow row = settingRow(context, R.drawable.msg_link,
                         TextUtils.isEmpty(source.title)
                                 ? I18n.t("Подписка", "Subscription") : source.title,
-                        I18n.t("Нажмите, чтобы удалить подписку",
-                                "Tap to remove this subscription"));
-                row.setValue(source.nodeCount > 0
+                        I18n.t("Удержание — переместить или скрыть",
+                                "Hold to reorder or hide"));
+                row.setValue(source.hidden
+                        ? I18n.t("Скрыта", "Hidden")
+                        : (source.nodeCount > 0
                         ? I18n.t("Серверов: ", "Servers: ") + source.nodeCount
-                        : I18n.t("Серверов нет", "No servers"));
+                        : I18n.t("Серверов нет", "No servers")));
                 setSafeClick(row.view, () -> confirmDeleteSubscription(source));
+                final int position = customSourceRows.size();
+                final int last = page.customSources.size() - 1;
+                row.view.setOnLongClickListener(view -> {
+                    showSubscriptionActions(source, position, last);
+                    return true;
+                });
                 customSourceRows.add(row);
                 customSourcesContainer.addView(row.view, sectionParams());
             }
@@ -611,7 +620,7 @@ final class ExitFyServersFragment
         String title = TextUtils.isEmpty(node.name)
                 ? I18n.t("Сервер без названия", "Unnamed server") : node.name;
         String summary = nodeSummary(node);
-        SettingRow row = settingRow(context, R.drawable.msg_folders,
+        SettingRow row = settingRow(context, R.drawable.msg_language,
                 title, summary);
         boolean selected = node.key.equals(page.selectedKey);
         String status = pingLabel(node);
@@ -674,6 +683,48 @@ final class ExitFyServersFragment
                 () -> runMutation(() -> new JSONObject()
                         .put("command", "delete_manual_node")
                         .put("key", node.key)));
+    }
+
+    /**
+     * Reordering and hiding live behind a long press: a plain tap on this row
+     * has always deleted, and moving that action would surprise anyone who
+     * learned it.
+     */
+    private void showSubscriptionActions(ExitFyServerPage.CustomSource source,
+                                         int position, int last) {
+        List<CharSequence> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        if (position > 0) {
+            labels.add(I18n.t("Переместить выше", "Move up"));
+            actions.add(() -> moveSubscription(source, -1));
+        }
+        if (position < last) {
+            labels.add(I18n.t("Переместить ниже", "Move down"));
+            actions.add(() -> moveSubscription(source, 1));
+        }
+        labels.add(source.hidden
+                ? I18n.t("Показать серверы", "Show its servers")
+                : I18n.t("Скрыть серверы", "Hide its servers"));
+        actions.add(() -> runMutation(() -> new JSONObject()
+                .put("command", "hide_subscription")
+                .put("id", source.id)
+                .put("hidden", !source.hidden)));
+        labels.add(I18n.t("Удалить подписку", "Delete subscription"));
+        actions.add(() -> confirmDeleteSubscription(source));
+        showChoiceDialog(
+                TextUtils.isEmpty(source.title)
+                        ? I18n.t("Подписка", "Subscription") : source.title,
+                labels.toArray(new CharSequence[0]), -1, index -> {
+                    if (index < 0 || index >= actions.size()) return;
+                    actions.get(index).run();
+                });
+    }
+
+    private void moveSubscription(ExitFyServerPage.CustomSource source, int delta) {
+        runMutation(() -> new JSONObject()
+                .put("command", "move_subscription")
+                .put("id", source.id)
+                .put("delta", delta));
     }
 
     private void confirmDeleteSubscription(ExitFyServerPage.CustomSource source) {

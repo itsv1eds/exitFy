@@ -236,7 +236,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.addView(iconBadge(context, R.drawable.msg_speed,
+        header.addView(iconBadge(context, R.drawable.drawer_proxy_on,
                 I18n.t("Состояние подключения", "Connection status"), 56),
                 fixed(dp(56), dp(56)));
 
@@ -388,7 +388,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
         top.setOnClickListener(view -> showQuickServerSwitch());
         bindBackground(top, BackgroundRole.ACCENT_SURFACE, dp(14), 0);
         applyThemeBinding(top);
-        top.addView(iconBadge(context, R.drawable.msg_speed,
+        top.addView(iconBadge(context, R.drawable.msg_language,
                 I18n.t("Активный сервер", "Active server"), 48), fixed(dp(48), dp(48)));
 
         LinearLayout labels = new LinearLayout(context);

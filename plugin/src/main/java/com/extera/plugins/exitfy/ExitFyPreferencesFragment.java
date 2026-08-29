@@ -11,8 +11,8 @@ import org.telegram.messenger.R;
 final class ExitFyPreferencesFragment
         extends ExitFySubscreenFragment<ExitFyDashboardState> {
     private static final String[] PING_VALUES = {
-            SettingsModel.PING_PROXY_GET,
             SettingsModel.PING_TCP,
+            SettingsModel.PING_PROXY_GET,
     };
 
     private ExitFyDashboardState state = ExitFyDashboardState.EMPTY;
@@ -55,7 +55,7 @@ final class ExitFyPreferencesFragment
         setSafeClick(refreshOnOpenRow.view, this::showRefreshOnOpenDialog);
         content.addView(refreshOnOpenRow.view, sectionParams());
 
-        autoCheckRow = settingRow(context, R.drawable.msg_speed,
+        autoCheckRow = settingRow(context, R.drawable.msg_stats,
                 I18n.t("Автопроверка задержки", "Automatic latency check"),
                 I18n.t("Периодически и всегда по TCP, чтобы не прерывать подключение",
                         "On a schedule, always over TCP so the connection is not interrupted"));
@@ -71,7 +71,7 @@ final class ExitFyPreferencesFragment
                 I18n.t("Версии компонентов", "Component versions"), "");
         content.addView(coreVersionRow.view, sectionParams());
 
-        dualCoreRow = settingRow(context, R.drawable.msg_settings,
+        dualCoreRow = settingRow(context, R.drawable.msg_permissions,
                 I18n.t("Два ядра сразу (эксперимент)", "Both cores at once (experimental)"), "");
         setSafeClick(dualCoreRow.view, this::showDualCoreDialog);
         content.addView(dualCoreRow.view, sectionParams());
@@ -139,8 +139,8 @@ final class ExitFyPreferencesFragment
 
     private void showPingTypeDialog() {
         CharSequence[] labels = {
-                "Proxy GET",
                 "TCP",
+                "Proxy GET",
         };
         showChoiceDialog(I18n.t("Тип пинга", "Ping type"),
                 labels, pingTypeIndex(state.pingType), index -> {
@@ -296,12 +296,12 @@ final class ExitFyPreferencesFragment
     }
 
     private static int pingTypeIndex(String value) {
-        return SettingsModel.PING_TCP.equals(value) ? 1 : 0;
+        return SettingsModel.PING_PROXY_GET.equals(value) ? 1 : 0;
     }
 
     private static String pingTypeLabel(String value) {
-        return SettingsModel.PING_TCP.equals(value)
-                ? "TCP"
-                : "Proxy GET";
+        return SettingsModel.PING_PROXY_GET.equals(value)
+                ? "Proxy GET"
+                : "TCP";
     }
 }

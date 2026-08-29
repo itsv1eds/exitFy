@@ -135,10 +135,14 @@ final class SubscriptionManager implements Closeable {
         if (cached != null) return new ArrayList<>(cached);
         LinkedHashMap<String, ProtocolParser.Node> exact = new LinkedHashMap<>();
         JSONArray sources = provider(bounded).optJSONArray("sources");
+        Set<String> hidden = bounded == CUSTOM_PROVIDER_ID
+                ? hiddenSourceIdsLocked() : Collections.emptySet();
         if (sources != null) {
             for (int i = 0; i < sources.length(); i++) {
                 JSONObject source = sources.optJSONObject(i);
-                if (source != null) collectStored(source.optJSONArray("nodes"), exact);
+                if (source != null && !hidden.contains(source.optString("id", ""))) {
+                    collectStored(source.optJSONArray("nodes"), exact);
+                }
                 if (exact.size() >= MAX_TOTAL_NODES) break;
             }
         }
@@ -537,6 +541,95 @@ final class SubscriptionManager implements Closeable {
         return true;
     }
 
+    /**
+     * Moves one saved subscription within the list. Order decides which
+     * servers a page shows first, so it is the user's to arrange.
+     */
+    synchronized boolean moveCustomUrl(String id, int delta) throws Exception {
+        ensureWritable();
+        if (id == null || id.isEmpty() || delta == 0) return false;
+        JSONArray current = data.optJSONArray("customUrls");
+        int length = current == null ? 0 : current.length();
+        int from = -1;
+        for (int i = 0; i < length; i++) {
+            JSONObject item = current.optJSONObject(i);
+            if (item != null && id.equals(item.optString("id", ""))) {
+                from = i;
+                break;
+            }
+        }
+        if (from < 0) return false;
+        int to = from + (delta > 0 ? 1 : -1);
+        if (to < 0 || to >= length) return false;
+        List<JSONObject> items = new ArrayList<>();
+        for (int i = 0; i < length; i++) items.add(current.optJSONObject(i));
+        JSONObject moved = items.remove(from);
+        items.add(to, moved);
+        JSONArray next = new JSONArray();
+        for (JSONObject item : items) next.put(item);
+        data.put("customUrls", next);
+        reorderSourcesLocked(items);
+        invalidateNodeCachesLocked(CUSTOM_PROVIDER_ID);
+        persist();
+        mutationRevision++;
+        return true;
+    }
+
+    /**
+     * Hides a subscription's servers without deleting it. Sources go quiet for
+     * a while and come back; losing the URL to stop seeing them is a poor
+     * trade, and re-adding it loses whatever else was saved with it.
+     */
+    synchronized boolean setCustomUrlHidden(String id, boolean hidden) throws Exception {
+        ensureWritable();
+        if (id == null || id.isEmpty()) return false;
+        JSONArray current = data.optJSONArray("customUrls");
+        for (int i = 0; current != null && i < current.length(); i++) {
+            JSONObject item = current.optJSONObject(i);
+            if (item == null || !id.equals(item.optString("id", ""))) continue;
+            if (item.optBoolean("hidden", false) == hidden) return false;
+            item.put("hidden", hidden);
+            invalidateNodeCachesLocked(CUSTOM_PROVIDER_ID);
+            clearProbeResultsLocked();
+            persist();
+            mutationRevision++;
+            return true;
+        }
+        return false;
+    }
+
+    private void reorderSourcesLocked(List<JSONObject> orderedUrls) throws Exception {
+        JSONArray sources = provider(CUSTOM_PROVIDER_ID).optJSONArray("sources");
+        if (sources == null) return;
+        LinkedHashMap<String, JSONObject> byId = new LinkedHashMap<>();
+        for (int i = 0; i < sources.length(); i++) {
+            JSONObject source = sources.optJSONObject(i);
+            if (source != null) byId.put(source.optString("id", ""), source);
+        }
+        JSONArray next = new JSONArray();
+        for (JSONObject item : orderedUrls) {
+            if (item == null) continue;
+            String sourceKey = sourceId(sourceStorageKey(
+                    CUSTOM_PROVIDER_ID, item.optString("url", "")));
+            JSONObject source = byId.remove(sourceKey);
+            if (source != null) next.put(source);
+        }
+        for (JSONObject leftover : byId.values()) next.put(leftover);
+        provider(CUSTOM_PROVIDER_ID).put("sources", next);
+    }
+
+    private Set<String> hiddenSourceIdsLocked() {
+        LinkedHashSet<String> hidden = new LinkedHashSet<>();
+        JSONArray custom = data.optJSONArray("customUrls");
+        for (int i = 0; custom != null && i < custom.length(); i++) {
+            JSONObject item = custom.optJSONObject(i);
+            if (item == null || !item.optBoolean("hidden", false)) continue;
+            hidden.add(sourceId(sourceStorageKey(
+                    CUSTOM_PROVIDER_ID, item.optString("url", ""))));
+        }
+        return hidden;
+    }
+
     synchronized void clearNodesKeepSubscriptions() throws Exception {
         ensureWritable();
         long operationEpoch = beginOperation();
@@ -634,7 +727,8 @@ final class SubscriptionManager implements Closeable {
                     custom.put(new JSONObject()
                             .put("id", item.id)
                             .put("title", item.title)
-                            .put("nodeCount", item.nodeCount));
+                            .put("nodeCount", item.nodeCount)
+                            .put("hidden", item.hidden));
                 }
             }
             result.put("providerId", bounded);
@@ -775,7 +869,8 @@ final class SubscriptionManager implements Closeable {
             JSONArray storedNodes = stored == null ? null : stored.optJSONArray("nodes");
             customSources.add(new SourceSummary(item.optString("id", ""),
                     item.optString("title", hostTitle(sourceUrl)),
-                    storedNodes == null ? 0 : storedNodes.length()));
+                    storedNodes == null ? 0 : storedNodes.length(),
+                    item.optBoolean("hidden", false)));
         }
         viewSnapshot = new ViewSnapshot(providers, selected,
                 Collections.unmodifiableList(customSources));
@@ -1881,11 +1976,13 @@ final class SubscriptionManager implements Closeable {
         final String id;
         final String title;
         final int nodeCount;
+        final boolean hidden;
 
-        SourceSummary(String id, String title, int nodeCount) {
+        SourceSummary(String id, String title, int nodeCount, boolean hidden) {
             this.id = id == null ? "" : id;
             this.title = title == null ? "" : title;
             this.nodeCount = Math.max(0, nodeCount);
+            this.hidden = hidden;
         }
     }
 
