@@ -1699,6 +1699,42 @@ tasks.register("lintPluginTemplate") {
     }
 }
 
+tasks.register("verifySettingsReachTheRuntime") {
+    group = "verification"
+    description = "Every setting the runtime reads must be one the template sends"
+    def settingsFile = file("src/main/java/com/extera/plugins/exitfy/SettingsModel.java")
+    inputs.files(settingsFile, pluginTemplateFile)
+    outputs.upToDateWhen { false }
+    doLast {
+        // A setting the template leaves out is read back as its default on the
+        // next start, so it looks like the plugin forgot it. This has happened
+        // twice; the contract is checked instead of remembered.
+        String model = settingsFile.text
+        int parseStart = model.indexOf("static SettingsModel fromJson")
+        int parseEnd = model.indexOf("JSONObject toJson")
+        if (parseStart < 0 || parseEnd < parseStart) {
+            throw new GradleException("Cannot locate the settings parser")
+        }
+        String parser = model.substring(parseStart, parseEnd)
+        String template = pluginTemplateFile.getText("UTF-8")
+        int sendStart = template.indexOf("    def _settings_dict(self):")
+        int sendEnd = template.indexOf("\n    def ", sendStart + 1)
+        if (sendStart < 0 || sendEnd < sendStart) {
+            throw new GradleException("Cannot locate the template settings payload")
+        }
+        String sent = template.substring(sendStart, sendEnd)
+        List<String> missing = []
+        (parser =~ /object\.opt\w+\("([a-z_]+)"/).each { match ->
+            String key = match[1]
+            if (!sent.contains("\"${key}\":")) missing.add(key)
+        }
+        if (!missing.isEmpty()) {
+            throw new GradleException(
+                    "Settings the template never sends: " + missing.join(", "))
+        }
+    }
+}
+
 tasks.register("verifyFailoverStaysOptIn") {
     group = "verification"
     description = "Server switching must never start without the user asking for it"
@@ -1754,6 +1790,7 @@ tasks.matching { it.name == "lintPlugin" }.configureEach {
     dependsOn tasks.named("lintPluginTemplate")
     dependsOn tasks.named("verifyManifestSigningKey")
     dependsOn tasks.named("verifyFailoverStaysOptIn")
+    dependsOn tasks.named("verifySettingsReachTheRuntime")
 }
 
 tasks.register("pythonTemplateTests") {

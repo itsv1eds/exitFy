@@ -484,6 +484,9 @@ class ExitFyPlugin(BasePlugin):
                 self.get_setting("refresh_on_open", False)
             ),
             "auto_check_minutes": self._auto_check_minutes_value(),
+            "calls_via_proxy": self._as_bool(
+                self.get_setting("calls_via_proxy", False)
+            ),
         }
 
     def _auto_check_minutes_value(self):

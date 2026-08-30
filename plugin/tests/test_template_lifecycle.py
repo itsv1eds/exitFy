@@ -174,6 +174,7 @@ class TemplateLifecycleTest(unittest.TestCase):
             "dual_core": True,
             "refresh_on_open": True,
             "auto_check_minutes": 60,
+            "calls_via_proxy": True,
             "ping_type": "proxy_get",
         })
 
@@ -185,6 +186,7 @@ class TemplateLifecycleTest(unittest.TestCase):
         self.assertTrue(values["dual_core"])
         self.assertTrue(values["refresh_on_open"])
         self.assertEqual(60, values["auto_check_minutes"])
+        self.assertTrue(values["calls_via_proxy"])
         self.assertEqual("proxy_get", values["ping_type"])
 
     def test_unset_settings_default_to_off_and_tcp(self):
@@ -196,6 +198,7 @@ class TemplateLifecycleTest(unittest.TestCase):
         self.assertFalse(values["dual_core"])
         self.assertFalse(values["refresh_on_open"])
         self.assertEqual(0, values["auto_check_minutes"])
+        self.assertFalse(values["calls_via_proxy"])
 
     def test_an_unoffered_check_period_is_treated_as_off(self):
         plugin_type, *_ = load_plugin_class()
