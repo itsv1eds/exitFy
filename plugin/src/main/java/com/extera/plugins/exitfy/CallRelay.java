@@ -18,6 +18,13 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -39,6 +46,7 @@ final class CallRelay implements Closeable {
     private static final int MAX_DATAGRAM_BYTES = 2048;
     private static final long IDLE_TIMEOUT_MS = 120_000L;
     private static final int HANDSHAKE_TIMEOUT_MS = 4_000;
+    private static final long OPEN_TIMEOUT_MS = 3_000L;
 
     private final Object lock = new Object();
     private final Map<String, Mapping> mappings = new LinkedHashMap<>();
@@ -51,6 +59,13 @@ final class CallRelay implements Closeable {
     private final AtomicLong toTelegram = new AtomicLong();
     private final AtomicLong mapped = new AtomicLong();
     private volatile String lastRefusal = "";
+
+    private final Queue<Mapping> pendingRegistrations = new ConcurrentLinkedQueue<>();
+    private final ExecutorService opener = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "exitfy-call-open");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private Selector selector;
     private Thread worker;
@@ -82,25 +97,46 @@ final class CallRelay implements Closeable {
                 existing.lastActivity = System.currentTimeMillis();
                 return existing.localPort;
             }
-            if (existing != null) closeQuietly(existing);
+            if (existing != null) {
+                mappings.remove(key);
+                closeQuietly(existing);
+            }
             dropIdleLocked();
             if (mappings.size() >= MAX_MAPPINGS) {
-                throw new IllegalStateException("too many call endpoints");
+                lastRefusal = "too many call endpoints";
+                throw new IllegalStateException(lastRefusal);
             }
-            Mapping mapping;
-            try {
-                mapping = openMapping(targetIp, targetPort);
-            } catch (Exception error) {
-                lastRefusal = ErrorSanitizer.clean(error.getMessage() == null
-                        ? error.getClass().getSimpleName() : error.getMessage());
-                throw error;
+        }
+        // The call layer asks for this from the thread it is running on, and
+        // on Android that is the main thread, where opening a socket throws.
+        // The handshake happens here instead and the caller only waits.
+        Mapping mapping;
+        try {
+            Future<Mapping> pending = opener.submit(
+                    (Callable<Mapping>) () -> openMapping(targetIp, targetPort));
+            mapping = pending.get(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (Exception error) {
+            Throwable cause = error.getCause() == null ? error : error.getCause();
+            lastRefusal = ErrorSanitizer.clean(cause.getMessage() == null
+                    ? cause.getClass().getSimpleName() : cause.getMessage());
+            throw error instanceof Exception ? (Exception) error : new IOException(error);
+        }
+        synchronized (lock) {
+            Mapping raced = mappings.get(key);
+            if (raced != null && raced.usable()) {
+                closeQuietly(mapping);
+                return raced.localPort;
             }
             mappings.put(key, mapping);
             mapped.incrementAndGet();
             ensureWorkerLocked();
-            selector.wakeup();
-            return mapping.localPort;
         }
+        // Registering a channel blocks while the pump sits in select(), so the
+        // pump picks new mappings up itself.
+        pendingRegistrations.add(mapping);
+        Selector current = selector;
+        if (current != null) current.wakeup();
+        return mapping.localPort;
     }
 
     /**
@@ -137,6 +173,8 @@ final class CallRelay implements Closeable {
             current = new ArrayList<>(mappings.values());
             mappings.clear();
         }
+        opener.shutdownNow();
+        pendingRegistrations.clear();
         if (closing != null) {
             closing.wakeup();
             try {
@@ -167,6 +205,7 @@ final class CallRelay implements Closeable {
     }
 
     private void ensureWorkerLocked() throws IOException {
+        if (selector == null) selector = Selector.open();
         if (running && worker != null && worker.isAlive()) return;
         running = true;
         Thread thread = new Thread(this::pump, "exitfy-call-relay");
@@ -196,13 +235,7 @@ final class CallRelay implements Closeable {
             core.socket().bind(new InetSocketAddress(
                     InetAddress.getByName("127.0.0.1"), 0));
 
-            Mapping mapping = new Mapping(targetIp, targetPort, control, client, core, relay);
-            synchronized (lock) {
-                if (selector == null) selector = Selector.open();
-            }
-            client.register(selector, SelectionKey.OP_READ, mapping);
-            core.register(selector, SelectionKey.OP_READ, mapping);
-            return mapping;
+            return new Mapping(targetIp, targetPort, control, client, core, relay);
         } catch (Exception error) {
             closeQuietly(control);
             closeQuietly(client);
@@ -287,6 +320,7 @@ final class CallRelay implements Closeable {
                 current = selector;
             }
             if (current == null) return;
+            registerPending(current);
             try {
                 current.select(1_000L);
             } catch (IOException stopped) {
@@ -308,6 +342,18 @@ final class CallRelay implements Closeable {
                 }
             }
             expireIdle();
+        }
+    }
+
+    private void registerPending(Selector current) {
+        Mapping mapping;
+        while ((mapping = pendingRegistrations.poll()) != null) {
+            try {
+                mapping.client.register(current, SelectionKey.OP_READ, mapping);
+                mapping.core.register(current, SelectionKey.OP_READ, mapping);
+            } catch (Exception ignored) {
+                closeQuietly(mapping);
+            }
         }
     }
 

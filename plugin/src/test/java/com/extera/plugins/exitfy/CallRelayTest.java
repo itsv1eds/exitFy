@@ -114,6 +114,38 @@ public class CallRelayTest {
         }
     }
 
+    @Test
+    public void theCallerNeverOpensSocketsItselfAndLaterMappingsDoNotHang()
+            throws Exception {
+        try (FakeSocks socks = new FakeSocks("", "");
+             CallRelay relay = new CallRelay("127.0.0.1", socks.port(), "", "")) {
+            // Android refuses network work on the thread the call layer calls
+            // from, so the handshake must happen on the relay's own thread.
+            String caller = Thread.currentThread().getName();
+            relay.mapEndpoint(REFLECTOR, REFLECTOR_PORT);
+            assertEquals(caller, Thread.currentThread().getName());
+            assertTrue(socks.handshakeThread().startsWith("fake-socks"));
+
+            // The pump is running by now: registering a channel with a
+            // selector blocks while it sits in select(), so a second mapping
+            // is where that deadlock would show.
+            for (int index = 1; index < 4; index++) {
+                int port = relay.mapEndpoint("91.108.4." + (20 + index), REFLECTOR_PORT);
+                assertTrue(port > 0);
+            }
+
+            byte[] payload = "later-mapping".getBytes(StandardCharsets.UTF_8);
+            try (DatagramSocket sender = new DatagramSocket(
+                    new InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0))) {
+                int last = relay.mapEndpoint("91.108.4.23", REFLECTOR_PORT);
+                sender.send(new DatagramPacket(payload, payload.length,
+                        InetAddress.getByName("127.0.0.1"), last));
+                assertNotNull("a later mapping never forwarded anything",
+                        socks.awaitDatagram());
+            }
+        }
+    }
+
     /** Minimal SOCKS5 server: greeting, optional login, UDP associate. */
     private static final class FakeSocks implements Closeable {
         private final ServerSocket listener;
@@ -124,6 +156,7 @@ public class CallRelayTest {
         private final String username;
         private final String password;
         private volatile boolean running = true;
+        private volatile String handshakeThread = "";
 
         FakeSocks(String username, String password) throws IOException {
             this.username = username;
@@ -141,6 +174,10 @@ public class CallRelayTest {
 
         int port() {
             return listener.getLocalPort();
+        }
+
+        String handshakeThread() {
+            return handshakeThread;
         }
 
         byte[] awaitDatagram() throws InterruptedException {
@@ -179,6 +216,7 @@ public class CallRelayTest {
         }
 
         private void handle(Socket client) throws IOException {
+            handshakeThread = Thread.currentThread().getName();
             InputStream in = client.getInputStream();
             OutputStream out = client.getOutputStream();
             int version = in.read();
