@@ -29,6 +29,7 @@ final class ExitFyDashboardState {
     final boolean failover;
     final boolean refreshOnOpen;
     final int autoCheckMinutes;
+    final boolean callsViaProxy;
     final boolean dualCoreActive;
     final boolean customHwidSet;
     final String defaultHwid;
@@ -66,6 +67,7 @@ final class ExitFyDashboardState {
         failover = value.optBoolean("failover", false);
         refreshOnOpen = value.optBoolean("refreshOnOpen", false);
         autoCheckMinutes = value.optInt("autoCheckMinutes", 0);
+        callsViaProxy = value.optBoolean("callsViaProxy", false);
         dualCoreActive = value.optBoolean("dualCoreActive", false);
         customHwidSet = value.optBoolean("customHwidSet", false);
         defaultHwid = safeLabel(value.optString("defaultHwid", ""), 32, "");

@@ -78,6 +78,15 @@ switching does not require the server screen. That screen lists 50 servers per
 page by default and can show 200; probing stays capped at 50 regardless, since
 listing and probing cost different things.
 
+The `calls_via_proxy` setting, off by default, carries call media through the
+connection already running. Telegram passes a proxy to one-to-one calls but not
+to group calls, so endpoints in Telegram's reflector ranges are rewritten to a
+loopback port where `CallRelay` wraps each datagram in a SOCKS5 UDP request and
+sends it through the core. Only reflector addresses are forwarded -- the port is
+on loopback and would otherwise relay whatever found it -- and the mappings die
+with the connection whose proxy port they hold. No third-party relay is
+involved: a call leaves by the server the user already chose.
+
 TCP is the default latency check and the first option offered: it measures
 without borrowing Telegram's proxy, so it works while connected. Proxy GET
 remains for the full-path measurement.

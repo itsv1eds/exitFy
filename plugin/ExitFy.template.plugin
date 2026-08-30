@@ -5,7 +5,14 @@ import os
 import threading
 import zlib
 
-from base_plugin import AppEvent, BasePlugin, MenuItemData, MenuItemType
+from base_plugin import (
+    AppEvent,
+    BasePlugin,
+    MenuItemData,
+    MenuItemType,
+    MethodHook,
+)
+from hook_utils import find_class
 from android_utils import run_on_ui_thread
 from client_utils import get_last_fragment
 from ui.bulletin import BulletinHelper
@@ -29,6 +36,10 @@ DEX_KEEPER_NAME = DEX_KEEPER_PREFIX + __version__
 SETTINGS_SCHEMA = 6
 PROVIDER_CATALOG_VERSION = 3
 AUTO_CHECK_MINUTE_CHOICES = (0, 15, 60, 360)
+CALL_HOOK_TARGETS = (
+    ("org.telegram.messenger.voip.Instance", "makeInstance"),
+    ("org.telegram.messenger.voip.NativeInstance", "setJoinResponsePayload"),
+)
 CUSTOM_PROVIDER_ID = 3
 CUSTOM_V2_ID = 2
 LEGACY_PLUGIN_ID = "exitfy"
@@ -340,9 +351,36 @@ class DexRuntime:
 _DEX_RUNTIME = DexRuntime()
 
 
+class _CallEndpointHook(MethodHook):
+    def __init__(self, plugin, endpoint_cls):
+        self.plugin = plugin
+        self.endpoint_cls = endpoint_cls
+
+    def before_hooked_method(self, param):
+        try:
+            args = param.args or []
+            if len(args) >= 4:
+                self.plugin._route_call_endpoints(args[3], self.endpoint_cls)
+        except Exception:
+            pass
+
+
+class _CallJoinHook(MethodHook):
+    def __init__(self, plugin):
+        self.plugin = plugin
+
+    def before_hooked_method(self, param):
+        try:
+            if param.args:
+                param.args[0] = self.plugin._route_call_candidates(param.args[0])
+        except Exception:
+            pass
+
+
 class ExitFyPlugin(BasePlugin):
     def __init__(self):
         super().__init__()
+        self._call_hooks = []
         self._menu_ids = []
         self._runtime_ready = False
         self._provider_migration_value = None
@@ -369,6 +407,7 @@ class ExitFyPlugin(BasePlugin):
                 self._settings_json(),
             )
             self._runtime_ready = True
+            self._install_call_hooks()
             try:
                 self.set_setting("schema_version", SETTINGS_SCHEMA, reload_settings=False)
             except Exception as exc:
@@ -395,12 +434,14 @@ class ExitFyPlugin(BasePlugin):
         except Exception as exc:
             self.log("exitFy unload failed: " + str(exc))
         self._runtime_ready = False
+        self._remove_call_hooks()
 
     def on_app_event(self, event_type):
         if event_type != AppEvent.RESUME or not self._runtime_ready:
             return
         try:
             _DEX_RUNTIME.call("onAppResume")
+            self._install_call_hooks()
         except Exception as exc:
             self.log("exitFy resume failed: " + str(exc))
 
@@ -790,6 +831,117 @@ class ExitFyPlugin(BasePlugin):
             except Exception:
                 pass
         self._menu_ids = []
+
+    def _calls_via_proxy(self):
+        return self._as_bool(self.get_setting("calls_via_proxy", False))
+
+    def _install_call_hooks(self):
+        # The hook objects have to outlive this call: Java holds only a weak
+        # link, and a collected callback takes the hooked method down with it.
+        if self._call_hooks or not self._calls_via_proxy():
+            return
+        for class_name, method_name in CALL_HOOK_TARGETS:
+            try:
+                target = find_class(class_name)
+                if target is None:
+                    continue
+                if method_name == "makeInstance":
+                    endpoint_cls = find_class(
+                        "org.telegram.messenger.voip.Instance$Endpoint")
+                    if endpoint_cls is None:
+                        continue
+                    hook = _CallEndpointHook(self, endpoint_cls)
+                else:
+                    hook = _CallJoinHook(self)
+                self._call_hooks.append(hook)
+                self._call_hooks.append(
+                    self.hook_all_methods(target, method_name, hook))
+            except Exception as exc:
+                self.log("exitFy call hook failed for %s: %s" % (method_name, exc))
+
+    def _remove_call_hooks(self):
+        for item in list(self._call_hooks):
+            try:
+                if hasattr(item, "unhook"):
+                    item.unhook()
+            except Exception:
+                pass
+        self._call_hooks = []
+
+    def _map_call_endpoint(self, ip, port):
+        try:
+            raw = _DEX_RUNTIME.call("execute", json.dumps({
+                "command": "call_relay_map",
+                "ip": str(ip),
+                "port": int(port),
+            }, separators=(",", ":")))
+            answer = json.loads(str(raw))
+            if not answer.get("ok"):
+                return 0
+            return int(json.loads(str(answer.get("data") or "{}")).get("port", 0))
+        except Exception:
+            return 0
+
+    def _route_call_endpoints(self, endpoints, endpoint_cls):
+        if not self._runtime_ready or not self._calls_via_proxy():
+            return
+        try:
+            for index in range(len(endpoints)):
+                endpoint = endpoints[index]
+                if bool(getattr(endpoint, "tcp", False)):
+                    continue
+                local_port = self._map_call_endpoint(
+                    str(getattr(endpoint, "ipv4", "") or ""), int(endpoint.port))
+                if local_port < 1:
+                    continue
+                replacement = endpoint_cls(
+                    bool(endpoint.isRtc),
+                    int(endpoint.id),
+                    "127.0.0.1",
+                    "",
+                    int(local_port),
+                    int(endpoint.type),
+                    endpoint.peerTag,
+                    bool(endpoint.turn),
+                    bool(endpoint.stun),
+                    getattr(endpoint, "username", None),
+                    getattr(endpoint, "password", None),
+                    False,
+                )
+                try:
+                    replacement.reflectorId = int(endpoint.reflectorId)
+                except Exception:
+                    pass
+                endpoints[index] = replacement
+        except Exception as exc:
+            self.log("exitFy call endpoint routing failed: " + str(exc))
+
+    def _route_call_candidates(self, payload):
+        if not self._runtime_ready or not self._calls_via_proxy():
+            return payload
+        try:
+            data = json.loads(str(payload))
+            candidates = data.get("transport", {}).get("candidates", [])
+            if not isinstance(candidates, list):
+                return payload
+            changed = False
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                local_port = self._map_call_endpoint(
+                    str(candidate.get("ip", "") or ""),
+                    int(candidate.get("port", 0) or 0))
+                if local_port < 1:
+                    continue
+                candidate["ip"] = "127.0.0.1"
+                candidate["port"] = str(local_port)
+                changed = True
+            if not changed:
+                return payload
+            return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        except Exception as exc:
+            self.log("exitFy call candidate routing failed: " + str(exc))
+            return payload
 
     def _open_dashboard(self, _context=None):
         def open_on_ui():

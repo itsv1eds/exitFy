@@ -1818,6 +1818,36 @@ public class RuntimeModelsTest {
     }
 
     @Test
+    public void onlyTelegramReflectorsAreEverForwarded() {
+        // The relay listens on loopback. Without this check anything on the
+        // device that found the port could route through the user's server.
+        assertTrue(TelegramReflectors.isReflector("91.108.4.1"));
+        assertTrue(TelegramReflectors.isReflector("149.154.175.50"));
+        assertTrue(TelegramReflectors.isReflector("91.108.58.255"));
+        assertFalse(TelegramReflectors.isReflector("8.8.8.8"));
+        assertFalse(TelegramReflectors.isReflector("127.0.0.1"));
+        assertFalse(TelegramReflectors.isReflector("91.108.60.1"));
+        assertFalse(TelegramReflectors.isReflector("10.0.0.1"));
+    }
+
+    @Test
+    public void reflectorAddressParsingRejectsAnythingIrregular() {
+        assertEquals(0L, TelegramReflectors.toIpv4("0.0.0.0"));
+        // Surrounding whitespace is trimmed on purpose; whitespace inside is
+        // not an address.
+        assertEquals(16909060L, TelegramReflectors.toIpv4(" 1.2.3.4 "));
+        assertEquals(4294967295L, TelegramReflectors.toIpv4("255.255.255.255"));
+        for (String rejected : new String[]{
+                null, "", "1.2.3", "1.2.3.4.5", "1.2.3.256", "1.2.3.-1",
+                "01.2.3.4", "1.2.3.", ".1.2.3", "1.2. 3.4", "a.b.c.d",
+                "1.2.3.4.", "12345678901234567",
+        }) {
+            assertEquals(rejected + " was accepted", -1L,
+                    TelegramReflectors.toIpv4(rejected));
+        }
+    }
+
+    @Test
     public void theScheduledCheckPeriodOnlyAcceptsOfferedValues() {
         SettingsModel base = SettingsModel.defaults();
         assertEquals(SettingsModel.PING_TCP, base.pingType);

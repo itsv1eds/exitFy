@@ -349,6 +349,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         if (previous.autoCheckMinutes != next.autoCheckMinutes) {
             settingPersistenceRevisions.record("auto_check_minutes", revision);
         }
+        if (previous.callsViaProxy != next.callsViaProxy) {
+            settingPersistenceRevisions.record("calls_via_proxy", revision);
+        }
     }
 
     private void finishSettingsUpdate(SettingsUpdate update) {
@@ -410,6 +413,19 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                     MAX_COMMAND_TOKEN_UTF8_BYTES, MAX_COMMAND_JSON_UTF8_BYTES);
             String command = request.optString("command", "");
             if (mutatesNodeSelection(command)) cancelPing(true);
+            if ("call_relay_map".equals(command)) {
+                CallRelay relay = callRelay;
+                if (relay == null || !settings.callsViaProxy
+                        || stateMachine.get() != RuntimeState.RUNNING) {
+                    return response(false, I18n.t(
+                            "Звонки через exitFy недоступны без подключения",
+                            "Calls through exitFy need an active connection"), "").toString();
+                }
+                int mapped = relay.mapEndpoint(
+                        request.optString("ip", ""), request.optInt("port", 0));
+                return response(true, "", new JSONObject()
+                        .put("port", mapped).toString()).toString();
+            }
             if ("core_versions".equals(command)) {
                 // Kept off the dashboard on purpose: which engine runs is not
                 // something the main screen asks anyone to think about. People
@@ -803,6 +819,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             value.put("failover", current.failover);
             value.put("refreshOnOpen", current.refreshOnOpen);
             value.put("autoCheckMinutes", current.autoCheckMinutes);
+            value.put("callsViaProxy", current.callsViaProxy);
             value.put("dualCoreActive", NativeCoreRuntime.dualCoreEnabled());
             // Never expose a custom identifier in a screen-state snapshot
             // which can outlive the editor dialog.
@@ -991,7 +1008,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         SettingsModel disabled = new SettingsModel(false, previous.providerId,
                 previous.customHwid, previous.schemaVersion, previous.pingType,
                 previous.dualCore, previous.failover,
-                previous.refreshOnOpen, previous.autoCheckMinutes);
+                previous.refreshOnOpen, previous.autoCheckMinutes,
+                previous.callsViaProxy);
         long persistRevision;
         synchronized (settingsRequestLock) {
             synchronized (subscriptionRefreshControl) {
@@ -1016,7 +1034,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         SettingsModel custom = new SettingsModel(previous.enabled, SettingsModel.CUSTOM_PROVIDER_ID,
                 previous.customHwid, previous.schemaVersion, previous.pingType,
                 previous.dualCore, previous.failover,
-                previous.refreshOnOpen, previous.autoCheckMinutes);
+                previous.refreshOnOpen, previous.autoCheckMinutes,
+                previous.callsViaProxy);
         long persistRevision;
         synchronized (settingsRequestLock) {
             synchronized (subscriptionRefreshControl) {
@@ -1154,6 +1173,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                     activeNode = selected;
                     connectionIssue = "";
                     localPort = port;
+                    openCallRelay(port, credentials);
                     restartRequired = false;
                     coreSelectionBlocked = false;
                     reconnectBackoff.reset();
@@ -1247,6 +1267,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             finishProxySession(preserveCurrentTelegramProxy);
             stopServicesOnly();
             localPort = 0;
+            closeCallRelay();
             if (!loaded || !settings.enabled) probeResumeGuard = null;
             return;
         }
@@ -1260,6 +1281,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         activeNode = null;
         connectionIssue = "";
         localPort = 0;
+        closeCallRelay();
         try {
             stateMachine.transition(RuntimeState.STOPPED);
         } catch (Exception ignored) {
@@ -1326,6 +1348,25 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     }
 
     private volatile long lastAutoCheckAt;
+    private volatile CallRelay callRelay;
+
+    /**
+     * The relay lives exactly as long as the connection it borrows: its
+     * mappings point at a local proxy port that stops existing when the core
+     * stops.
+     */
+    private void openCallRelay(int port, ProxySession.Credentials credentials) {
+        closeCallRelay();
+        if (!settings.callsViaProxy) return;
+        callRelay = new CallRelay("127.0.0.1", port,
+                credentials.username, credentials.password);
+    }
+
+    private void closeCallRelay() {
+        CallRelay current = callRelay;
+        callRelay = null;
+        if (current != null) current.close();
+    }
 
     private void fail(Exception error) {
         String message = ErrorSanitizer.clean(error == null ? ""
@@ -1844,6 +1885,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             throw new IllegalStateException("core stop failed before probe");
         }
         localPort = 0;
+        closeCallRelay();
         try {
             if (stateMachine.get() != RuntimeState.STOPPED) {
                 stateMachine.transition(RuntimeState.STOPPED);
@@ -3356,6 +3398,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         }
         activeNode = null;
         localPort = 0;
+        closeCallRelay();
         try {
             RuntimeState state = stateMachine.get();
             if (state == RuntimeState.RUNNING || state == RuntimeState.STARTING) {

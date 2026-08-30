@@ -196,6 +196,12 @@ Device testing is performed by the beta tester after receiving
   next server of the source is selected after the second failure and not
   before. Confirm a subscription that fails to refresh never moves the
   selection. With failover off, the selection must never change on its own.
+- With calls through exitFy off, confirm calls behave exactly as before. Turn
+  it on, restart, and place a one-to-one call and join a group call: media must
+  work and the exit country must be the server's. Confirm the mapping dies with
+  the connection -- disconnect mid-call and the media stops rather than falling
+  back to a direct path. Watch for audio delay: every packet takes an extra
+  loopback hop.
 - Confirm a fresh install checks latency over TCP, and that Proxy GET is still
   reachable and works when selected. Long-press a saved subscription and
   reorder, hide and show it: a hidden source keeps its URL, loses its servers

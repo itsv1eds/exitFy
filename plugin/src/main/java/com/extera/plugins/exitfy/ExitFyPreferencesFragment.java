@@ -24,6 +24,7 @@ final class ExitFyPreferencesFragment
     private SettingRow failoverRow;
     private SettingRow refreshOnOpenRow;
     private SettingRow autoCheckRow;
+    private SettingRow callsRow;
     private boolean commandBusy;
 
     @Override
@@ -62,6 +63,14 @@ final class ExitFyPreferencesFragment
         setSafeClick(autoCheckRow.view, this::showAutoCheckDialog);
         content.addView(autoCheckRow.view, sectionParams());
 
+        callsRow = settingRow(context, R.drawable.msg_secret,
+                I18n.t("Звонки через exitFy (эксперимент)",
+                        "Calls through exitFy (experimental)"),
+                I18n.t("Медиа звонка идёт через ваш сервер, без сторонних релеев",
+                        "Call media goes through your own server, with no third-party relay"));
+        setSafeClick(callsRow.view, this::showCallsDialog);
+        content.addView(callsRow.view, sectionParams());
+
         failoverRow = settingRow(context, R.drawable.msg_retry,
                 I18n.t("Менять сервер при обрыве", "Switch server on failure"), "");
         setSafeClick(failoverRow.view, this::showFailoverDialog);
@@ -92,7 +101,7 @@ final class ExitFyPreferencesFragment
         if (pingTypeRow == null || customHwidRow == null
                 || dualCoreRow == null || coreVersionRow == null
                 || failoverRow == null || refreshOnOpenRow == null
-                || autoCheckRow == null) {
+                || autoCheckRow == null || callsRow == null) {
             return;
         }
         if (next.runtimeAvailable) {
@@ -108,6 +117,8 @@ final class ExitFyPreferencesFragment
             refreshOnOpenRow.setValue(next.refreshOnOpen
                     ? I18n.t("Включено", "On") : I18n.t("Выключено", "Off"));
             autoCheckRow.setValue(autoCheckLabel(next.autoCheckMinutes));
+            callsRow.setValue(next.callsViaProxy
+                    ? I18n.t("Включено", "On") : I18n.t("Выключено", "Off"));
         } else {
             String unavailable = I18n.t("Runtime недоступен", "Runtime unavailable");
             pingTypeRow.setValue(unavailable);
@@ -117,6 +128,7 @@ final class ExitFyPreferencesFragment
             failoverRow.setValue(unavailable);
             refreshOnOpenRow.setValue(unavailable);
             autoCheckRow.setValue(unavailable);
+            callsRow.setValue(unavailable);
         }
         updateRowsEnabled();
     }
@@ -135,6 +147,7 @@ final class ExitFyPreferencesFragment
         if (failoverRow != null) failoverRow.setEnabled(enabled);
         if (refreshOnOpenRow != null) refreshOnOpenRow.setEnabled(enabled);
         if (autoCheckRow != null) autoCheckRow.setEnabled(enabled);
+        if (callsRow != null) callsRow.setEnabled(enabled);
     }
 
     private void showPingTypeDialog() {
@@ -190,6 +203,26 @@ final class ExitFyPreferencesFragment
                     showToast(I18n.t(
                             "Серверы обоих типов теперь работают без перезапуска",
                             "Servers of both kinds now work without a restart"), true);
+                });
+    }
+
+    private void showCallsDialog() {
+        CharSequence[] labels = {
+                I18n.t("Выключено", "Off"),
+                I18n.t("Включено", "On"),
+        };
+        showChoiceDialog(
+                I18n.t("Звонки через exitFy (эксперимент)",
+                        "Calls through exitFy (experimental)"),
+                labels, state.callsViaProxy ? 1 : 0, index -> {
+                    boolean value = index == 1;
+                    if (value == state.callsViaProxy) return;
+                    setSetting("calls_via_proxy", value);
+                    showToast(value
+                            ? I18n.t("Заработает после перезапуска exteraGram",
+                            "Takes effect after exteraGram restarts")
+                            : I18n.t("Выключится после перезапуска exteraGram",
+                            "Turns off after exteraGram restarts"), true);
                 });
     }
 
