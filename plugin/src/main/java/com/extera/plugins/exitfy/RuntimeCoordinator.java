@@ -413,7 +413,12 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                     MAX_COMMAND_TOKEN_UTF8_BYTES, MAX_COMMAND_JSON_UTF8_BYTES);
             String command = request.optString("command", "");
             if (mutatesNodeSelection(command)) cancelPing(true);
+            if ("call_hooks_installed".equals(command)) {
+                callHooksInstalled = Math.max(0, Math.min(16, request.optInt("count", 0)));
+                return response(true, "", "").toString();
+            }
             if ("call_relay_map".equals(command)) {
+                callMapRequests.incrementAndGet();
                 CallRelay relay = callRelay;
                 if (relay == null || !settings.callsViaProxy
                         || stateMachine.get() != RuntimeState.RUNNING) {
@@ -430,6 +435,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 CallRelay relay = callRelay;
                 return response(true, "", new JSONObject()
                         .put("enabled", settings.callsViaProxy)
+                        .put("hooks", callHooksInstalled)
+                        .put("requests", callMapRequests.get())
                         .put("counters", relay == null ? "" : relay.statistics())
                         .toString()).toString();
             }
@@ -1356,6 +1363,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
 
     private volatile long lastAutoCheckAt;
     private volatile CallRelay callRelay;
+    private volatile int callHooksInstalled;
+    private final java.util.concurrent.atomic.AtomicLong callMapRequests =
+            new java.util.concurrent.atomic.AtomicLong();
 
     /**
      * The relay lives exactly as long as the connection it borrows: its

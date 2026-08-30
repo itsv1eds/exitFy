@@ -67,8 +67,8 @@ final class ExitFyPreferencesFragment
 
         callStateRow = settingRow(context, R.drawable.msg_stats,
                 I18n.t("Состояние звонков", "Call routing state"),
-                I18n.t("Сопоставлено / отправлено / получено",
-                        "Mapped / sent / received"));
+                I18n.t("Врезки / запросы / сопоставлено / отправлено / получено",
+                        "Hooks / requests / mapped / sent / received"));
         setSafeClick(callStateRow.view, this::loadCallState);
         content.addView(callStateRow.view, sectionParams());
 
@@ -244,8 +244,10 @@ final class ExitFyPreferencesFragment
             }
             String counters = ExitFyDashboardState.safeLabel(
                     value.optString("counters", ""), 32, "");
+            String prefix = value.optInt("hooks", 0) + "/" + value.optLong("requests", 0L);
             return counters.isEmpty()
-                    ? I18n.t("Нет подключения", "Not connected") : counters;
+                    ? prefix + I18n.t(" · нет подключения", " · not connected")
+                    : prefix + "/" + counters;
         } catch (Exception ignored) {
             return I18n.t("Недоступно", "Unavailable");
         }

@@ -7,6 +7,16 @@ import pathlib
 import unittest
 
 
+class FakeHookHandle:
+    def __init__(self, target, method):
+        self.target = target
+        self.method = method
+        self.removed = False
+
+    def unhook(self):
+        self.removed = True
+
+
 class FakeBasePlugin:
     def __init__(self):
         self.logs = []
@@ -22,6 +32,9 @@ class FakeBasePlugin:
     def set_setting(self, key, value, reload_settings=False):
         del reload_settings
         self.settings[key] = value
+
+    def hook_all_methods(self, target, method, _hook):
+        return FakeHookHandle(target, method)
 
     def remove_menu_item(self, _item_id):
         return True
@@ -76,10 +89,13 @@ class FakeDexRuntime:
 def load_plugin_class(overrides=None):
     template = pathlib.Path(__file__).resolve().parents[1] / "ExitFy.template.plugin"
     tree = ast.parse(template.read_text(encoding="utf-8"), filename=str(template))
-    selected = next(
+    # The hook classes and the endpoint lookup live beside the plugin class
+    # and are part of what it does, so they are loaded with it.
+    wanted = ("_endpoint_class", "_CallEndpointHook", "_CallJoinHook", "ExitFyPlugin")
+    selected = [
         node for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "ExitFyPlugin"
-    )
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in wanted
+    ]
     runtime = FakeDexRuntime()
     errors = []
     infos = []
@@ -105,6 +121,13 @@ def load_plugin_class(overrides=None):
         "__version__": "4.1.0",
         "PROVIDER_CATALOG_VERSION": 3,
         "AUTO_CHECK_MINUTE_CHOICES": (0, 15, 60, 360),
+        "CALL_HOOK_TARGETS": (
+            ("org.telegram.messenger.voip.Instance", "makeInstance"),
+            ("org.telegram.messenger.voip.NativeInstance", "setJoinResponsePayload"),
+        ),
+        "MethodHook": object,
+        "find_class": lambda name: name,
+        "jclass": lambda name: name,
         "CUSTOM_PROVIDER_ID": 3,
         "CUSTOM_V2_ID": 2,
         "SETTINGS_SCHEMA": 6,
@@ -133,7 +156,7 @@ def load_plugin_class(overrides=None):
     }
     if overrides:
         namespace.update(overrides)
-    exec(compile(ast.Module(body=[selected], type_ignores=[]), str(template), "exec"),
+    exec(compile(ast.Module(body=selected, type_ignores=[]), str(template), "exec"),
          namespace)
     return namespace["ExitFyPlugin"], runtime, errors, opened, infos
 
@@ -165,6 +188,26 @@ class TemplateLifecycleTest(unittest.TestCase):
         self.assertEqual(SHRIMP, plugin.get_setting("provider_id", SHRIMP))
         self.assertEqual(3, plugin.settings["provider_catalog_version"])
         self.assertNotIn("provider_catalog_legacy_id", plugin.settings)
+
+    def test_call_hooks_are_retained_and_only_installed_when_asked(self):
+        plugin_type, _runtime, _errors, _opened, _infos = load_plugin_class()
+        plugin = plugin_type()
+
+        # Off by default: nothing is hooked until the setting says so.
+        plugin._install_call_hooks()
+        self.assertEqual([], plugin._call_hooks)
+
+        plugin.settings["calls_via_proxy"] = True
+        plugin._install_call_hooks()
+        # Java keeps only a weak link to a hook callback, so a collected one
+        # takes the hooked method down with it: every hook stays referenced.
+        self.assertTrue(plugin._call_hooks)
+        retained = list(plugin._call_hooks)
+        plugin._install_call_hooks()
+        self.assertEqual(retained, plugin._call_hooks)
+
+        plugin._remove_call_hooks()
+        self.assertEqual([], plugin._call_hooks)
 
     def test_every_stored_setting_reaches_the_runtime(self):
         plugin_type, *_ = load_plugin_class()

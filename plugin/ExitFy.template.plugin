@@ -351,6 +351,22 @@ class DexRuntime:
 _DEX_RUNTIME = DexRuntime()
 
 
+def _endpoint_class():
+    # A nested class is not always reachable by the same lookup that finds a
+    # top-level one, and the whole rewrite is skipped when it is missed.
+    name = "org.telegram.messenger.voip.Instance$Endpoint"
+    try:
+        found = jclass(name)
+        if found is not None:
+            return found
+    except Exception:
+        pass
+    try:
+        return find_class(name)
+    except Exception:
+        return None
+
+
 class _CallEndpointHook(MethodHook):
     def __init__(self, plugin, endpoint_cls):
         self.plugin = plugin
@@ -408,6 +424,7 @@ class ExitFyPlugin(BasePlugin):
             )
             self._runtime_ready = True
             self._install_call_hooks()
+            self._report_call_hooks()
             try:
                 self.set_setting("schema_version", SETTINGS_SCHEMA, reload_settings=False)
             except Exception as exc:
@@ -849,8 +866,7 @@ class ExitFyPlugin(BasePlugin):
                 if target is None:
                     continue
                 if method_name == "makeInstance":
-                    endpoint_cls = find_class(
-                        "org.telegram.messenger.voip.Instance$Endpoint")
+                    endpoint_cls = _endpoint_class()
                     if endpoint_cls is None:
                         continue
                     hook = _CallEndpointHook(self, endpoint_cls)
@@ -861,6 +877,21 @@ class ExitFyPlugin(BasePlugin):
                     self.hook_all_methods(target, method_name, hook))
             except Exception as exc:
                 self.log("exitFy call hook failed for %s: %s" % (method_name, exc))
+
+    def _report_call_hooks(self):
+        # The runtime counts what reaches it; only this side knows whether the
+        # hooks were installed at all, and 0/0/0 cannot tell the two apart.
+        # Nothing is reported when the feature is off: the default path stays
+        # exactly as quiet as it was.
+        if not self._call_hooks:
+            return
+        try:
+            _DEX_RUNTIME.call("execute", json.dumps({
+                "command": "call_hooks_installed",
+                "count": int(len(self._call_hooks) // 2),
+            }, separators=(",", ":")))
+        except Exception:
+            pass
 
     def _remove_call_hooks(self):
         for item in list(self._call_hooks):
