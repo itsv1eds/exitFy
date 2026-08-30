@@ -426,6 +426,13 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 return response(true, "", new JSONObject()
                         .put("port", mapped).toString()).toString();
             }
+            if ("call_relay_stats".equals(command)) {
+                CallRelay relay = callRelay;
+                return response(true, "", new JSONObject()
+                        .put("enabled", settings.callsViaProxy)
+                        .put("counters", relay == null ? "" : relay.statistics())
+                        .toString()).toString();
+            }
             if ("core_versions".equals(command)) {
                 // Kept off the dashboard on purpose: which engine runs is not
                 // something the main screen asks anyone to think about. People

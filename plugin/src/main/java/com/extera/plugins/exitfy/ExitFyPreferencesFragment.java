@@ -21,10 +21,12 @@ final class ExitFyPreferencesFragment
     private SettingRow dualCoreRow;
     private SettingRow coreVersionRow;
     private String coreVersions = "";
+    private String callState = "";
     private SettingRow failoverRow;
     private SettingRow refreshOnOpenRow;
     private SettingRow autoCheckRow;
     private SettingRow callsRow;
+    private SettingRow callStateRow;
     private boolean commandBusy;
 
     @Override
@@ -62,6 +64,13 @@ final class ExitFyPreferencesFragment
                         "On a schedule, always over TCP so the connection is not interrupted"));
         setSafeClick(autoCheckRow.view, this::showAutoCheckDialog);
         content.addView(autoCheckRow.view, sectionParams());
+
+        callStateRow = settingRow(context, R.drawable.msg_stats,
+                I18n.t("Состояние звонков", "Call routing state"),
+                I18n.t("Сопоставлено / отправлено / получено",
+                        "Mapped / sent / received"));
+        setSafeClick(callStateRow.view, this::loadCallState);
+        content.addView(callStateRow.view, sectionParams());
 
         callsRow = settingRow(context, R.drawable.msg_secret,
                 I18n.t("Звонки через exitFy (эксперимент)",
@@ -119,6 +128,11 @@ final class ExitFyPreferencesFragment
             autoCheckRow.setValue(autoCheckLabel(next.autoCheckMinutes));
             callsRow.setValue(next.callsViaProxy
                     ? I18n.t("Включено", "On") : I18n.t("Выключено", "Off"));
+            if (callStateRow != null) {
+                callStateRow.setValue(callState.isEmpty()
+                        ? I18n.t("Нажмите, чтобы обновить", "Tap to refresh")
+                        : callState);
+            }
         } else {
             String unavailable = I18n.t("Runtime недоступен", "Runtime unavailable");
             pingTypeRow.setValue(unavailable);
@@ -129,6 +143,7 @@ final class ExitFyPreferencesFragment
             refreshOnOpenRow.setValue(unavailable);
             autoCheckRow.setValue(unavailable);
             callsRow.setValue(unavailable);
+            if (callStateRow != null) callStateRow.setValue(unavailable);
         }
         updateRowsEnabled();
     }
@@ -148,6 +163,7 @@ final class ExitFyPreferencesFragment
         if (refreshOnOpenRow != null) refreshOnOpenRow.setEnabled(enabled);
         if (autoCheckRow != null) autoCheckRow.setEnabled(enabled);
         if (callsRow != null) callsRow.setEnabled(enabled);
+        if (callStateRow != null) callStateRow.setEnabled(enabled);
     }
 
     private void showPingTypeDialog() {
@@ -204,6 +220,35 @@ final class ExitFyPreferencesFragment
                             "Серверы обоих типов теперь работают без перезапуска",
                             "Servers of both kinds now work without a restart"), true);
                 });
+    }
+
+    private void loadCallState() {
+        executeCommand(() -> new JSONObject().put("command", "call_relay_stats"),
+                false, result -> {
+                    if (result == null || !result.ok) return;
+                    String label = describeCallState(result.data);
+                    runUiAction(() -> {
+                        callState = label;
+                        if (callStateRow != null) {
+                            callStateRow.setValue(label);
+                        }
+                    });
+                });
+    }
+
+    private static String describeCallState(String data) {
+        try {
+            JSONObject value = JsonGuard.object(data == null ? "{}" : data);
+            if (!value.optBoolean("enabled", false)) {
+                return I18n.t("Выключено", "Off");
+            }
+            String counters = ExitFyDashboardState.safeLabel(
+                    value.optString("counters", ""), 32, "");
+            return counters.isEmpty()
+                    ? I18n.t("Нет подключения", "Not connected") : counters;
+        } catch (Exception ignored) {
+            return I18n.t("Недоступно", "Unavailable");
+        }
     }
 
     private void showCallsDialog() {

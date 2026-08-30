@@ -18,6 +18,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Carries call media through the connection exitFy already runs.
@@ -45,6 +46,10 @@ final class CallRelay implements Closeable {
     private final int proxyPort;
     private final String username;
     private final String password;
+
+    private final AtomicLong fromTelegram = new AtomicLong();
+    private final AtomicLong toTelegram = new AtomicLong();
+    private final AtomicLong mapped = new AtomicLong();
 
     private Selector selector;
     private Thread worker;
@@ -83,10 +88,21 @@ final class CallRelay implements Closeable {
             }
             Mapping mapping = openMapping(targetIp, targetPort);
             mappings.put(key, mapping);
+            mapped.incrementAndGet();
             ensureWorkerLocked();
             selector.wakeup();
             return mapping.localPort;
         }
+    }
+
+    /**
+     * Enough to tell where a failing call stops without a debugger: no
+     * mappings means the endpoints were never rewritten, mappings with
+     * nothing sent means the call layer refused the loopback endpoint, and
+     * traffic out with none back means the node is not carrying UDP.
+     */
+    String statistics() {
+        return mapped.get() + "/" + fromTelegram.get() + "/" + toTelegram.get();
     }
 
     @Override
@@ -302,6 +318,7 @@ final class CallRelay implements Closeable {
         if (length <= 0 || length > MAX_DATAGRAM_BYTES - 10) return;
         mapping.lastClient = from;
         mapping.lastActivity = System.currentTimeMillis();
+        fromTelegram.incrementAndGet();
         ByteBuffer wrapped = ByteBuffer.allocate(10 + length);
         wrapped.put((byte) 0).put((byte) 0).put((byte) 0).put((byte) 1);
         for (String part : mapping.targetIp.split("\\.")) {
@@ -334,6 +351,7 @@ final class CallRelay implements Closeable {
         SocketAddress client = mapping.lastClient;
         if (client == null || !buffer.hasRemaining()) return;
         mapping.lastActivity = System.currentTimeMillis();
+        toTelegram.incrementAndGet();
         mapping.client.send(buffer, client);
     }
 
