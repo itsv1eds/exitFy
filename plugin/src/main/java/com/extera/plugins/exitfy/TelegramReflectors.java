@@ -1,11 +1,17 @@
 package com.extera.plugins.exitfy;
 
 /**
- * The address ranges Telegram hands out as call reflectors.
+ * Which call endpoints may be forwarded.
  *
- * <p>Only these are ever forwarded. The relay listens on loopback, and without
- * this check anything on the device that found the port could have its traffic
- * carried out through the user's server.</p>
+ * <p>The relay listens on loopback, so it must not carry traffic for anything
+ * on the device that finds the port. It once accepted only a hardcoded list of
+ * Telegram's reflector ranges, copied from elsewhere; those ranges change, and
+ * an endpoint outside the list was silently refused, which is a whole feature
+ * failing over a stale constant.</p>
+ *
+ * <p>The rule is now what actually matters: a public unicast address. Loopback,
+ * private, link-local, multicast and the reserved ends stay refused, so the
+ * relay can never be pointed back at the device or its network.</p>
  */
 final class TelegramReflectors {
     private static final String[] RANGES = {
@@ -25,7 +31,8 @@ final class TelegramReflectors {
     private TelegramReflectors() {
     }
 
-    static boolean isReflector(String address) {
+    /** True for the ranges Telegram is known to publish, kept for tests. */
+    static boolean isKnownReflector(String address) {
         long value = toIpv4(address);
         if (value < 0) return false;
         for (String range : RANGES) {
@@ -36,6 +43,24 @@ final class TelegramReflectors {
             if (network >= 0 && (value & mask) == (network & mask)) return true;
         }
         return false;
+    }
+
+    /**
+     * A public unicast address, which is the only kind a call endpoint can be.
+     */
+    static boolean isForwardable(String address) {
+        long value = toIpv4(address);
+        if (value < 0) return false;
+        long first = (value >>> 24) & 0xFF;
+        long second = (value >>> 16) & 0xFF;
+        if (first == 0 || first == 10 || first == 127 || first >= 224) return false;
+        if (first == 100 && second >= 64 && second <= 127) return false;
+        if (first == 169 && second == 254) return false;
+        if (first == 172 && second >= 16 && second <= 31) return false;
+        if (first == 192 && second == 168) return false;
+        if (first == 192 && second == 0) return false;
+        if (first == 198 && (second == 18 || second == 19)) return false;
+        return true;
     }
 
     static long toIpv4(String address) {

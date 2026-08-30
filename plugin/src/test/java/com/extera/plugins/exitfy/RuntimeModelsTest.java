@@ -1818,16 +1818,26 @@ public class RuntimeModelsTest {
     }
 
     @Test
-    public void onlyTelegramReflectorsAreEverForwarded() {
+    public void onlyPublicEndpointsAreEverForwarded() {
         // The relay listens on loopback. Without this check anything on the
-        // device that found the port could route through the user's server.
-        assertTrue(TelegramReflectors.isReflector("91.108.4.1"));
-        assertTrue(TelegramReflectors.isReflector("149.154.175.50"));
-        assertTrue(TelegramReflectors.isReflector("91.108.58.255"));
-        assertFalse(TelegramReflectors.isReflector("8.8.8.8"));
-        assertFalse(TelegramReflectors.isReflector("127.0.0.1"));
-        assertFalse(TelegramReflectors.isReflector("91.108.60.1"));
-        assertFalse(TelegramReflectors.isReflector("10.0.0.1"));
+        // device that found the port could route through the user's server,
+        // and pointing it back at the device or its network is the part that
+        // matters -- not whether an address is on a list that goes stale.
+        assertTrue(TelegramReflectors.isForwardable("91.108.4.1"));
+        assertTrue(TelegramReflectors.isForwardable("149.154.175.50"));
+        assertTrue(TelegramReflectors.isForwardable("8.8.8.8"));
+        for (String refused : new String[]{
+                "127.0.0.1", "10.0.0.1", "192.168.1.5", "172.16.0.1", "172.31.255.255",
+                "169.254.1.1", "100.64.0.1", "224.0.0.1", "255.255.255.255",
+                "0.0.0.0", "198.18.0.1", "192.0.0.1", "not-an-address",
+        }) {
+            assertFalse(refused + " was forwarded",
+                    TelegramReflectors.isForwardable(refused));
+        }
+        assertTrue(TelegramReflectors.isForwardable("172.15.0.1"));
+        assertTrue(TelegramReflectors.isForwardable("172.32.0.1"));
+        assertTrue(TelegramReflectors.isKnownReflector("91.108.4.1"));
+        assertFalse(TelegramReflectors.isKnownReflector("8.8.8.8"));
     }
 
     @Test

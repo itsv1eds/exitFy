@@ -422,6 +422,11 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 CallRelay relay = callRelay;
                 if (relay == null || !settings.callsViaProxy
                         || stateMachine.get() != RuntimeState.RUNNING) {
+                    // Naming which of the three is missing is the difference
+                    // between a fixable report and "it does not work".
+                    callMapRefusal = relay == null
+                            ? "relay is not open"
+                            : (!settings.callsViaProxy ? "setting is off" : "not connected");
                     return response(false, I18n.t(
                             "Звонки через exitFy недоступны без подключения",
                             "Calls through exitFy need an active connection"), "").toString();
@@ -438,6 +443,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                         .put("hooks", callHooksInstalled)
                         .put("requests", callMapRequests.get())
                         .put("counters", relay == null ? "" : relay.statistics())
+                        .put("refusal", relay != null && !relay.lastRefusal().isEmpty()
+                                ? relay.lastRefusal() : callMapRefusal)
                         .toString()).toString();
             }
             if ("core_versions".equals(command)) {
@@ -1364,6 +1371,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     private volatile long lastAutoCheckAt;
     private volatile CallRelay callRelay;
     private volatile int callHooksInstalled;
+    private volatile String callMapRefusal = "";
     private final java.util.concurrent.atomic.AtomicLong callMapRequests =
             new java.util.concurrent.atomic.AtomicLong();
 

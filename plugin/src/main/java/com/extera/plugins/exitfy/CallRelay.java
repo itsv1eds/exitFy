@@ -50,6 +50,7 @@ final class CallRelay implements Closeable {
     private final AtomicLong fromTelegram = new AtomicLong();
     private final AtomicLong toTelegram = new AtomicLong();
     private final AtomicLong mapped = new AtomicLong();
+    private volatile String lastRefusal = "";
 
     private Selector selector;
     private Thread worker;
@@ -68,11 +69,11 @@ final class CallRelay implements Closeable {
      * the budget.
      */
     int mapEndpoint(String targetIp, int targetPort) throws Exception {
-        if (!TelegramReflectors.isReflector(targetIp)) {
-            throw new IllegalArgumentException("address is not a Telegram reflector");
+        if (!TelegramReflectors.isForwardable(targetIp)) {
+            throw refuse("address is not a public endpoint");
         }
         if (targetPort < 1 || targetPort > 65535) {
-            throw new IllegalArgumentException("port is out of range");
+            throw refuse("port is out of range");
         }
         String key = targetIp + ":" + targetPort;
         synchronized (lock) {
@@ -86,7 +87,14 @@ final class CallRelay implements Closeable {
             if (mappings.size() >= MAX_MAPPINGS) {
                 throw new IllegalStateException("too many call endpoints");
             }
-            Mapping mapping = openMapping(targetIp, targetPort);
+            Mapping mapping;
+            try {
+                mapping = openMapping(targetIp, targetPort);
+            } catch (Exception error) {
+                lastRefusal = ErrorSanitizer.clean(error.getMessage() == null
+                        ? error.getClass().getSimpleName() : error.getMessage());
+                throw error;
+            }
             mappings.put(key, mapping);
             mapped.incrementAndGet();
             ensureWorkerLocked();
@@ -103,6 +111,16 @@ final class CallRelay implements Closeable {
      */
     String statistics() {
         return mapped.get() + "/" + fromTelegram.get() + "/" + toTelegram.get();
+    }
+
+    /** Why the last endpoint could not be mapped, for when nothing is. */
+    String lastRefusal() {
+        return lastRefusal;
+    }
+
+    private IllegalArgumentException refuse(String reason) {
+        lastRefusal = reason;
+        return new IllegalArgumentException(reason);
     }
 
     @Override

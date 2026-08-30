@@ -93,17 +93,18 @@ public class CallRelayTest {
     }
 
     @Test
-    public void anythingOutsideTelegramsRangesIsRefused() throws Exception {
+    public void nothingOnTheDevicesOwnNetworkIsForwarded() throws Exception {
         try (FakeSocks socks = new FakeSocks("", "");
              CallRelay relay = new CallRelay("127.0.0.1", socks.port(), "", "")) {
-            for (String address : new String[]{"8.8.8.8", "127.0.0.1", "10.0.0.5"}) {
+            for (String address : new String[]{"127.0.0.1", "10.0.0.5", "192.168.0.2"}) {
                 try {
                     relay.mapEndpoint(address, 443);
-                    fail("forwarded a non-reflector address: " + address);
+                    fail("forwarded an address on the device's own network: " + address);
                 } catch (IllegalArgumentException expected) {
-                    assertTrue(expected.getMessage().contains("reflector"));
+                    assertTrue(expected.getMessage().contains("public endpoint"));
                 }
             }
+            assertTrue(relay.lastRefusal().contains("public endpoint"));
             try {
                 relay.mapEndpoint(REFLECTOR, 0);
                 fail("forwarded an invalid port");

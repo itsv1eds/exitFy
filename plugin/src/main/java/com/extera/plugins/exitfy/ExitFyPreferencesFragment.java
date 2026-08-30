@@ -245,9 +245,12 @@ final class ExitFyPreferencesFragment
             String counters = ExitFyDashboardState.safeLabel(
                     value.optString("counters", ""), 32, "");
             String prefix = value.optInt("hooks", 0) + "/" + value.optLong("requests", 0L);
-            return counters.isEmpty()
+            String line = counters.isEmpty()
                     ? prefix + I18n.t(" · нет подключения", " · not connected")
                     : prefix + "/" + counters;
+            String refusal = ExitFyDashboardState.safeLabel(
+                    value.optString("refusal", ""), 64, "");
+            return refusal.isEmpty() ? line : line + " · " + refusal;
         } catch (Exception ignored) {
             return I18n.t("Недоступно", "Unavailable");
         }
