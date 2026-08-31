@@ -115,8 +115,12 @@ final class XrayConfigRenderer {
             }
             stream.put("wsSettings", settings);
         } else if (network.equals("grpc")) {
-            stream.put("grpcSettings", new JSONObject()
-                    .put("serviceName", transport.optString("service_name", "")));
+            JSONObject settings = new JSONObject()
+                    .put("serviceName", transport.optString("service_name", ""));
+            if (transport.optBoolean(ProtocolParser.GRPC_MULTI_MODE, false)) {
+                settings.put("multiMode", true);
+            }
+            stream.put("grpcSettings", settings);
         } else if (network.equals("httpupgrade")) {
             String path = transport.optString("path", "/");
             if (transport.has("max_early_data")) {

@@ -78,6 +78,11 @@ switching does not require the server screen. That screen lists 50 servers per
 page by default and can show 200; probing stays capped at 50 regardless, since
 listing and probing cost different things.
 
+Multiplexed gRPC (`mode=multi`) is carried as an Xray-only node: Xray has the
+option and sing-box does not, so the node reports which core can run it instead
+of being refused. Refusing it discarded fifteen of one subscription's twenty
+servers.
+
 The `calls_via_proxy` setting, off by default, carries call media through the
 connection already running. Telegram passes a proxy to one-to-one calls but not
 to group calls, so endpoints in Telegram's reflector ranges are rewritten to a

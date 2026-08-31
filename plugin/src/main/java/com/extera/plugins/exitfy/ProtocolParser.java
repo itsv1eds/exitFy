@@ -839,16 +839,18 @@ final class ProtocolParser {
         if (network.equals("grpc")) {
             rejectPresent(params, "gRPC", "host", "headers", "ed", "eh",
                     "earlyDataHeaderName", "early_data_header_name", "extra");
-            // "gun" is the plain single-stream mode this outbound already
-            // describes, and subscriptions state it explicitly. Multiplexed
-            // gRPC is a different transport that is not represented here.
+            // "gun" is the plain single-stream mode. "multi" multiplexes over
+            // one connection, which Xray expresses and sing-box has no option
+            // for, so it is carried here and the node reports itself as one
+            // only Xray can run.
             String grpcMode = value(params, "mode", "gun").toLowerCase(Locale.US);
-            if (!grpcMode.equals("gun")) {
+            if (!grpcMode.equals("gun") && !grpcMode.equals("multi")) {
                 throw new IllegalArgumentException(
                         "unsupported gRPC transport mode: " + grpcMode);
             }
             rejectAliasConflict(params, "gRPC service", "serviceName", "path");
             JSONObject value = new JSONObject().put("type", "grpc");
+            if (grpcMode.equals("multi")) value.put(GRPC_MULTI_MODE, true);
             String serviceName = nonEmpty(value(params, "serviceName", ""),
                     value(params, "path", ""));
             if (!empty(serviceName)) value.put("service_name", serviceName);
@@ -995,6 +997,8 @@ final class ProtocolParser {
         }
     }
 
+    /** Marks multiplexed gRPC, which only Xray can represent. */
+    static final String GRPC_MULTI_MODE = "exitfy_grpc_multi";
     private static final int MAX_IGNORED_PARAM_CHARS = 512;
     private static final int MAX_XHTTP_EXTRA_FIELDS = 32;
     private static final int MAX_XHTTP_EXTRA_VALUE_CHARS = 256;
@@ -2064,7 +2068,8 @@ final class ProtocolParser {
                 }
                 break;
             case "grpc":
-                requireOnlyNeutralKeys(transport, "gRPC transport", "type", "service_name");
+                requireOnlyNeutralKeys(transport, "gRPC transport",
+                        "type", "service_name", GRPC_MULTI_MODE);
                 if (transport.has("service_name")) {
                     String serviceName = neutralString(
                             transport, "service_name", true, false, MAX_URI_BYTES);
@@ -3067,6 +3072,11 @@ final class ProtocolParser {
                 return false;
             }
             if (family == CoreFamily.SING_BOX) {
+                // sing-box has no multiplexed gRPC option, so a node asking
+                // for it can only run on Xray.
+                if (transport != null && transport.optBoolean(GRPC_MULTI_MODE, false)) {
+                    return false;
+                }
                 if (protocol.equals("shadowsocks") && !singBoxShadowsocksMethod(
                         outbound.optString("method", ""))) return false;
                 JSONObject reality = tls == null ? null : tls.optJSONObject("reality");

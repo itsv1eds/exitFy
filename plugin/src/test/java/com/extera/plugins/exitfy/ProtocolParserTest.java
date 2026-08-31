@@ -168,6 +168,43 @@ public class ProtocolParserTest {
     }
 
     @Test
+    public void multiplexedGrpcIsKeptAndRunsOnTheCoreThatHasIt() throws Exception {
+        // A live subscription serves fifteen of its twenty servers this way.
+        // Rejecting the mode threw three quarters of it away.
+        String uri = "vless://33333333-3333-3333-3333-333333333333@edge.example:443"
+                + "?encryption=none&type=grpc&serviceName=Sosat&mode=multi"
+                + "&security=reality&sni=edge.example&fp=firefox&pbk=" + "a".repeat(43);
+        ProtocolParser.Node node = ProtocolParser.parse(uri + "#Multi");
+        JSONObject transport = node.outbound.getJSONObject("transport");
+        assertEquals("grpc", transport.getString("type"));
+        assertEquals("Sosat", transport.getString("service_name"));
+        assertTrue(transport.getBoolean(ProtocolParser.GRPC_MULTI_MODE));
+
+        // sing-box has no option for it, so the node says so rather than
+        // being started on a core that would run it as something else.
+        assertTrue(node.supports(CoreFamily.XRAY));
+        assertFalse(node.supports(CoreFamily.SING_BOX));
+
+        JSONObject rendered = XrayConfigRenderer.build(node, 1080, "user", "pass");
+        JSONObject grpc = rendered.getJSONArray("outbounds").getJSONObject(0)
+                .getJSONObject("streamSettings").getJSONObject("grpcSettings");
+        assertTrue(grpc.getBoolean("multiMode"));
+        assertEquals("Sosat", grpc.getString("serviceName"));
+
+        // The stored form has to survive a reload, which is where the marker
+        // was first refused as an unknown transport field.
+        ProtocolParser.Node reloaded = ProtocolParser.fromStoredJson(node.toStoredJson());
+        assertTrue(reloaded.outbound.getJSONObject("transport")
+                .getBoolean(ProtocolParser.GRPC_MULTI_MODE));
+
+        ProtocolParser.Node plain = ProtocolParser.parse(
+                uri.replace("&mode=multi", "&mode=gun") + "#Gun");
+        assertFalse(plain.outbound.getJSONObject("transport")
+                .optBoolean(ProtocolParser.GRPC_MULTI_MODE, false));
+        assertTrue(plain.supports(CoreFamily.SING_BOX));
+    }
+
+    @Test
     public void keepsQuicNodesCarryingClientHintsWeDoNotEnumerate() throws Exception {
         // A live provider decorates every Hysteria2 link with "fm", a client
         // hint for QUIC congestion control. Rejecting the whole node over it
@@ -2034,10 +2071,17 @@ public class ProtocolParserTest {
         ProtocolParser.Node grpc = ProtocolParser.parse("vless://00000000-0000-0000-0000-000000000000@example.invalid:443?encryption=none&security=reality&sni=a.invalid&fp=firefox&type=grpc&mode=gun&serviceName=%2F&pbk=Zo1uT3ivgn6XzVcv2BnGyyU1BjWWB3DcV5vTuwo8SEY&sid=b2a8c903ef11d56a#node");
         assertTrue(grpc.supports(CoreFamily.XRAY));
 
-        // Multiplexed gRPC is a different transport and stays refused.
+        // Multiplexed gRPC is a different transport, and Xray is the core
+        // that has it. It used to be refused outright, which threw away most
+        // of a subscription that serves its servers this way.
+        ProtocolParser.Node multi = ProtocolParser.parse("vless://00000000-0000-0000-0000-000000000000@example.invalid:443?encryption=none&security=reality&sni=a.invalid&fp=firefox&type=grpc&mode=gun&serviceName=%2F&pbk=Zo1uT3ivgn6XzVcv2BnGyyU1BjWWB3DcV5vTuwo8SEY&sid=b2a8c903ef11d56a#node".replace("mode=gun", "mode=multi"));
+        assertTrue(multi.supports(CoreFamily.XRAY));
+        assertFalse(multi.supports(CoreFamily.SING_BOX));
+
+        // A mode neither core implements still is refused.
         try {
-            ProtocolParser.parse("vless://00000000-0000-0000-0000-000000000000@example.invalid:443?encryption=none&security=reality&sni=a.invalid&fp=firefox&type=grpc&mode=gun&serviceName=%2F&pbk=Zo1uT3ivgn6XzVcv2BnGyyU1BjWWB3DcV5vTuwo8SEY&sid=b2a8c903ef11d56a#node".replace("mode=gun", "mode=multi"));
-            throw new AssertionError("multiplexed gRPC accepted");
+            ProtocolParser.parse("vless://00000000-0000-0000-0000-000000000000@example.invalid:443?encryption=none&security=reality&sni=a.invalid&fp=firefox&type=grpc&mode=gun&serviceName=%2F&pbk=Zo1uT3ivgn6XzVcv2BnGyyU1BjWWB3DcV5vTuwo8SEY&sid=b2a8c903ef11d56a#node".replace("mode=gun", "mode=whatever"));
+            throw new AssertionError("an unknown gRPC mode was accepted");
         } catch (IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("gRPC transport mode"));
         }
