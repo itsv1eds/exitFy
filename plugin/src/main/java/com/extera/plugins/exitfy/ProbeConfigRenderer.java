@@ -60,16 +60,18 @@ final class ProbeConfigRenderer {
         for (int i = 0; i < nodes.size(); i++) {
             ProtocolParser.Node node = nodes.get(i);
             if (node == null) throw new IllegalArgumentException("probe node is missing");
-            ProtocolParser.validateNeutralOutbound(node.outbound);
             if (!node.supports(CoreFamily.XRAY)) {
                 throw new IllegalArgumentException("probe node is not compatible with Xray");
+            }
+            if (node.xrayOutbound == null) {
+                ProtocolParser.validateNeutralOutbound(node.outbound);
             }
             String suffix = String.valueOf(i);
             inbounds.put(new JSONObject().put("tag", "probe-in-" + suffix)
                     .put("listen", "127.0.0.1").put("port", ports.get(i))
                     .put("protocol", "socks")
                     .put("settings", new JSONObject().put("auth", "noauth").put("udp", false)));
-            outbounds.put(XrayConfigRenderer.renderOutbound(node.outbound)
+            outbounds.put(XrayConfigRenderer.renderOutbound(node)
                     .put("tag", "probe-out-" + suffix));
             rules.put(new JSONObject().put("type", "field")
                     .put("inboundTag", new JSONArray().put("probe-in-" + suffix))

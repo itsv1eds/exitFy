@@ -10,6 +10,20 @@ final class XrayConfigRenderer {
     static JSONObject build(ProtocolParser.Node node, int localPort,
                             String username, String password) throws Exception {
         if (node == null) throw new IllegalArgumentException("node is missing");
+        if (node.xrayOutbound != null) {
+            if (!node.supports(CoreFamily.XRAY)) {
+                throw new IllegalArgumentException("node is not representable by Xray");
+            }
+            if (localPort <= 0 || localPort > 65535) {
+                throw new IllegalArgumentException("invalid local SOCKS port");
+            }
+            JSONObject inbound = socksInbound(localPort, username, password);
+            JSONObject outbound = renderOutbound(node).put("tag", "proxy");
+            return new JSONObject()
+                    .put("log", new JSONObject().put("loglevel", "none"))
+                    .put("inbounds", new JSONArray().put(inbound))
+                    .put("outbounds", new JSONArray().put(outbound));
+        }
         ProtocolParser.validateNeutralOutbound(node.outbound);
         if (!node.supports(CoreFamily.XRAY)) {
             throw new IllegalArgumentException("node is not representable by Xray");
@@ -18,20 +32,7 @@ final class XrayConfigRenderer {
             throw new IllegalArgumentException("invalid local SOCKS port");
         }
 
-        JSONObject inboundSettings = new JSONObject().put("udp", true);
-        if (!empty(username) && !empty(password)) {
-            inboundSettings.put("auth", "password")
-                    .put("accounts", new JSONArray().put(new JSONObject()
-                            .put("user", username).put("pass", password)));
-        } else {
-            inboundSettings.put("auth", "noauth");
-        }
-        JSONObject inbound = new JSONObject()
-                .put("tag", "socks-in")
-                .put("listen", "127.0.0.1")
-                .put("port", localPort)
-                .put("protocol", "socks")
-                .put("settings", inboundSettings);
+        JSONObject inbound = socksInbound(localPort, username, password);
 
         JSONObject outbound = renderOutbound(node.outbound).put("tag", "proxy");
         return new JSONObject()
@@ -40,6 +41,32 @@ final class XrayConfigRenderer {
                 // There is deliberately no freedom/direct outbound. A failed
                 // proxy configuration must never become a direct connection.
                 .put("outbounds", new JSONArray().put(outbound));
+    }
+
+    static JSONObject renderOutbound(ProtocolParser.Node node) throws Exception {
+        if (node == null) throw new IllegalArgumentException("node is missing");
+        if (node.xrayOutbound != null) {
+            return XrayNativeOutbound.runtimeOutbound(node.xrayOutbound, "proxy");
+        }
+        return renderOutbound(node.outbound);
+    }
+
+    private static JSONObject socksInbound(int localPort, String username, String password)
+            throws Exception {
+        JSONObject inboundSettings = new JSONObject().put("udp", true);
+        if (!empty(username) && !empty(password)) {
+            inboundSettings.put("auth", "password")
+                    .put("accounts", new JSONArray().put(new JSONObject()
+                            .put("user", username).put("pass", password)));
+        } else {
+            inboundSettings.put("auth", "noauth");
+        }
+        return new JSONObject()
+                .put("tag", "socks-in")
+                .put("listen", "127.0.0.1")
+                .put("port", localPort)
+                .put("protocol", "socks")
+                .put("settings", inboundSettings);
     }
 
     static JSONObject renderOutbound(JSONObject source) throws Exception {

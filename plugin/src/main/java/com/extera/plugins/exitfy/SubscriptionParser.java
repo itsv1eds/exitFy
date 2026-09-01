@@ -401,6 +401,11 @@ final class SubscriptionParser {
         if (!budget.reserve()) return;
         try {
             validateOutboundShape(object);
+            if (isXrayOutboundShape(object)) {
+                nodes.add(ProtocolParser.fromXrayOutbound("",
+                        xrayDisplayName(object), object));
+                return;
+            }
             ImportHints hints = new ImportHints();
             String converted = jsonOutboundToUri(object, hints);
             if (converted.isEmpty()) throw new IllegalArgumentException("unrepresentable outbound");
@@ -457,6 +462,14 @@ final class SubscriptionParser {
 
     private static boolean isProxyOutbound(JSONObject object) {
         if (object == null) return false;
+        if (isXrayOutboundShape(object)) {
+            Object raw = object.opt("protocol");
+            if (raw instanceof String) {
+                return XrayNativeOutbound.isTunnelProtocol((String) raw)
+                        || object.has("type");
+            }
+            return object.has("protocol") || object.has("type");
+        }
         for (String key : new String[]{"type", "protocol"}) {
             Object raw = object.opt(key);
             if (raw instanceof String && isSupportedOutboundType((String) raw)) return true;
@@ -1473,11 +1486,25 @@ final class SubscriptionParser {
             }
         }
         boolean xray = isXrayOutboundShape(object);
-        String type = xray ? xrayOutboundType(object) : outboundType(object);
-        boolean valid;
         if (xray) {
-            valid = hasOnlyKeys(object, "protocol", "tag", "settings", "streamSettings");
-        } else if (type.equals("vless")) {
+            if (!object.has("protocol") || object.has("type")) {
+                throw new IllegalArgumentException(
+                        "Xray outbound requires exact protocol discriminator");
+            }
+            Object raw = object.opt("protocol");
+            if (!(raw instanceof String)) {
+                throw new IllegalArgumentException(
+                        "structured discriminator must be a string: protocol");
+            }
+            if (!XrayNativeOutbound.isTunnelProtocol((String) raw)) {
+                throw new IllegalArgumentException(
+                        "unsupported outbound discriminator: protocol");
+            }
+            return;
+        }
+        String type = outboundType(object);
+        boolean valid;
+        if (type.equals("vless")) {
             valid = hasOnlyKeys(object, "type", "protocol", "tag", "name", "remarks", "ps",
                     "server", "address", "server_port", "port", "uuid", "id", "user",
                     "flow", "packet_encoding", "packetEncoding", "encryption", "tls",
@@ -1504,6 +1531,18 @@ final class SubscriptionParser {
         return object != null && (object.has("protocol") || object.has("streamSettings")
                 || (settings != null && (settings.has("vnext")
                 || settings.has("servers"))));
+    }
+
+    private static String xrayDisplayName(JSONObject object) {
+        if (object == null) return "";
+        for (String key : new String[]{"name", "remarks", "ps", "tag"}) {
+            Object raw = object.opt(key);
+            if (raw instanceof String) {
+                String value = (String) raw;
+                if (!value.isEmpty()) return value;
+            }
+        }
+        return "";
     }
 
     private static String outboundType(JSONObject object) {

@@ -12,6 +12,7 @@ import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class SubscriptionParserTest {
@@ -185,7 +186,7 @@ public class SubscriptionParserTest {
     }
 
     @Test
-    public void extractsXrayVnextJsonAsNeutralNode() throws Exception {
+    public void extractsXrayVnextJsonAsNativeOutbound() throws Exception {
         JSONObject user = new JSONObject()
                 .put("id", "44444444-4444-4444-4444-444444444444")
                 .put("flow", "xtls-rprx-vision");
@@ -201,11 +202,17 @@ public class SubscriptionParserTest {
         List<ProtocolParser.Node> nodes = SubscriptionParser.parseNodes(
                 new JSONObject().put("outbounds", new JSONArray().put(outbound)).toString());
         assertEquals(1, nodes.size());
-        JSONObject parsed = nodes.get(0).outbound;
-        assertEquals("xray.example", parsed.optString("server"));
-        assertEquals("xtls-rprx-vision", parsed.optString("flow"));
-        assertFalse(parsed.has("transport"));
-        assertEquals("edge.example", parsed.optJSONObject("tls").optString("server_name"));
+        ProtocolParser.Node node = nodes.get(0);
+        assertEquals("xray.example", node.outbound.optString("server"));
+        assertFalse(node.outbound.has("transport"));
+        assertTrue(node.outbound.getJSONObject("tls").optJSONObject("reality")
+                .optBoolean("enabled"));
+        assertEquals("xtls-rprx-vision", nativeXray(node).getJSONObject("settings")
+                .getJSONArray("vnext").getJSONObject(0).getJSONArray("users")
+                .getJSONObject(0).getString("flow"));
+        assertEquals("edge.example", nativeXray(node).getJSONObject("streamSettings")
+                .getJSONObject("realitySettings").getString("serverName"));
+        assertFalse(node.supports(CoreFamily.SING_BOX));
     }
 
     @Test
@@ -220,9 +227,9 @@ public class SubscriptionParserTest {
         JSONObject transport = parsed.nodes.get(0).outbound.getJSONObject("transport");
         assertEquals("grpc", transport.getString("type"));
         assertFalse(transport.has("service_name"));
-        assertEquals("", XrayConfigRenderer.renderOutbound(parsed.nodes.get(0).outbound)
-                .getJSONObject("streamSettings").getJSONObject("grpcSettings")
-                .optString("serviceName", ""));
+        JSONObject grpc = XrayConfigRenderer.renderOutbound(parsed.nodes.get(0))
+                .getJSONObject("streamSettings").getJSONObject("grpcSettings");
+        assertEquals(0, grpc.length());
     }
 
     @Test
@@ -254,10 +261,14 @@ public class SubscriptionParserTest {
         SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", new JSONArray()
                         .put(direct).put(xray).put(transported).put(xhttp)).toString());
-        assertTrue(parsed.nodes.isEmpty());
-        assertEquals(4, parsed.rejected);
+        assertEquals(2, parsed.nodes.size());
+        assertEquals(2, parsed.rejected);
         assertTrue(parsed.reasons.contains("vless_vision_tls_required"));
         assertTrue(parsed.reasons.contains("vless_vision_raw_required"));
+        assertTrue(parsed.nodes.get(0).supports(CoreFamily.XRAY));
+        assertTrue(parsed.nodes.get(1).supports(CoreFamily.XRAY));
+        assertFalse(parsed.nodes.get(0).supports(CoreFamily.SING_BOX));
+        assertFalse(parsed.nodes.get(1).supports(CoreFamily.SING_BOX));
     }
 
     @Test
@@ -304,10 +315,12 @@ public class SubscriptionParserTest {
         List<ProtocolParser.Node> xhttpNodes = SubscriptionParser.parseNodes(
                 new JSONObject().put("outbounds", new JSONArray().put(xhttp)).toString());
         assertEquals(1, xhttpNodes.size());
-        JSONObject transport = xhttpNodes.get(0).outbound.optJSONObject("transport");
-        assertEquals("xhttp", transport.optString("type"));
-        assertEquals("packet-up", transport.optString("mode"));
-        assertEquals("100-200", transport.optJSONObject("extra").optString("xPaddingBytes"));
+        JSONObject xhttpSettings = nativeXray(xhttpNodes.get(0))
+                .getJSONObject("streamSettings").getJSONObject("xhttpSettings");
+        assertEquals("xhttp", xhttpNodes.get(0).outbound.getJSONObject("transport")
+                .getString("type"));
+        assertEquals("packet-up", xhttpSettings.getString("mode"));
+        assertEquals("100-200", xhttpSettings.getString("xPaddingBytes"));
 
         JSONObject mkcp = xrayVnext("vmess", "kcp.example",
                 "44444444-4444-4444-4444-444444444444", "auto")
@@ -323,10 +336,14 @@ public class SubscriptionParserTest {
         List<ProtocolParser.Node> mkcpNodes = SubscriptionParser.parseNodes(
                 new JSONObject().put("outbounds", new JSONArray().put(mkcp)).toString());
         assertEquals(1, mkcpNodes.size());
-        JSONObject mkcpTransport = mkcpNodes.get(0).outbound.optJSONObject("transport");
-        assertEquals("mkcp", mkcpTransport.optString("type"));
-        assertEquals("dns", mkcpTransport.optString("legacy_header"));
-        assertEquals("mask.example", mkcpTransport.optString("legacy_seed"));
+        JSONObject mkcpStream = nativeXray(mkcpNodes.get(0)).getJSONObject("streamSettings");
+        assertEquals("mkcp", mkcpNodes.get(0).outbound.getJSONObject("transport")
+                .getString("type"));
+        assertEquals("dns", mkcpStream.getJSONObject("finalmask").getJSONArray("udp")
+                .getJSONObject(1).getJSONObject("settings").getString("header"));
+        assertEquals("mask.example", mkcpStream.getJSONObject("finalmask")
+                .getJSONArray("udp").getJSONObject(0).getJSONObject("settings")
+                .getString("value"));
     }
 
     @Test
@@ -347,8 +364,12 @@ public class SubscriptionParserTest {
         }
         SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", ambiguous).toString());
-        assertTrue(parsed.nodes.isEmpty());
-        assertEquals(3, parsed.rejected);
+        assertEquals(3, parsed.nodes.size());
+        for (ProtocolParser.Node node : parsed.nodes) {
+            JSONObject stream = nativeXray(node).getJSONObject("streamSettings");
+            assertTrue(stream.has("xhttpSettings"));
+            assertTrue(stream.has("splithttpSettings"));
+        }
     }
 
     @Test
@@ -365,11 +386,14 @@ public class SubscriptionParserTest {
                         .put("xhttpSettings", new JSONObject().put("path", "/x")
                                 .put("extra", new JSONObject().put("xPaddingBytes", "10-20"))
                                 .put("scMinPostsIntervalMs", 30)));
-        SubscriptionParser.ParseResult rejected = SubscriptionParser.parseDetailed(
+        SubscriptionParser.ParseResult imported = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", new JSONArray()
                         .put(overlapping).put(nonOverlapping)).toString());
-        assertTrue(rejected.nodes.isEmpty());
-        assertEquals(2, rejected.rejected);
+        assertEquals(2, imported.nodes.size());
+        assertTrue(nativeXray(imported.nodes.get(0)).getJSONObject("streamSettings")
+                .getJSONObject("xhttpSettings").has("noSSEHeader"));
+        assertTrue(nativeXray(imported.nodes.get(1)).getJSONObject("streamSettings")
+                .getJSONObject("xhttpSettings").has("scMinPostsIntervalMs"));
     }
 
     @Test
@@ -404,12 +428,12 @@ public class SubscriptionParserTest {
 
         SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", invalid).toString());
-        assertTrue(parsed.nodes.isEmpty());
-        assertEquals(invalid.length(), parsed.rejected);
+        assertEquals(invalid.length(), parsed.nodes.size());
+        for (ProtocolParser.Node node : parsed.nodes) nativeXray(node);
     }
 
     @Test
-    public void structuredMkcpRejectsPresentEmptyNumericFields() throws Exception {
+    public void structuredMkcpKeepsPresentEmptyNumericFieldsForTheCore() throws Exception {
         JSONArray invalid = new JSONArray();
         String[] keys = {"mtu", "tti", "uplinkCapacity", "uplink_capacity",
                 "downlinkCapacity", "downlink_capacity", "cwndMultiplier",
@@ -425,8 +449,7 @@ public class SubscriptionParserTest {
         }
         SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", invalid).toString());
-        assertTrue(parsed.nodes.isEmpty());
-        assertEquals(keys.length, parsed.rejected);
+        assertEquals(keys.length, parsed.nodes.size());
     }
 
     @Test
@@ -440,8 +463,8 @@ public class SubscriptionParserTest {
         SubscriptionParser.ParseResult accepted = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", new JSONArray().put(valid)).toString());
         assertEquals(1, accepted.nodes.size());
-        assertEquals(0, accepted.nodes.get(0).outbound.getJSONObject("transport")
-                .getInt("uplink_capacity"));
+        assertEquals(0, nativeXray(accepted.nodes.get(0)).getJSONObject("streamSettings")
+                .getJSONObject("kcpSettings").getInt("uplinkCapacity"));
 
         JSONObject capacityOverflow = new JSONObject(valid.toString());
         capacityOverflow.getJSONObject("streamSettings").getJSONObject("kcpSettings")
@@ -450,11 +473,10 @@ public class SubscriptionParserTest {
         windowOverflow.getJSONObject("streamSettings").getJSONObject("kcpSettings")
                 .put("uplinkCapacity", 4095).put("tti", 1000)
                 .put("cwndMultiplier", 1024);
-        SubscriptionParser.ParseResult rejected = SubscriptionParser.parseDetailed(
+        SubscriptionParser.ParseResult overflow = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", new JSONArray()
                         .put(capacityOverflow).put(windowOverflow)).toString());
-        assertTrue(rejected.nodes.isEmpty());
-        assertEquals(2, rejected.rejected);
+        assertEquals(2, overflow.nodes.size());
     }
 
     @Test
@@ -481,9 +503,9 @@ public class SubscriptionParserTest {
                 new JSONObject().put("outbounds", outbounds).toString());
         assertEquals("unexpected simplified Xray rejection: " + parsed.reasons,
                 4, parsed.nodes.size());
-        assertEquals(" secret ", parsed.nodes.stream()
+        assertEquals(" secret ", nativeXray(parsed.nodes.stream()
                 .filter(node -> node.outbound.optString("type").equals("trojan"))
-                .findFirst().get().outbound.getString("password"));
+                .findFirst().get()).getJSONObject("settings").getString("password"));
 
         JSONObject conflicting = new JSONObject().put("protocol", "vless")
                 .put("settings", new JSONObject().put("address", "conflict.example")
@@ -499,9 +521,9 @@ public class SubscriptionParserTest {
                 .put("settings", new JSONObject().put("address", "flow.example")
                         .put("port", 443).put("password", "password")
                         .put("flow", "xtls-rprx-vision"));
-        assertTrue(SubscriptionParser.parseNodes(new JSONObject().put("outbounds",
+        assertEquals(3, SubscriptionParser.parseNodes(new JSONObject().put("outbounds",
                 new JSONArray().put(conflicting).put(unsupported).put(trojanFlow))
-                .toString()).isEmpty());
+                .toString()).size());
     }
 
     @Test
@@ -580,8 +602,8 @@ public class SubscriptionParserTest {
 
         SubscriptionParser.ParseResult rejected = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", invalid).toString());
-        assertTrue(rejected.reasons.toString(), rejected.nodes.isEmpty());
-        assertEquals(invalid.length(), rejected.rejected);
+        assertEquals(rejected.reasons.toString(), invalid.length() - 1, rejected.nodes.size());
+        assertEquals(1, rejected.rejected);
 
         JSONObject directVless = new JSONObject().put("type", "vless")
                 .put("address", "direct-alias.example").put("port", 443)
@@ -662,8 +684,7 @@ public class SubscriptionParserTest {
 
         SubscriptionParser.ParseResult rejected = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", invalid).toString());
-        assertTrue(rejected.reasons.toString(), rejected.nodes.isEmpty());
-        assertEquals(invalid.length(), rejected.rejected);
+        assertEquals(rejected.reasons.toString(), invalid.length(), rejected.nodes.size());
 
         JSONObject lowercase2022 = new JSONObject(uppercase2022.toString());
         lowercase2022.getJSONObject("settings").getJSONArray("servers")
@@ -781,8 +802,8 @@ public class SubscriptionParserTest {
         }) {
             SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(
                     new JSONObject().put("outbounds", new JSONArray().put(outbound)).toString());
-            assertTrue(parsed.nodes.isEmpty());
-            assertEquals(1, parsed.rejected);
+            assertEquals(1, parsed.nodes.size());
+            nativeXray(parsed.nodes.get(0));
             assertTrue(parsed.reasons.size() <= 20);
         }
     }
@@ -807,8 +828,8 @@ public class SubscriptionParserTest {
                     .put("streamSettings", new JSONObject().put("network", "mkcp")
                             .put("finalmask", new JSONObject().put(
                                     "udp", invalidMasks.getJSONArray(index))));
-            assertTrue(SubscriptionParser.parseNodes(new JSONObject()
-                    .put("outbounds", new JSONArray().put(outbound)).toString()).isEmpty());
+            assertEquals(1, SubscriptionParser.parseNodes(new JSONObject()
+                    .put("outbounds", new JSONArray().put(outbound)).toString()).size());
         }
     }
 
@@ -863,8 +884,9 @@ public class SubscriptionParserTest {
         assertEquals(2, parsed.nodes.size());
         assertEquals(2147483648L, parsed.nodes.get(0).outbound
                 .getJSONObject("transport").getLong("max_early_data"));
-        assertEquals(2147483647L, parsed.nodes.get(1).outbound
-                .getJSONObject("transport").getLong("max_early_data"));
+        JSONObject wsSettings = nativeXray(parsed.nodes.get(1))
+                .getJSONObject("streamSettings").getJSONObject("wsSettings");
+        assertEquals("/ws?ed=2147483647", wsSettings.getString("path"));
         assertFalse(parsed.nodes.get(1).supports(CoreFamily.SING_BOX));
         assertTrue(parsed.nodes.get(1).supports(CoreFamily.XRAY));
 
@@ -873,15 +895,15 @@ public class SubscriptionParserTest {
         SubscriptionParser.ParseResult unsigned = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", new JSONArray().put(xray)).toString());
         assertEquals(1, unsigned.nodes.size());
-        assertEquals(2147483648L, unsigned.nodes.get(0).outbound
-                .getJSONObject("transport").getLong("max_early_data"));
+        assertEquals("/ws?ed=2147483648", nativeXray(unsigned.nodes.get(0))
+                .getJSONObject("streamSettings").getJSONObject("wsSettings").getString("path"));
         assertTrue(unsigned.nodes.get(0).supports(CoreFamily.XRAY));
 
         xray.getJSONObject("streamSettings").getJSONObject("wsSettings")
                 .put("path", "/ws?ed=4294967296");
         SubscriptionParser.ParseResult overflow = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", new JSONArray().put(xray)).toString());
-        assertTrue(overflow.nodes.isEmpty());
+        assertEquals(1, overflow.nodes.size());
     }
 
     @Test
@@ -897,10 +919,9 @@ public class SubscriptionParserTest {
                                         .put("flow", "unsupported-flow")))));
         SubscriptionParser.ParseResult result = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", outbounds).toString());
-        assertEquals(2, result.rejected);
-        assertTrue(result.nodes.isEmpty());
+        assertEquals(1, result.rejected);
+        assertEquals(1, result.nodes.size());
         assertTrue(result.reasons.contains("detour_unsupported"));
-        assertTrue(result.reasons.contains("trojan_flow_unsupported"));
         assertTrue(result.reasons.size() <= 20);
         String reasons = result.reasons.toString();
         assertTrue(!reasons.contains("secret-host"));
@@ -940,33 +961,25 @@ public class SubscriptionParserTest {
                 new JSONObject().put("outbounds", new JSONArray().put(http).put(ws)).toString());
         assertEquals(0, parsed.rejected);
         assertEquals(2, parsed.nodes.size());
-        JSONObject httpTransport = parsed.nodes.get(0).outbound.getJSONObject("transport");
-        assertEquals("/h2", httpTransport.getString("path"));
-        assertEquals(2, httpTransport.getJSONObject("headers")
+        JSONObject httpSettings = nativeXray(parsed.nodes.get(0))
+                .getJSONObject("streamSettings").getJSONObject("httpSettings");
+        assertEquals("/h2", httpSettings.getJSONArray("path").getString(0));
+        assertEquals(2, httpSettings.getJSONObject("headers")
                 .getJSONArray("X-Test").length());
-        assertTrue(parsed.nodes.get(0).supports(CoreFamily.SING_BOX));
-        assertFalse(parsed.nodes.get(0).supports(CoreFamily.XRAY));
-        JSONObject wsTransport = parsed.nodes.get(1).outbound.getJSONObject("transport");
-        assertEquals("/ws?v=1", wsTransport.getString("path"));
-        assertEquals(2048, wsTransport.getInt("max_early_data"));
-        assertFalse(wsTransport.has("early_data_header_name"));
-        assertEquals(ProtocolParser.WS_EARLY_DATA_XRAY_PATH,
-                wsTransport.getString(ProtocolParser.WS_EARLY_DATA_MODE));
-        assertTrue(wsTransport.getBoolean(ProtocolParser.WS_XRAY_PATH_SEMANTICS));
+        assertEquals("http", parsed.nodes.get(0).outbound.getJSONObject("transport")
+                .getString("type"));
+        assertTrue(parsed.nodes.get(0).supports(CoreFamily.XRAY));
+        assertFalse(parsed.nodes.get(0).supports(CoreFamily.SING_BOX));
+        JSONObject wsSettings = nativeXray(parsed.nodes.get(1))
+                .getJSONObject("streamSettings").getJSONObject("wsSettings");
+        assertEquals("/ws?ed=2048&v=1", wsSettings.getString("path"));
         assertFalse(parsed.nodes.get(1).supports(CoreFamily.SING_BOX));
         assertEquals(CoreFamily.XRAY,
                 CoreSelector.select(parsed.nodes.get(1), null, false, false));
-        try {
-            ProtocolParser.renderSingBoxOutbound(parsed.nodes.get(1).outbound);
-            throw new AssertionError("sing-box accepted Xray WebSocket path semantics");
-        } catch (IllegalArgumentException expected) {
-            assertTrue(expected.getMessage().contains(
-                    ProtocolParser.SING_BOX_XRAY_WS_PATH_UNSUPPORTED));
-        }
         JSONObject xrayWs = XrayConfigRenderer.build(parsed.nodes.get(1), 39012, "", "")
                 .getJSONArray("outbounds").getJSONObject(0)
                 .getJSONObject("streamSettings").getJSONObject("wsSettings");
-        assertEquals("/ws?v=1&ed=2048", xrayWs.getString("path"));
+        assertEquals("/ws?ed=2048&v=1", xrayWs.getString("path"));
         assertTrue(parsed.nodes.get(1).supports(CoreFamily.XRAY));
     }
 
@@ -985,10 +998,11 @@ public class SubscriptionParserTest {
                 new JSONObject().put("outbounds", new JSONArray()
                         .put(networkAlias).put(methodAlias)).toString());
         assertEquals(accepted.reasons.toString(), 2, accepted.nodes.size());
+        assertEquals("ws", accepted.nodes.get(0).outbound.getJSONObject("transport")
+                .getString("type"));
+        assertFalse(accepted.nodes.get(1).outbound.has("transport"));
         for (ProtocolParser.Node node : accepted.nodes) {
-            assertEquals("ws", node.outbound.getJSONObject("transport")
-                    .getString("type"));
-            assertTrue(node.supports(CoreFamily.SING_BOX));
+            assertFalse(node.supports(CoreFamily.SING_BOX));
             assertTrue(node.supports(CoreFamily.XRAY));
         }
 
@@ -996,8 +1010,7 @@ public class SubscriptionParserTest {
         conflict.getJSONObject("streamSettings").put("method", "websocket");
         SubscriptionParser.ParseResult rejected = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", new JSONArray().put(conflict)).toString());
-        assertTrue(rejected.nodes.isEmpty());
-        assertEquals(1, rejected.rejected);
+        assertEquals(1, rejected.nodes.size());
     }
 
     @Test
@@ -1014,8 +1027,8 @@ public class SubscriptionParserTest {
                     .put("streamSettings", new JSONObject().put("network", "ws")
                             .put("wsSettings", new JSONObject().put("path", "/ws")
                                     .put(key, value)));
-            assertTrue(key, SubscriptionParser.parseNodes(new JSONObject()
-                    .put("outbounds", new JSONArray().put(invalid)).toString()).isEmpty());
+            assertEquals(key, 1, SubscriptionParser.parseNodes(new JSONObject()
+                    .put("outbounds", new JSONArray().put(invalid)).toString()).size());
         }
         JSONObject wsArrayHeader = xrayVnext("vless", "ws-header-type.example",
                 "83838383-8383-8383-8383-838383838384", "none")
@@ -1023,24 +1036,26 @@ public class SubscriptionParserTest {
                         .put("wsSettings", new JSONObject().put("path", "/ws")
                                 .put("headers", new JSONObject()
                                         .put("X-Test", new JSONArray().put("one")))));
-        assertTrue(SubscriptionParser.parseNodes(new JSONObject()
-                .put("outbounds", new JSONArray().put(wsArrayHeader)).toString()).isEmpty());
+        assertEquals(1, SubscriptionParser.parseNodes(new JSONObject()
+                .put("outbounds", new JSONArray().put(wsArrayHeader)).toString()).size());
 
         for (String key : new String[]{"path", "service_name"}) {
             JSONObject invalid = xrayVnext("vless", "grpc-tag.example",
                     "84848484-8484-8484-8484-848484848484", "none")
                     .put("streamSettings", new JSONObject().put("network", "grpc")
                             .put("grpcSettings", new JSONObject().put(key, "svc")));
-            assertTrue(key, SubscriptionParser.parseNodes(new JSONObject()
-                    .put("outbounds", new JSONArray().put(invalid)).toString()).isEmpty());
+            assertEquals(key, 1, SubscriptionParser.parseNodes(new JSONObject()
+                    .put("outbounds", new JSONArray().put(invalid)).toString()).size());
         }
         JSONObject grpc = xrayVnext("vless", "grpc-exact.example",
                 "85858585-8585-8585-8585-858585858585", "none")
                 .put("streamSettings", new JSONObject().put("network", "grpc")
                         .put("grpcSettings", new JSONObject().put("serviceName", "svc")));
-        assertEquals("svc", SubscriptionParser.parseNodes(new JSONObject()
-                .put("outbounds", new JSONArray().put(grpc)).toString()).get(0)
-                .outbound.getJSONObject("transport").getString("service_name"));
+        ProtocolParser.Node grpcNode = SubscriptionParser.parseNodes(new JSONObject()
+                .put("outbounds", new JSONArray().put(grpc)).toString()).get(0);
+        assertEquals("grpc", grpcNode.outbound.getJSONObject("transport").getString("type"));
+        assertEquals("svc", nativeXray(grpcNode).getJSONObject("streamSettings")
+                .getJSONObject("grpcSettings").getString("serviceName"));
 
         JSONObject exactTls = xrayVnext("vless", "tls-exact.example",
                 "86868686-8686-8686-8686-868686868686", "none")
@@ -1053,10 +1068,11 @@ public class SubscriptionParserTest {
                                 .put("alpn", "h2,http/1.1")));
         ProtocolParser.Node tlsNode = SubscriptionParser.parseNodes(new JSONObject()
                 .put("outbounds", new JSONArray().put(exactTls)).toString()).get(0);
-        assertEquals("edge.example", tlsNode.outbound.getJSONObject("tls")
-                .getString("server_name"));
-        assertEquals(2, tlsNode.outbound.getJSONObject("tls")
-                .getJSONArray("alpn").length());
+        assertTrue(tlsNode.outbound.getJSONObject("tls").getBoolean("enabled"));
+        JSONObject tlsSettings = nativeXray(tlsNode).getJSONObject("streamSettings")
+                .getJSONObject("tlsSettings");
+        assertEquals("edge.example", tlsSettings.getString("serverName"));
+        assertEquals("h2,http/1.1", tlsSettings.getString("alpn"));
 
         for (Object[] alias : new Object[][]{
                 {"insecure", false}, {"server_name", "edge.example"},
@@ -1068,8 +1084,8 @@ public class SubscriptionParserTest {
             secure.remove("serverName");
             secure.remove("fingerprint");
             secure.put((String) alias[0], alias[1]);
-            assertTrue((String) alias[0], SubscriptionParser.parseNodes(new JSONObject()
-                    .put("outbounds", new JSONArray().put(invalid)).toString()).isEmpty());
+            assertEquals((String) alias[0], 1, SubscriptionParser.parseNodes(new JSONObject()
+                    .put("outbounds", new JSONArray().put(invalid)).toString()).size());
         }
 
         JSONObject exactReality = xrayVnext("vless", "reality-exact.example",
@@ -1083,8 +1099,10 @@ public class SubscriptionParserTest {
                                 .put("shortId", "42").put("spiderX", "/probe")));
         ProtocolParser.Node reality = SubscriptionParser.parseNodes(new JSONObject()
                 .put("outbounds", new JSONArray().put(exactReality)).toString()).get(0);
-        assertEquals(realityPublicKey(), reality.outbound.getJSONObject("tls")
-                .getJSONObject("reality").getString("public_key"));
+        assertTrue(reality.outbound.getJSONObject("tls").getJSONObject("reality")
+                .getBoolean("enabled"));
+        assertEquals(realityPublicKey(), nativeXray(reality).getJSONObject("streamSettings")
+                .getJSONObject("realitySettings").getString("password"));
 
         for (String alias : new String[]{"server_name", "sni", "public_key", "pbk",
                 "short_id", "sid", "spider_x", "spx", "insecure", "alpn",
@@ -1092,16 +1110,16 @@ public class SubscriptionParserTest {
             JSONObject invalid = new JSONObject(exactReality.toString());
             invalid.getJSONObject("streamSettings").getJSONObject("realitySettings")
                     .put(alias, alias.equals("insecure") ? Boolean.FALSE : "value");
-            assertTrue(alias, SubscriptionParser.parseNodes(new JSONObject()
-                    .put("outbounds", new JSONArray().put(invalid)).toString()).isEmpty());
+            assertEquals(alias, 1, SubscriptionParser.parseNodes(new JSONObject()
+                    .put("outbounds", new JSONArray().put(invalid)).toString()).size());
         }
         JSONObject duplicateRealityKey = new JSONObject(exactReality.toString());
         duplicateRealityKey.getJSONObject("streamSettings")
                 .getJSONObject("realitySettings")
                 .put("publicKey", realityPublicKey());
-        assertTrue(SubscriptionParser.parseNodes(new JSONObject()
+        assertEquals(1, SubscriptionParser.parseNodes(new JSONObject()
                 .put("outbounds", new JSONArray().put(duplicateRealityKey))
-                .toString()).isEmpty());
+                .toString()).size());
     }
 
     @Test
@@ -1119,15 +1137,17 @@ public class SubscriptionParserTest {
                     .put("streamSettings", new JSONObject().put("network", "mkcp")
                             .put("kcpSettings", new JSONObject()
                                     .put((String) alias[0], alias[1])));
-            assertTrue((String) alias[0], SubscriptionParser.parseNodes(new JSONObject()
-                    .put("outbounds", new JSONArray().put(invalid)).toString()).isEmpty());
+            assertEquals((String) alias[0], 1, SubscriptionParser.parseNodes(new JSONObject()
+                    .put("outbounds", new JSONArray().put(invalid)).toString()).size());
         }
         JSONObject wrongBlock = xrayVnext("vless", "mkcp-block.example",
                 "88888888-8888-8888-8888-888888888882", "none")
                 .put("streamSettings", new JSONObject().put("network", "mkcp")
                         .put("mkcpSettings", new JSONObject().put("mtu", 1350)));
-        assertTrue(SubscriptionParser.parseNodes(new JSONObject()
-                .put("outbounds", new JSONArray().put(wrongBlock)).toString()).isEmpty());
+        ProtocolParser.Node mkcpBlock = SubscriptionParser.parseNodes(new JSONObject()
+                .put("outbounds", new JSONArray().put(wrongBlock)).toString()).get(0);
+        assertEquals(1350, nativeXray(mkcpBlock).getJSONObject("streamSettings")
+                .getJSONObject("mkcpSettings").getInt("mtu"));
 
         JSONObject directWs = direct("vless")
                 .put("tls", new JSONObject().put("enabled", true)
@@ -1169,8 +1189,8 @@ public class SubscriptionParserTest {
             JSONObject invalid = new JSONObject(base.toString());
             invalid.getJSONObject("streamSettings")
                     .getJSONObject("httpupgradeSettings").put("headers", headers);
-            assertTrue(headers.toString(), SubscriptionParser.parseNodes(new JSONObject()
-                    .put("outbounds", new JSONArray().put(invalid)).toString()).isEmpty());
+            assertEquals(headers.toString(), 1, SubscriptionParser.parseNodes(new JSONObject()
+                    .put("outbounds", new JSONArray().put(invalid)).toString()).size());
         }
 
         JSONObject split = xrayVnext("vless", "split-block.example",
@@ -1180,8 +1200,9 @@ public class SubscriptionParserTest {
                                 .put("path", "/split").put("mode", "stream-one")));
         ProtocolParser.Node node = SubscriptionParser.parseNodes(new JSONObject()
                 .put("outbounds", new JSONArray().put(split)).toString()).get(0);
-        assertEquals("xhttp", node.outbound.getJSONObject("transport").getString("type"));
-        assertEquals("/split", node.outbound.getJSONObject("transport").getString("path"));
+        assertEquals("splithttp", node.outbound.getJSONObject("transport").getString("type"));
+        assertEquals("/split", nativeXray(node).getJSONObject("streamSettings")
+                .getJSONObject("xhttpSettings").getString("path"));
     }
 
     @Test
@@ -1196,17 +1217,15 @@ public class SubscriptionParserTest {
                 new JSONObject().put("outbounds", new JSONArray().put(encoded)).toString());
         assertEquals(parsed.reasons.toString(), 1, parsed.nodes.size());
         ProtocolParser.Node node = parsed.nodes.get(0);
-        JSONObject neutral = node.outbound.getJSONObject("transport");
-        assertEquals("/ws?token=%2Fraw&x=1", neutral.getString("path"));
-        assertEquals(2048L, neutral.getLong("max_early_data"));
-        assertEquals(ProtocolParser.WS_EARLY_DATA_XRAY_PATH,
-                neutral.getString(ProtocolParser.WS_EARLY_DATA_MODE));
-        assertTrue(neutral.getBoolean(ProtocolParser.WS_XRAY_PATH_SEMANTICS));
+        assertEquals("/ws?%65d=%32%30%34%38&token=%2Fraw&&x=1",
+                nativeXray(node).getJSONObject("streamSettings")
+                        .getJSONObject("wsSettings").getString("path"));
+        assertEquals("ws", node.outbound.getJSONObject("transport").getString("type"));
         assertFalse(node.supports(CoreFamily.SING_BOX));
         assertEquals(CoreFamily.XRAY,
                 CoreSelector.select(node, null, false, false));
-        assertEquals("/ws?token=%2Fraw&x=1&ed=2048",
-                XrayConfigRenderer.renderOutbound(node.outbound)
+        assertEquals("/ws?%65d=%32%30%34%38&token=%2Fraw&&x=1",
+                XrayConfigRenderer.renderOutbound(node)
                         .getJSONObject("streamSettings").getJSONObject("wsSettings")
                         .getString("path"));
 
@@ -1215,8 +1234,8 @@ public class SubscriptionParserTest {
                 .put("path", "/ws?ed=1024&%65d=2048");
         SubscriptionParser.ParseResult rejected = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", new JSONArray().put(duplicate)).toString());
-        assertTrue(rejected.nodes.isEmpty());
-        assertEquals(1, rejected.rejected);
+        assertEquals(1, rejected.nodes.size());
+        assertEquals(0, rejected.rejected);
     }
 
     @Test
@@ -1233,22 +1252,23 @@ public class SubscriptionParserTest {
         ProtocolParser.Node node = parsed.nodes.get(0);
         JSONObject transport = node.outbound.getJSONObject("transport");
         assertEquals("httpupgrade", transport.getString("type"));
-        assertEquals("/upgrade?token=%2Fraw", transport.getString("path"));
-        assertEquals(2048L, transport.getLong("max_early_data"));
+        assertEquals("/upgrade?%65d=%32%30%34%38&token=%2Fraw",
+                nativeXray(node).getJSONObject("streamSettings")
+                        .getJSONObject("httpupgradeSettings").getString("path"));
         assertFalse(node.supports(CoreFamily.SING_BOX));
         assertTrue(node.supports(CoreFamily.XRAY));
         assertEquals(CoreFamily.XRAY,
                 CoreSelector.select(node, null, false, false));
-        assertEquals("/upgrade?token=%2Fraw&ed=2048",
-                XrayConfigRenderer.renderOutbound(node.outbound)
+        assertEquals("/upgrade?%65d=%32%30%34%38&token=%2Fraw",
+                XrayConfigRenderer.renderOutbound(node)
                         .getJSONObject("streamSettings")
                         .getJSONObject("httpupgradeSettings").getString("path"));
 
         JSONObject duplicate = new JSONObject(encoded.toString());
         duplicate.getJSONObject("streamSettings").getJSONObject("httpupgradeSettings")
                 .put("path", "/upgrade?ed=1&%65d=2");
-        assertTrue(SubscriptionParser.parseNodes(new JSONObject()
-                .put("outbounds", new JSONArray().put(duplicate)).toString()).isEmpty());
+        assertEquals(1, SubscriptionParser.parseNodes(new JSONObject()
+                .put("outbounds", new JSONArray().put(duplicate)).toString()).size());
 
         JSONObject overflow = new JSONObject(encoded.toString());
         overflow.getJSONObject("streamSettings").getJSONObject("httpupgradeSettings")
@@ -1256,16 +1276,17 @@ public class SubscriptionParserTest {
         SubscriptionParser.ParseResult unsigned = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", new JSONArray().put(overflow)).toString());
         assertEquals(unsigned.reasons.toString(), 1, unsigned.nodes.size());
-        assertEquals(2147483648L, unsigned.nodes.get(0).outbound
-                .getJSONObject("transport").getLong("max_early_data"));
+        assertEquals("/upgrade?ed=2147483648", nativeXray(unsigned.nodes.get(0))
+                .getJSONObject("streamSettings").getJSONObject("httpupgradeSettings")
+                .getString("path"));
         assertTrue(unsigned.nodes.get(0).supports(CoreFamily.XRAY));
 
         overflow.getJSONObject("streamSettings").getJSONObject("httpupgradeSettings")
                 .put("path", "/upgrade?ed=4294967296");
         SubscriptionParser.ParseResult rejected = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", new JSONArray().put(overflow)).toString());
-        assertTrue(rejected.nodes.isEmpty());
-        assertEquals(1, rejected.rejected);
+        assertEquals(1, rejected.nodes.size());
+        assertEquals(0, rejected.rejected);
     }
 
     @Test
@@ -1286,12 +1307,12 @@ public class SubscriptionParserTest {
                                 new JSONArray().put(outbound)).toString());
                 assertEquals(network + "/" + query + ": " + parsed.reasons,
                         1, parsed.nodes.size());
-                JSONObject transport = parsed.nodes.get(0).outbound
-                        .getJSONObject("transport");
-                assertEquals("/zero?v=1", transport.getString("path"));
-                assertFalse(transport.has("max_early_data"));
-                assertEquals("/zero?v=1", XrayConfigRenderer
-                        .renderOutbound(parsed.nodes.get(0).outbound)
+                String settingsPath = nativeXray(parsed.nodes.get(0))
+                        .getJSONObject("streamSettings")
+                        .getJSONObject(settingsKey).getString("path");
+                assertEquals("/zero?" + query + "&v=1", settingsPath);
+                assertEquals("/zero?" + query + "&v=1", XrayConfigRenderer
+                        .renderOutbound(parsed.nodes.get(0))
                         .getJSONObject("streamSettings")
                         .getJSONObject(settingsKey).getString("path"));
             }
@@ -1303,8 +1324,6 @@ public class SubscriptionParserTest {
             throws Exception {
         String rawPath = "/zero?z=last&&space=hello%20world&bare&token=%2fraw"
                 + "&a=two&a=one&ed=0#fragment";
-        String canonical = "/zero?a=two&a=one&bare=&space=hello+world"
-                + "&token=%2Fraw&z=last#fragment";
         for (String network : new String[]{"ws", "httpupgrade"}) {
             String settingsKey = network.equals("ws")
                     ? "wsSettings" : "httpupgradeSettings";
@@ -1316,12 +1335,11 @@ public class SubscriptionParserTest {
                     new JSONObject().put("outbounds",
                             new JSONArray().put(outbound)).toString());
             assertEquals(network + ": " + parsed.reasons, 1, parsed.nodes.size());
-            JSONObject transport = parsed.nodes.get(0).outbound
-                    .getJSONObject("transport");
-            assertEquals(canonical, transport.getString("path"));
-            assertFalse(transport.has("max_early_data"));
-            assertEquals(canonical, XrayConfigRenderer
-                    .renderOutbound(parsed.nodes.get(0).outbound)
+            assertEquals(rawPath, nativeXray(parsed.nodes.get(0))
+                    .getJSONObject("streamSettings")
+                    .getJSONObject(settingsKey).getString("path"));
+            assertEquals(rawPath, XrayConfigRenderer
+                    .renderOutbound(parsed.nodes.get(0))
                     .getJSONObject("streamSettings")
                     .getJSONObject(settingsKey).getString("path"));
         }
@@ -1340,12 +1358,10 @@ public class SubscriptionParserTest {
         assertEquals(0, parsed.rejected);
         assertEquals(1, parsed.nodes.size());
         ProtocolParser.Node node = parsed.nodes.get(0);
-        JSONObject neutral = node.outbound.getJSONObject("transport");
-        assertEquals("/ws?token=%2Fraw#fragment", neutral.getString("path"));
-        assertEquals(2048, neutral.getInt("max_early_data"));
-        assertEquals(ProtocolParser.WS_EARLY_DATA_XRAY_PATH,
-                neutral.getString(ProtocolParser.WS_EARLY_DATA_MODE));
-        assertTrue(neutral.getBoolean(ProtocolParser.WS_XRAY_PATH_SEMANTICS));
+        assertEquals("/ws?token=%2Fraw&ed=2048#fragment",
+                nativeXray(node).getJSONObject("streamSettings")
+                        .getJSONObject("wsSettings").getString("path"));
+        assertEquals("ws", node.outbound.getJSONObject("transport").getString("type"));
         assertFalse(node.supports(CoreFamily.SING_BOX));
         assertTrue(node.supports(CoreFamily.XRAY));
         assertEquals(CoreFamily.XRAY,
@@ -1372,8 +1388,8 @@ public class SubscriptionParserTest {
         SubscriptionParser.ParseResult rejected = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", new JSONArray()
                         .put(forbiddenAlias)).toString());
-        assertEquals(1, rejected.rejected);
-        assertTrue(rejected.nodes.isEmpty());
+        assertEquals(0, rejected.rejected);
+        assertEquals(1, rejected.nodes.size());
     }
 
     @Test
@@ -1425,9 +1441,7 @@ public class SubscriptionParserTest {
         ProtocolParser.Node node = parsed.nodes.get(0);
         assertFalse(node.supports(CoreFamily.SING_BOX));
         assertTrue(node.supports(CoreFamily.XRAY));
-        assertEquals(ProtocolParser.WS_EARLY_DATA_XRAY_PATH,
-                node.outbound.getJSONObject("transport")
-                        .getString(ProtocolParser.WS_EARLY_DATA_MODE));
+        assertEquals("ws", node.outbound.getJSONObject("transport").getString("type"));
         assertEquals("/ws?ed=1024", XrayConfigRenderer.build(node, 39014, "", "")
                 .getJSONArray("outbounds").getJSONObject(0)
                 .getJSONObject("streamSettings").getJSONObject("wsSettings")
@@ -1443,8 +1457,10 @@ public class SubscriptionParserTest {
                                 new JSONArray().put("/one").put("/two"))));
         SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", new JSONArray().put(outbound)).toString());
-        assertTrue(parsed.nodes.isEmpty());
-        assertEquals(1, parsed.rejected);
+        assertEquals(1, parsed.nodes.size());
+        assertEquals(0, parsed.rejected);
+        assertEquals(2, nativeXray(parsed.nodes.get(0)).getJSONObject("streamSettings")
+                .getJSONObject("httpSettings").getJSONArray("path").length());
     }
 
     @Test
@@ -2272,8 +2288,14 @@ public class SubscriptionParserTest {
         SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", new JSONArray()
                         .put(multiHost).put(ignoredBlock).put(wrongSecurityBlock)).toString());
-        assertTrue(parsed.nodes.isEmpty());
-        assertEquals(3, parsed.rejected);
+        assertEquals(3, parsed.nodes.size());
+        assertEquals(0, parsed.rejected);
+        assertEquals(2, nativeXray(parsed.nodes.get(0)).getJSONObject("streamSettings")
+                .getJSONObject("httpSettings").getJSONArray("host").length());
+        assertTrue(nativeXray(parsed.nodes.get(1)).getJSONObject("streamSettings")
+                .has("wsSettings"));
+        assertEquals("none", nativeXray(parsed.nodes.get(2)).getJSONObject("streamSettings")
+                .getString("security"));
     }
 
     @Test
@@ -2286,9 +2308,12 @@ public class SubscriptionParserTest {
         }
         SubscriptionParser.ParseResult rejected = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", xray).toString());
-        assertTrue(rejected.nodes.isEmpty());
-        assertEquals(3, rejected.rejected);
-        assertTrue(rejected.reasons.contains("security_unsupported"));
+        assertEquals(3, rejected.nodes.size());
+        assertEquals(0, rejected.rejected);
+        for (ProtocolParser.Node node : rejected.nodes) {
+            assertTrue(node.supports(CoreFamily.XRAY));
+            assertFalse(node.supports(CoreFamily.SING_BOX));
+        }
 
         JSONArray supported = new JSONArray();
         for (String security : new String[]{
@@ -2357,8 +2382,12 @@ public class SubscriptionParserTest {
 
         SubscriptionParser.ParseResult result = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", invalid).toString());
-        assertTrue(result.nodes.isEmpty());
-        assertEquals(invalid.length(), result.rejected);
+        assertEquals(4, result.nodes.size());
+        assertEquals(6, result.rejected);
+        for (ProtocolParser.Node node : result.nodes) {
+            nativeXray(node);
+            assertTrue(node.supports(CoreFamily.XRAY));
+        }
     }
 
     @Test
@@ -2371,8 +2400,11 @@ public class SubscriptionParserTest {
                                 .put("maxEarlyData", 2048)));
         SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", new JSONArray().put(outbound)).toString());
-        assertTrue(parsed.nodes.isEmpty());
-        assertEquals(1, parsed.rejected);
+        assertEquals(1, parsed.nodes.size());
+        JSONObject wsSettings = nativeXray(parsed.nodes.get(0))
+                .getJSONObject("streamSettings").getJSONObject("wsSettings");
+        assertEquals("/ws?ed=1024", wsSettings.getString("path"));
+        assertEquals(2048, wsSettings.getInt("maxEarlyData"));
     }
 
     @Test
@@ -2756,8 +2788,9 @@ public class SubscriptionParserTest {
 
         SubscriptionParser.ParseResult result = SubscriptionParser.parseDetailed(
                 new JSONObject().put("outbounds", invalid).toString());
-        assertTrue(result.nodes.isEmpty());
-        assertEquals(invalid.length(), result.rejected);
+        assertEquals(4, result.nodes.size());
+        assertEquals(7, result.rejected);
+        for (ProtocolParser.Node node : result.nodes) nativeXray(node);
     }
 
     @Test
@@ -2876,11 +2909,13 @@ public class SubscriptionParserTest {
                         .put("wsSettings", new JSONObject().put("path", "/ws")));
         ProtocolParser.Node implicitNode = SubscriptionParser.parseNodes(new JSONObject()
                 .put("outbounds", new JSONArray().put(implicit)).toString()).get(0);
-        assertEquals("sni.example", implicitNode.outbound.getJSONObject("transport")
-                .getJSONObject("headers").getString("Host"));
-        assertEquals("sni.example", ProtocolParser.renderSingBoxOutbound(
-                implicitNode.outbound).getJSONObject("transport")
-                .getJSONObject("headers").getString("Host"));
+        assertEquals("ws", implicitNode.outbound.getJSONObject("transport").getString("type"));
+        assertFalse(implicitNode.outbound.getJSONObject("transport").has("headers"));
+        JSONObject implicitWs = nativeXray(implicitNode).getJSONObject("streamSettings")
+                .getJSONObject("wsSettings");
+        assertEquals("/ws", implicitWs.getString("path"));
+        assertFalse(implicitWs.has("headers"));
+        assertFalse(implicitNode.supports(CoreFamily.SING_BOX));
 
         JSONObject exact = xrayVnext("vless", "endpoint.example",
                 "22222222-2222-2222-2222-222222222222", "none")
@@ -2890,10 +2925,10 @@ public class SubscriptionParserTest {
                                         .put("Host", "edge.example"))));
         ProtocolParser.Node exactNode = SubscriptionParser.parseNodes(new JSONObject()
                 .put("outbounds", new JSONArray().put(exact)).toString()).get(0);
-        assertEquals(" /ws ", exactNode.outbound.getJSONObject("transport")
-                .getString("path"));
-        assertEquals("edge.example", exactNode.outbound.getJSONObject("transport")
-                .getJSONObject("headers").getString("Host"));
+        JSONObject exactWs = nativeXray(exactNode).getJSONObject("streamSettings")
+                .getJSONObject("wsSettings");
+        assertEquals(" /ws ", exactWs.getString("path"));
+        assertEquals("edge.example", exactWs.getJSONObject("headers").getString("Host"));
 
         for (Object invalidHost : new Object[]{
                 "", " edge.example", new JSONArray(),
@@ -2905,8 +2940,8 @@ public class SubscriptionParserTest {
                             .put("wsSettings", new JSONObject().put("path", "/ws")
                                     .put("headers", new JSONObject()
                                             .put("Host", invalidHost))));
-            assertTrue(SubscriptionParser.parseNodes(new JSONObject()
-                    .put("outbounds", new JSONArray().put(invalid)).toString()).isEmpty());
+            assertEquals(1, SubscriptionParser.parseNodes(new JSONObject()
+                    .put("outbounds", new JSONArray().put(invalid)).toString()).size());
         }
     }
 
@@ -3039,6 +3074,11 @@ public class SubscriptionParserTest {
             }
             payload[i] ^= current[index++];
         }
+    }
+
+    private static JSONObject nativeXray(ProtocolParser.Node node) {
+        assertNotNull(node.xrayOutbound);
+        return node.xrayOutbound;
     }
 
     private static JSONObject xrayVnext(String protocol, String address,

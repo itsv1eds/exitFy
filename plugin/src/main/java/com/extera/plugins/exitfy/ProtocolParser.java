@@ -254,6 +254,13 @@ final class ProtocolParser {
         if (!storedUri.isEmpty() && utf8Exceeds(storedUri, MAX_URI_BYTES)) {
             throw new IllegalArgumentException("stored proxy URI exceeds 16 KiB");
         }
+        JSONObject xrayOutbound = value.optJSONObject("xrayOutbound");
+        if (value.has("xrayOutbound") && xrayOutbound == null) {
+            throw new IllegalArgumentException("stored Xray outbound has invalid type");
+        }
+        if (xrayOutbound != null) {
+            return fromXrayOutbound(storedUri, value.optString("name", ""), xrayOutbound);
+        }
         JSONObject outbound = value.optJSONObject("outbound");
         if (value.has("outbound") && outbound == null) {
             throw new IllegalArgumentException("stored neutral outbound has invalid type");
@@ -262,6 +269,19 @@ final class ProtocolParser {
             return fromOutbound(storedUri, value.optString("name", ""), outbound);
         }
         return parse(storedUri);
+    }
+
+    static Node fromXrayOutbound(String uri, String name, JSONObject source) throws Exception {
+        if (uri != null && !uri.isEmpty() && utf8Exceeds(uri, MAX_URI_BYTES)) {
+            throw new IllegalArgumentException("stored proxy URI exceeds 16 KiB");
+        }
+        JSONObject sanitized = XrayNativeOutbound.sanitize(source);
+        JSONObject summary = XrayNativeOutbound.summary(sanitized);
+        String display = empty(name) ? sanitized.optString("tag", "") : name;
+        Node node = new Node(uri == null ? "" : uri, cleanName(display), summary, sanitized,
+                sha256(canonical(sanitized)));
+        requireSupported(node);
+        return node;
     }
 
     static JSONObject buildConfig(Node node, int localPort, String username, String password) throws Exception {
@@ -3043,22 +3063,32 @@ final class ProtocolParser {
         final String uri;
         final String name;
         final JSONObject outbound;
+        final JSONObject xrayOutbound;
         final String normalizedKey;
 
         Node(String uri, String name, JSONObject outbound, String normalizedKey) {
+            this(uri, name, outbound, null, normalizedKey);
+        }
+
+        Node(String uri, String name, JSONObject outbound, JSONObject xrayOutbound,
+             String normalizedKey) {
             this.uri = uri;
             this.name = name;
             this.outbound = outbound;
+            this.xrayOutbound = xrayOutbound;
             this.normalizedKey = normalizedKey;
         }
 
         JSONObject toStoredJson() throws Exception {
-            return new JSONObject().put("uri", uri).put("name", name)
+            JSONObject stored = new JSONObject().put("uri", uri).put("name", name)
                     .put("normalizedKey", normalizedKey)
                     .put("outbound", outbound);
+            if (xrayOutbound != null) stored.put("xrayOutbound", xrayOutbound);
+            return stored;
         }
 
         boolean supports(CoreFamily family) {
+            if (xrayOutbound != null) return family == CoreFamily.XRAY;
             if (!incompatibilityReason(family).isEmpty()) return false;
             String protocol = outbound.optString("type", "");
             JSONObject transport = outbound.optJSONObject("transport");
@@ -3125,6 +3155,9 @@ final class ProtocolParser {
         }
 
         String incompatibilityReason(CoreFamily family) {
+            if (xrayOutbound != null) {
+                return family == CoreFamily.XRAY ? "" : "xray_native_outbound";
+            }
             return ProtocolParser.incompatibilityReason(outbound, family);
         }
 
