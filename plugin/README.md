@@ -207,12 +207,13 @@ mapped, a successful background install automatically schedules reconnect;
 if a different Go family has already been mapped, activation waits for the next
 process start.
 
-TLS certificate validation is intentionally disabled by product policy for
-both subscriptions and the core updater. GitHub's asset digest and the
-manifest SHA-256 detect accidental corruption, but over this trust-all channel
-they do **not** protect a core `.so` from targeted MITM replacement. Downloads
-are streamed with a 64 MiB limit and checked for GitHub digest, manifest SHA,
-ELF64/`EM_AARCH64`, 16 KiB `PT_LOAD` alignment and the exact
+TLS certificates are verified. Subscriptions carry the user's own server
+credentials and decide which servers they connect through, so accepting any
+certificate handed both to anyone on the path; the client once did exactly
+that, by an earlier product policy. Core downloads are additionally pinned to a
+signed manifest, so verification here is the second lock rather than the only
+one. Downloads are streamed with a 64 MiB limit and checked for GitHub digest,
+manifest SHA, ELF64/`EM_AARCH64`, 16 KiB `PT_LOAD` alignment and the exact
 `StartCore`/`StopCore` exports.
 
 Release downloads are blocked outright on some networks, so the manifest and

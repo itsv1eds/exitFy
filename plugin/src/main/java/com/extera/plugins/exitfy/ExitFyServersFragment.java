@@ -964,20 +964,6 @@ final class ExitFyServersFragment
         context.startActivity(intent);
     }
 
-    private void confirm(CharSequence title, CharSequence message,
-                         CharSequence positive, Runnable action) {
-        Context context = getParentActivity();
-        if (context == null) return;
-        AlertDialog dialog = new AlertDialog.Builder(context, getResourceProvider())
-                .setTitle(title)
-                .setMessage(message)
-                .setNegativeButton(I18n.t("Отмена", "Cancel"), null)
-                .setPositiveButton(positive,
-                        (ignored, which) -> runUiAction(action))
-                .create();
-        showDialog(dialog);
-    }
-
     private String nodeDetails(ExitFyServerPage.Node node) {
         StringBuilder value = new StringBuilder();
         appendDetail(value, I18n.t("Источник", "Source"),

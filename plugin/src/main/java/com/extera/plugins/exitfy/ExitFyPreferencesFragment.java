@@ -1,6 +1,8 @@
 package com.extera.plugins.exitfy;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.widget.LinearLayout;
 
 import org.json.JSONObject;
@@ -27,6 +29,7 @@ final class ExitFyPreferencesFragment
     private SettingRow autoCheckRow;
     private SettingRow callsRow;
     private SettingRow callStateRow;
+    private SettingRow restartRow;
     private boolean commandBusy;
 
     @Override
@@ -84,6 +87,13 @@ final class ExitFyPreferencesFragment
                 I18n.t("Менять сервер при обрыве", "Switch server on failure"), "");
         setSafeClick(failoverRow.view, this::showFailoverDialog);
         content.addView(failoverRow.view, sectionParams());
+
+        restartRow = settingRow(context, R.drawable.msg_reset,
+                I18n.t("Перезапустить exteraGram", "Restart exteraGram"),
+                I18n.t("Нужно после смены настроек, которые применяются при запуске",
+                        "Needed after changing a setting that applies at startup"));
+        setSafeClick(restartRow.view, this::confirmRestart);
+        content.addView(restartRow.view, sectionParams());
 
         coreVersionRow = settingRow(context, R.drawable.msg_info,
                 I18n.t("Версии компонентов", "Component versions"), "");
@@ -254,6 +264,30 @@ final class ExitFyPreferencesFragment
         } catch (Exception ignored) {
             return I18n.t("Недоступно", "Unavailable");
         }
+    }
+
+    private void confirmRestart() {
+        confirm(
+                I18n.t("Перезапустить exteraGram?", "Restart exteraGram?"),
+                I18n.t("Приложение закроется и откроется снова. Переписки не затрагиваются.",
+                        "The app closes and opens again. Your chats are not affected."),
+                I18n.t("Перезапустить", "Restart"),
+                this::restartApplication);
+    }
+
+    private void restartApplication() {
+        Activity activity = getParentActivity();
+        if (activity == null) return;
+        try {
+            Intent intent = activity.getPackageManager()
+                    .getLaunchIntentForPackage(activity.getPackageName());
+            if (intent == null) return;
+            activity.finishAffinity();
+            activity.startActivity(intent);
+        } catch (Exception ignored) {
+            return;
+        }
+        System.exit(0);
     }
 
     private void showCallsDialog() {

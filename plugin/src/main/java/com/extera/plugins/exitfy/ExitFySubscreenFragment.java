@@ -322,6 +322,21 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
      * A list of actions, not a choice between values: radio cells would ask
      * the user to pick a state that nothing here stores.
      */
+    /** One confirmation dialog for every screen that asks before acting. */
+    protected final void confirm(CharSequence title, CharSequence message,
+                                 CharSequence positive, Runnable action) {
+        runUiAction(() -> {
+            Context context = getParentActivity();
+            if (context == null) return;
+            showDialog(new AlertDialog.Builder(context, getResourceProvider())
+                    .setTitle(title)
+                    .setMessage(message)
+                    .setNegativeButton(I18n.t("Отмена", "Cancel"), null)
+                    .setPositiveButton(positive, (ignored, which) -> runUiAction(action))
+                    .create());
+        });
+    }
+
     protected final void showActionDialog(CharSequence title, CharSequence[] labels,
                                           ChoiceListener listener) {
         runUiAction(() -> {

@@ -1,6 +1,5 @@
 package com.extera.plugins.exitfy;
 
-import android.annotation.SuppressLint;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
@@ -10,9 +9,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.security.SecureRandom;
 import java.security.MessageDigest;
-import java.security.cert.X509Certificate;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -28,17 +25,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.GZIPInputStream;
 
-import javax.net.ssl.HostnameVerifier;
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLSocketFactory;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
 
-// Subscription and core-updater TLS verification are intentionally disabled by
-// the documented product policy. SHA-256 therefore detects corruption but is
-// not an independent defense against targeted MITM replacement.
-@SuppressLint({"TrustAllX509TrustManager", "CustomX509TrustManager"})
+// TLS is verified normally. This client fetches subscriptions, which carry the
+// user's own server credentials and decide which servers they connect through;
+// accepting any certificate handed anyone on the path both of those. Core
+// downloads are additionally pinned to a signed manifest, so verification here
+// is the second lock, not the only one.
 final class LimitedHttpClient implements Closeable {
     static final int MAX_WIRE_BYTES = 8 * 1024 * 1024;
     static final int MAX_EXPANDED_BYTES = 8 * 1024 * 1024;
@@ -59,7 +51,6 @@ final class LimitedHttpClient implements Closeable {
      */
     private final Object registrationLock = new Object();
     private final Set<HttpURLConnection> active = new HashSet<>();
-    private final SSLSocketFactory unsafeSocketFactory;
     private final ConnectionFactory connectionFactory;
     private volatile boolean closed;
     // Guarded by registrationLock. A request snapshots this value before it
@@ -74,7 +65,6 @@ final class LimitedHttpClient implements Closeable {
     LimitedHttpClient(ConnectionFactory connectionFactory) {
         if (connectionFactory == null) throw new IllegalArgumentException("connection factory is missing");
         this.connectionFactory = connectionFactory;
-        this.unsafeSocketFactory = createUnsafeSocketFactory();
     }
 
     Response get(String url, Map<String, String> headers) throws IOException {
@@ -334,11 +324,6 @@ final class LimitedHttpClient implements Closeable {
                     connection.setRequestProperty(name, header.getValue());
                 }
             }
-            if (connection instanceof HttpsURLConnection) {
-                HttpsURLConnection https = (HttpsURLConnection) connection;
-                https.setSSLSocketFactory(unsafeSocketFactory);
-                https.setHostnameVerifier(UNSAFE_HOSTNAME_VERIFIER);
-            }
             return connection;
         } catch (IOException | RuntimeException | Error failure) {
             disconnectLater(Collections.singleton(connection));
@@ -548,31 +533,6 @@ final class LimitedHttpClient implements Closeable {
         return output.toString();
     }
 
-    private static SSLSocketFactory createUnsafeSocketFactory() {
-        try {
-            TrustManager[] trustManagers = new TrustManager[]{new X509TrustManager() {
-                @Override
-                public void checkClientTrusted(X509Certificate[] chain, String authType) {
-                }
-
-                @Override
-                public void checkServerTrusted(X509Certificate[] chain, String authType) {
-                }
-
-                @Override
-                public X509Certificate[] getAcceptedIssuers() {
-                    return new X509Certificate[0];
-                }
-            }};
-            SSLContext context = SSLContext.getInstance("TLS");
-            context.init(null, trustManagers, new SecureRandom());
-            return context.getSocketFactory();
-        } catch (Exception error) {
-            throw new IllegalStateException("cannot initialize TLS policy", error);
-        }
-    }
-
-    private static final HostnameVerifier UNSAFE_HOSTNAME_VERIFIER = (hostname, session) -> true;
 
     interface ConnectionFactory {
         HttpURLConnection open(URL target) throws IOException;
