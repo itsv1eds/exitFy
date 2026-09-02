@@ -22,7 +22,7 @@ from java import jclass
 from org.telegram.messenger import ApplicationLoader
 
 __id__ = "exitFy_v2"
-__name__ = "exitFy"
+__name__ = "exitFy V2"
 __description__ = "Application download speed optimization"
 __author__ = "@exteraPluginsSup"
 __version__ = "4.1.0"
