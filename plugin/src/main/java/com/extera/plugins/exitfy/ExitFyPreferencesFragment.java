@@ -18,6 +18,7 @@ final class ExitFyPreferencesFragment
     private ExitFyDashboardState state = ExitFyDashboardState.EMPTY;
     private SettingRow pingTypeRow;
     private SettingRow customHwidRow;
+    private SettingRow subscriptionUserAgentRow;
     private SettingRow dualCoreRow;
     private SettingRow coreVersionRow;
     private String coreVersions = "";
@@ -50,6 +51,13 @@ final class ExitFyPreferencesFragment
                 "HWID", "");
         setSafeClick(customHwidRow.view, this::showCustomHwidDialog);
         content.addView(customHwidRow.view, sectionParams());
+
+        subscriptionUserAgentRow = settingRow(context, R.drawable.msg_edit,
+                "User-Agent",
+                I18n.t("С каким клиентом запрашиваются подписки",
+                        "Which client identity is used to fetch subscriptions"));
+        setSafeClick(subscriptionUserAgentRow.view, this::showSubscriptionUserAgentDialog);
+        content.addView(subscriptionUserAgentRow.view, sectionParams());
 
         refreshOnOpenRow = settingRow(context, R.drawable.msg_download,
                 I18n.t("Обновлять подписки при входе", "Refresh subscriptions on open"),
@@ -108,6 +116,7 @@ final class ExitFyPreferencesFragment
         if (next == null) return;
         state = next;
         if (pingTypeRow == null || customHwidRow == null
+                || subscriptionUserAgentRow == null
                 || dualCoreRow == null || coreVersionRow == null
                 || failoverRow == null || refreshOnOpenRow == null
                 || autoCheckRow == null || callsRow == null) {
@@ -118,6 +127,9 @@ final class ExitFyPreferencesFragment
             customHwidRow.setValue(next.customHwidSet
                     ? I18n.t("Настроен", "Configured")
                     : (next.defaultHwid.isEmpty() ? "—" : next.defaultHwid));
+            subscriptionUserAgentRow.setValue(next.subscriptionUserAgent.isEmpty()
+                    ? SettingsModel.subscriptionUserAgentLabel("")
+                    : next.subscriptionUserAgent);
             dualCoreRow.setValue(dualCoreLabel(next));
             coreVersionRow.setValue(coreVersions.isEmpty()
                     ? I18n.t("Загрузка…", "Loading…") : coreVersions);
@@ -137,6 +149,7 @@ final class ExitFyPreferencesFragment
             String unavailable = I18n.t("Runtime недоступен", "Runtime unavailable");
             pingTypeRow.setValue(unavailable);
             customHwidRow.setValue(unavailable);
+            subscriptionUserAgentRow.setValue(unavailable);
             dualCoreRow.setValue(unavailable);
             coreVersionRow.setValue(unavailable);
             failoverRow.setValue(unavailable);
@@ -158,6 +171,7 @@ final class ExitFyPreferencesFragment
         boolean enabled = state.runtimeAvailable && !commandBusy;
         if (pingTypeRow != null) pingTypeRow.setEnabled(enabled);
         if (customHwidRow != null) customHwidRow.setEnabled(enabled);
+        if (subscriptionUserAgentRow != null) subscriptionUserAgentRow.setEnabled(enabled);
         if (dualCoreRow != null) dualCoreRow.setEnabled(enabled);
         if (failoverRow != null) failoverRow.setEnabled(enabled);
         if (refreshOnOpenRow != null) refreshOnOpenRow.setEnabled(enabled);
@@ -191,6 +205,22 @@ final class ExitFyPreferencesFragment
                 false,
                 value -> setSetting("custom_hwid", value),
                 () -> setSetting("custom_hwid", ""));
+    }
+
+    private void showSubscriptionUserAgentDialog() {
+        String current = state.customSubscriptionUserAgentSet
+                ? state.subscriptionUserAgent : "";
+        showTextInputDialog(
+                "User-Agent",
+                I18n.t("Провайдер смотрит этот заголовок и решает, отдать JSON, base64 или Clash.",
+                        "The provider uses this header to decide whether to send JSON, base64, or Clash."),
+                SettingsModel.subscriptionUserAgentLabel(""),
+                I18n.t("Сохранить", "Save"),
+                I18n.t("Сбросить", "Reset"),
+                false,
+                current,
+                value -> setSetting("subscription_user_agent", value),
+                () -> setSetting("subscription_user_agent", ""));
     }
 
     /**

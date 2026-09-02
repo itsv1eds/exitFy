@@ -28,12 +28,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class SubscriptionManager implements Closeable {
-    private static final String SUBSCRIPTION_USER_AGENT = "v2rayN/6.23";
-    // Ordered: the long-standing agent first, so a provider that already
-    // answers it keeps returning exactly what it returns today.
-    private static final String[] SUBSCRIPTION_USER_AGENTS = {
-            SUBSCRIPTION_USER_AGENT, "clash-verge/1.0",
-    };
     private static final String STORE_FILE = "subscriptions.json";
     private static final long CACHE_TTL_MS = 6L * 60L * 60L * 1000L;
     static final int MAX_TOTAL_NODES = 10_000;
@@ -369,7 +363,8 @@ final class SubscriptionManager implements Closeable {
                 // unusable placeholder entries instead of servers. Retrying
                 // under a second widely accepted agent recovers those without
                 // changing what every other provider already returns.
-                for (String agent : SUBSCRIPTION_USER_AGENTS) {
+                for (String agent : SettingsModel.subscriptionUserAgents(
+                        settings == null ? "" : settings.subscriptionUserAgent)) {
                     response = http.get(candidate,
                             requestHeaders(settings, agent), requestScope);
                     if (response.status < 200 || response.status >= 300) {
@@ -1011,7 +1006,9 @@ final class SubscriptionManager implements Closeable {
     }
 
     private Map<String, String> requestHeaders(SettingsModel settings) {
-        return requestHeaders(settings, SUBSCRIPTION_USER_AGENT);
+        String[] agents = SettingsModel.subscriptionUserAgents(
+                settings == null ? "" : settings.subscriptionUserAgent);
+        return requestHeaders(settings, agents[0]);
     }
 
     private Map<String, String> requestHeaders(SettingsModel settings, String userAgent) {

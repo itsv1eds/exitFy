@@ -98,6 +98,35 @@ public class SubscriptionManagerTest {
     }
 
     @Test
+    public void subscriptionFetchUsesTheConfiguredUserAgent() throws Exception {
+        MiniServer server = new MiniServer(new AtomicReference<>(A1),
+                new AtomicInteger(200));
+        File root = Files.createTempDirectory("exitfy-subscription-ua").toFile();
+        LimitedHttpClient http = new LimitedHttpClient();
+        SubscriptionManager manager = new SubscriptionManager(new AtomicStore(root), http);
+        try {
+            manager.addCustomUrl("http://127.0.0.1:" + server.port() + "/first");
+            assertEquals(1, manager.refresh(
+                    SettingsModel.CUSTOM_PROVIDER_ID, SettingsModel.defaults()).size());
+            assertTrue(server.lastRequest().contains(
+                    "User-Agent: " + SettingsModel.DEFAULT_SUBSCRIPTION_USER_AGENT));
+
+            SettingsModel custom = SettingsModel.defaults()
+                    .withSetting("subscription_user_agent", "Happ/1.63.1");
+            assertEquals(1, manager.refresh(
+                    SettingsModel.CUSTOM_PROVIDER_ID, custom).size());
+            assertTrue(server.lastRequest().contains("User-Agent: Happ/1.63.1"));
+            assertFalse(server.lastRequest().contains(
+                    SettingsModel.DEFAULT_SUBSCRIPTION_USER_AGENT));
+        } finally {
+            manager.close();
+            http.close();
+            server.close();
+            TestFiles.deleteRecursively(root);
+        }
+    }
+
+    @Test
     public void defaultHwidIsStableAndSelectedNodeHasACompactProjection()
             throws Exception {
         File root = Files.createTempDirectory("exitfy-default-hwid").toFile();
@@ -1586,6 +1615,7 @@ public class SubscriptionManagerTest {
         private final CountDownLatch requestSeen;
         private final CountDownLatch releaseResponse;
         private final AtomicInteger requests = new AtomicInteger();
+        private volatile String lastRequest = "";
         private volatile boolean running = true;
 
         MiniServer(AtomicReference<String> firstBody, AtomicInteger secondStatus) throws Exception {
@@ -1613,12 +1643,17 @@ public class SubscriptionManagerTest {
             return requests.get();
         }
 
+        String lastRequest() {
+            return lastRequest;
+        }
+
         private void loop() {
             while (running) {
                 try (Socket socket = listener.accept()) {
                     socket.setSoTimeout(2000);
                     String request = readHeaders(socket.getInputStream());
                     requests.incrementAndGet();
+                    lastRequest = request;
                     if (requestSeen != null) requestSeen.countDown();
                     if (releaseResponse != null
                             && !releaseResponse.await(3, TimeUnit.SECONDS)) continue;
