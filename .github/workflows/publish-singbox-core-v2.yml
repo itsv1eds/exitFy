@@ -147,6 +147,7 @@ jobs:
               current_tag="$(jq -r .tag_name "$RUNNER_TEMP/current-release.json")"
               ./scripts/release_head_state.py --repo .. --head "$GITHUB_SHA" \
                 --foreign-pin cores/go.mod --foreign-pin cores/go.sum \
+                --release-path cores --release-path .github \
                 > "$RUNNER_TEMP/current-wrapper-candidates"
               gh api --paginate --slurp \
                 "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$current_tag?per_page=100" \

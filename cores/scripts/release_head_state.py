@@ -11,6 +11,7 @@ import verify_build_inputs
 
 
 FULL_COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+MAX_ANCESTRY_DEPTH = 200
 
 
 def _canonical_path(value: str) -> str:
@@ -43,7 +44,10 @@ def _parse_name_status(raw: bytes) -> list[tuple[str, str]]:
 
 
 def current_wrapper_candidates(
-    root: Path, head: str, foreign_pins: set[str]
+    root: Path,
+    head: str,
+    foreign_pins: set[str],
+    release_paths: tuple[str, ...] = (),
 ) -> list[str]:
     if FULL_COMMIT.fullmatch(head) is None:
         raise ValueError("workflow head is invalid")
@@ -60,7 +64,21 @@ def current_wrapper_candidates(
     ):
         raise ValueError("Git returned malformed parentage")
     candidates = [head]
-    if len(parents) == 2:
+    # A release is pinned to the wrapper that produced it, not to whatever
+    # else has been committed since. Callers that keep unrelated work in the
+    # same repository name the paths a release is built from; naming none
+    # compares the whole tree, which is what a cores-only repository wants.
+    current = head
+    for _ in range(MAX_ANCESTRY_DEPTH):
+        parents = verify_build_inputs._git(
+            root, "rev-list", "--parents", "-n", "1", current
+        ).decode("ascii", "strict").strip().split()
+        if not parents or parents[0] != current or any(
+            FULL_COMMIT.fullmatch(value) is None for value in parents
+        ):
+            raise ValueError("Git returned malformed parentage")
+        if len(parents) != 2:
+            break
         parent = parents[1]
         changes = _parse_name_status(
             verify_build_inputs._git(
@@ -73,12 +91,17 @@ def current_wrapper_candidates(
                 parent,
                 head,
                 "--",
+                *release_paths,
             )
         )
-        if changes and all(
+        # Everything a release was built from has to be identical, apart from
+        # the pin churn the other family's workflow commits.
+        if not all(
             status == "M" and path in canonical_pins for status, path in changes
         ):
-            candidates.append(parent)
+            break
+        candidates.append(parent)
+        current = parent
     verify_build_inputs._require_expected_head(root, head)
     return candidates
 
@@ -88,9 +111,13 @@ def main() -> None:
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--head", required=True)
     parser.add_argument("--foreign-pin", action="append", required=True)
+    parser.add_argument("--release-path", action="append", default=[])
     args = parser.parse_args()
     for candidate in current_wrapper_candidates(
-        args.repo, args.head, set(args.foreign_pin)
+        args.repo,
+        args.head,
+        set(args.foreign_pin),
+        tuple(_canonical_path(value) for value in args.release_path),
     ):
         print(candidate)
 
