@@ -415,7 +415,7 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
                                              TextInputListener submitListener,
                                              Runnable resetListener) {
         showTextInputDialog(title, explanation, hint, positiveText, resetText,
-                MAX_TEXT_INPUT_CHARS, false, true, submitListener, resetListener);
+                MAX_TEXT_INPUT_CHARS, false, true, null, submitListener, resetListener);
     }
 
     protected final void showTextInputDialog(CharSequence title, CharSequence explanation,
@@ -424,7 +424,18 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
                                              TextInputListener submitListener,
                                              Runnable resetListener) {
         showTextInputDialog(title, explanation, hint, positiveText, resetText,
-                MAX_TEXT_INPUT_CHARS, false, showCancel,
+                MAX_TEXT_INPUT_CHARS, false, showCancel, null,
+                submitListener, resetListener);
+    }
+
+    protected final void showTextInputDialog(CharSequence title, CharSequence explanation,
+                                             CharSequence hint, CharSequence positiveText,
+                                             CharSequence resetText, boolean showCancel,
+                                             CharSequence initialText,
+                                             TextInputListener submitListener,
+                                             Runnable resetListener) {
+        showTextInputDialog(title, explanation, hint, positiveText, resetText,
+                MAX_TEXT_INPUT_CHARS, false, showCancel, initialText,
                 submitListener, resetListener);
     }
 
@@ -435,13 +446,14 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
                                              TextInputListener submitListener,
                                              Runnable resetListener) {
         showTextInputDialog(title, explanation, hint, positiveText, resetText,
-                maxChars, multiline, true, submitListener, resetListener);
+                maxChars, multiline, true, null, submitListener, resetListener);
     }
 
     private void showTextInputDialog(CharSequence title, CharSequence explanation,
                                      CharSequence hint, CharSequence positiveText,
                                      CharSequence resetText, int maxChars,
                                      boolean multiline, boolean showCancel,
+                                     CharSequence initialText,
                                      TextInputListener submitListener,
                                      Runnable resetListener) {
         runUiAction(() -> {
@@ -471,6 +483,9 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
             EditText editText = new EditTextBoldCursor(context);
             editText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
             editText.setText("");
+            if (!TextUtils.isEmpty(initialText)) {
+                editText.setText(initialText);
+            }
             editText.setTextColor(getThemedColor(Theme.key_dialogTextBlack));
             editText.setHintTextColor(getThemedColor(Theme.key_groupcreate_hintText));
             editText.setHint(hint);

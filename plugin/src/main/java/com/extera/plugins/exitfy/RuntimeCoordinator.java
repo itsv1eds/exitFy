@@ -273,7 +273,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         // Carry every field: rebuilding with the short constructor silently
         // reset the settings this method does not name.
         return new SettingsModel(enabled, decision.providerId, value.customHwid,
-                value.schemaVersion, value.pingType, value.dualCore, value.failover);
+                value.schemaVersion, value.pingType, value.dualCore, value.failover,
+                value.refreshOnOpen, value.autoCheckMinutes, value.callsViaProxy,
+                value.subscriptionUserAgent);
     }
 
     private String setSettingFromUi(String key, Object rawValue) {
@@ -351,6 +353,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         }
         if (previous.callsViaProxy != next.callsViaProxy) {
             settingPersistenceRevisions.record("calls_via_proxy", revision);
+        }
+        if (!previous.subscriptionUserAgent.equals(next.subscriptionUserAgent)) {
+            settingPersistenceRevisions.record("subscription_user_agent", revision);
         }
     }
 
@@ -841,6 +846,10 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             value.put("refreshOnOpen", current.refreshOnOpen);
             value.put("autoCheckMinutes", current.autoCheckMinutes);
             value.put("callsViaProxy", current.callsViaProxy);
+            value.put("subscriptionUserAgent",
+                    SettingsModel.subscriptionUserAgentLabel(current.subscriptionUserAgent));
+            value.put("customSubscriptionUserAgentSet",
+                    !current.subscriptionUserAgent.isEmpty());
             value.put("dualCoreActive", NativeCoreRuntime.dualCoreEnabled());
             // Never expose a custom identifier in a screen-state snapshot
             // which can outlive the editor dialog.
@@ -1030,7 +1039,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 previous.customHwid, previous.schemaVersion, previous.pingType,
                 previous.dualCore, previous.failover,
                 previous.refreshOnOpen, previous.autoCheckMinutes,
-                previous.callsViaProxy);
+                previous.callsViaProxy, previous.subscriptionUserAgent);
         long persistRevision;
         synchronized (settingsRequestLock) {
             synchronized (subscriptionRefreshControl) {
@@ -1056,7 +1065,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 previous.customHwid, previous.schemaVersion, previous.pingType,
                 previous.dualCore, previous.failover,
                 previous.refreshOnOpen, previous.autoCheckMinutes,
-                previous.callsViaProxy);
+                previous.callsViaProxy, previous.subscriptionUserAgent);
         long persistRevision;
         synchronized (settingsRequestLock) {
             synchronized (subscriptionRefreshControl) {

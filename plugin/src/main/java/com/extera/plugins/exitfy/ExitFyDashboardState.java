@@ -32,6 +32,8 @@ final class ExitFyDashboardState {
     final boolean callsViaProxy;
     final boolean dualCoreActive;
     final boolean customHwidSet;
+    final boolean customSubscriptionUserAgentSet;
+    final String subscriptionUserAgent;
     final String defaultHwid;
     final String connectionIssue;
     final boolean refreshRunning;
@@ -70,6 +72,12 @@ final class ExitFyDashboardState {
         callsViaProxy = value.optBoolean("callsViaProxy", false);
         dualCoreActive = value.optBoolean("dualCoreActive", false);
         customHwidSet = value.optBoolean("customHwidSet", false);
+        customSubscriptionUserAgentSet = value.optBoolean(
+                "customSubscriptionUserAgentSet", false);
+        String agent = SettingsModel.normalizeCustomHwid(
+                value.optString("subscriptionUserAgent", ""));
+        subscriptionUserAgent = agent.isEmpty()
+                ? SettingsModel.subscriptionUserAgentLabel("") : agent;
         defaultHwid = safeLabel(value.optString("defaultHwid", ""), 32, "");
         connectionIssue = safeLabel(value.optString("connectionIssue", ""), 180, "");
 
