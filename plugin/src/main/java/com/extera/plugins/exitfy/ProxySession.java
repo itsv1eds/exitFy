@@ -8,7 +8,6 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.SharedConfig;
-import org.telegram.tgnet.ConnectionsManager;
 
 import java.io.Closeable;
 import java.nio.charset.StandardCharsets;
@@ -139,8 +138,8 @@ final class ProxySession implements Closeable {
             throw new ExternalProxyChangeException();
         }
 
-        SharedConfig.ProxyInfo requested = new SharedConfig.ProxyInfo(
-                "127.0.0.1", port, credentials.username, credentials.password, "");
+        SharedConfig.ProxyInfo requested = ProxyCompat.create(new ProxySnapshotModel.ProxyValue(
+                "127.0.0.1", port, credentials.username, credentials.password, ""));
         ProxySnapshotModel owned = snapshot.withOwnedFingerprint(fingerprint(requested));
         JSONObject ownedJson = owned.toJson()
                 .put(RETAIN_ACTIVATION_GUARD, true)
@@ -167,17 +166,19 @@ final class ProxySession implements Closeable {
                     throw new IllegalStateException("Telegram proxy fingerprint mismatch");
                 }
                 value.setCurrent(installed);
-                preferences.edit()
-                        .putString("proxy_ip", installed.address)
-                        .putInt("proxy_port", installed.port)
-                        .putString("proxy_user", installed.username)
-                        .putString("proxy_pass", installed.password)
-                        .putString("proxy_secret", installed.secret)
+                ProxySnapshotModel.ProxyValue installedValue = ProxyCompat.read(installed);
+                SharedPreferences.Editor editor = preferences.edit();
+                if (ProxyCompat.structured()) editor.putInt("proxy_type", installedValue.type);
+                editor
+                        .putString("proxy_ip", installedValue.address)
+                        .putInt("proxy_port", installedValue.port)
+                        .putString("proxy_user", installedValue.username)
+                        .putString("proxy_pass", installedValue.password)
+                        .putString("proxy_secret", installedValue.secret)
                         .putBoolean("proxy_enabled", true)
                         .putBoolean("proxy_enabled_calls", OWNED_PROXY_CALLS)
                         .apply();
-                ConnectionsManager.setProxySettings(true, installed.address, installed.port,
-                        installed.username, installed.password, installed.secret);
+                ProxyCompat.configure(true, installed);
                 NotificationCenter.getGlobalInstance()
                         .postNotificationName(NotificationCenter.proxySettingsChanged);
                 return null;
@@ -423,8 +424,7 @@ final class ProxySession implements Closeable {
                 SharedPreferences preferences = MessagesController.getGlobalMainSettings();
                 if (current == null || !matchesFingerprint(snapshot.ownedFingerprint, current)
                         || !preferences.getBoolean("proxy_enabled", false)) return false;
-                ConnectionsManager.setProxySettings(true, current.address, current.port,
-                        current.username, current.password, current.secret);
+                ProxyCompat.configure(true, current);
                 return true;
             });
         } catch (Exception error) {
@@ -486,7 +486,10 @@ final class ProxySession implements Closeable {
             }
             value.setCurrent(restored);
             ProxySnapshotModel.Preferences raw = snapshot.preferences;
-            preferences.edit()
+            SharedPreferences.Editor editor = preferences.edit();
+            if (raw.type >= 0) editor.putInt("proxy_type", raw.type);
+            else editor.remove("proxy_type");
+            editor
                     .putString("proxy_ip", raw.ip)
                     .putInt("proxy_port", raw.port)
                     .putString("proxy_user", raw.username)
@@ -497,10 +500,9 @@ final class ProxySession implements Closeable {
                             callsPreferenceAfterRestore(raw.calls, currentCalls))
                     .apply();
             if (raw.enabled && restored != null) {
-                ConnectionsManager.setProxySettings(true, restored.address, restored.port,
-                        restored.username, restored.password, restored.secret);
+                ProxyCompat.configure(true, restored);
             } else {
-                ConnectionsManager.setProxySettings(false, "", 0, "", "", "");
+                ProxyCompat.configure(false, null);
             }
             removeOwned(value, snapshot.ownedFingerprint);
             NotificationCenter.getGlobalInstance()
@@ -739,17 +741,17 @@ final class ProxySession implements Closeable {
                 preferences.getString("proxy_user", ""), preferences.getString("proxy_pass", ""),
                 preferences.getString("proxy_secret", ""),
                 preferences.getBoolean("proxy_enabled", false),
-                preferences.getBoolean("proxy_enabled_calls", false));
-        ProxySnapshotModel.ProxyValue value = previous == null ? null
-                : new ProxySnapshotModel.ProxyValue(previous.address, previous.port,
-                previous.username, previous.password, previous.secret);
+                preferences.getBoolean("proxy_enabled_calls", false),
+                preferences.getInt("proxy_type", -1));
+        ProxySnapshotModel.ProxyValue value = ProxyCompat.read(previous);
         return new ProxySnapshotModel(false, value,
                 previous == null ? "" : backend.name(previous), raw, "");
     }
 
     private static boolean samePreferences(ProxySnapshotModel.Preferences expected,
                                            SharedPreferences actual) {
-        return expected.enabled == actual.getBoolean("proxy_enabled", false)
+        return expected.type == actual.getInt("proxy_type", -1)
+                && expected.enabled == actual.getBoolean("proxy_enabled", false)
                 && expected.calls == actual.getBoolean("proxy_enabled_calls", false)
                 && expected.port == actual.getInt("proxy_port", 1080)
                 && expected.ip.equals(actual.getString("proxy_ip", ""))
@@ -761,6 +763,7 @@ final class ProxySession implements Closeable {
     private static boolean samePreferencesValue(ProxySnapshotModel.Preferences expected,
                                                 ProxySnapshotModel.Preferences actual) {
         return expected != null && actual != null
+                && expected.type == actual.type
                 && expected.enabled == actual.enabled && expected.calls == actual.calls
                 && expected.port == actual.port && expected.ip.equals(actual.ip)
                 && expected.username.equals(actual.username)
@@ -787,22 +790,18 @@ final class ProxySession implements Closeable {
     private static boolean sameProxy(ProxySnapshotModel.ProxyValue expected,
                                      SharedConfig.ProxyInfo actual) {
         if (expected == null || actual == null) return expected == null && actual == null;
-        return expected.address.equals(actual.address) && expected.port == actual.port
-                && expected.username.equals(actual.username)
-                && expected.password.equals(actual.password)
-                && expected.secret.equals(actual.secret);
+        return expected.equals(ProxyCompat.read(actual));
     }
 
     private static SharedConfig.ProxyInfo proxyFromValue(ProxySnapshotModel.ProxyValue value) {
-        return value == null ? null : new SharedConfig.ProxyInfo(value.address, value.port,
-                value.username, value.password, value.secret);
+        return ProxyCompat.create(value);
     }
 
     private static SharedConfig.ProxyInfo findExact(ArrayList<SharedConfig.ProxyInfo> values,
                                                     SharedConfig.ProxyInfo target) {
         if (target == null) return null;
-        String link = target.getLink();
-        for (SharedConfig.ProxyInfo item : values) if (link.equals(item.getLink())) return item;
+        String link = ProxyCompat.link(target);
+        for (SharedConfig.ProxyInfo item : values) if (link.equals(ProxyCompat.link(item))) return item;
         return null;
     }
 
@@ -828,7 +827,7 @@ final class ProxySession implements Closeable {
         if (proxy == null) return "";
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(proxy.getLink().getBytes(StandardCharsets.UTF_8));
+                    .digest(ProxyCompat.link(proxy).getBytes(StandardCharsets.UTF_8));
             StringBuilder output = new StringBuilder(64);
             for (byte item : digest) output.append(String.format(Locale.US, "%02x", item & 255));
             return output.toString();
@@ -840,7 +839,7 @@ final class ProxySession implements Closeable {
     private static boolean matchesFingerprint(String saved, SharedConfig.ProxyInfo proxy) {
         if (saved == null || saved.isEmpty() || proxy == null) return false;
         // The raw link is an exact beta.1 representation, not a name/address heuristic.
-        return saved.equals(fingerprint(proxy)) || saved.equals(proxy.getLink());
+        return saved.equals(fingerprint(proxy)) || saved.equals(ProxyCompat.link(proxy));
     }
 
     private ProxyBackend backend() {

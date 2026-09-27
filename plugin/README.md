@@ -92,6 +92,15 @@ on loopback and would otherwise relay whatever found it -- and the mappings die
 with the connection whose proxy port they hold. No third-party relay is
 involved: a call leaves by the server the user already chose.
 
+Proxy integration detects both host contracts at runtime: legacy ProxyInfo
+fields and the current ProxySettings model. Activation, ownership fingerprints,
+credentials and recovery use the same adapter. Recovery preserves the proxy
+type, including WEB proxies, and can read markers written by older plugin builds.
+
+The dashboard offers a source latency check below the connection button (up to
+50 servers per batch). The quick server chooser displays every row's measured
+latency or check status and updates while the dialog stays open.
+
 TCP is the default latency check and the first option offered: it measures
 without borrowing Telegram's proxy, so it works while connected. Proxy GET
 remains for the full-path measurement.

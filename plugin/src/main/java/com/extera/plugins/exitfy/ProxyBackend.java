@@ -157,14 +157,22 @@ interface ProxyBackend {
         @Override
         public SharedConfig.ProxyInfo add(SharedConfig.ProxyInfo value) {
             synchronized (SharedConfig.class) {
-                return SharedConfig.addProxy(value);
+                return (SharedConfig.ProxyInfo) legacyCall("addProxy", value);
             }
         }
 
         @Override
         public void delete(SharedConfig.ProxyInfo value) {
             synchronized (SharedConfig.class) {
-                SharedConfig.deleteProxy(value);
+                legacyCall("deleteProxy", value);
+            }
+        }
+
+        private Object legacyCall(String method, SharedConfig.ProxyInfo value) {
+            try {
+                return SharedConfig.class.getMethod(method, SharedConfig.ProxyInfo.class).invoke(null, value);
+            } catch (ReflectiveOperationException error) {
+                throw new IllegalStateException("Telegram legacy proxy API is unavailable", error);
             }
         }
 

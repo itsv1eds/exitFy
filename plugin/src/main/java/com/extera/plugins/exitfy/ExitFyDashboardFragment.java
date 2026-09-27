@@ -67,6 +67,13 @@ final class ExitFyDashboardFragment extends BaseFragment {
     private long announcedCoreInstallGeneration = -1L;
     private long pendingCoreInstallTerminalGeneration = -1L;
     private AlertDialog coreInstallDialog;
+    private AlertDialog serverChoicesDialog;
+    private TextView serverChoicesPingButton;
+    private final ArrayList<TextView> serverChoiceRows = new ArrayList<>();
+    private final ArrayList<String> serverChoiceKeys = new ArrayList<>();
+    private volatile boolean serverChoicesVisible;
+    private volatile long serverChoicesGeneration;
+    private int serverChoicesProvider = -1;
     private CoreInstallProgressView coreInstallProgressView;
     private long coreInstallDialogGeneration = -1L;
     private long coreInstallDialogShownAt = -1L;
@@ -149,6 +156,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
 
     @Override
     public void onPause() {
+        dismissServerChoices();
         setListening(false);
         cancelCoreInstallUiCallbacks();
         super.onPause();
@@ -157,6 +165,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
     @Override
     public void onFragmentDestroy() {
         alive = false;
+        dismissServerChoices();
         renderGeneration.incrementAndGet();
         setListening(false);
         cancelCoreInstallUiCallbacks();
@@ -266,6 +275,9 @@ final class ExitFyDashboardFragment extends BaseFragment {
         connectButton = primaryButton(context);
         connectButton.setOnClickListener(view -> onPrimaryActionClicked());
         card.addView(connectButton, topMargin(15));
+        pingButton = outlineButton(context);
+        pingButton.setOnClickListener(view -> onPingClicked());
+        card.addView(pingButton, topMargin(10));
         return card;
     }
 
@@ -410,9 +422,6 @@ final class ExitFyDashboardFragment extends BaseFragment {
 
         card.addView(top, matchWrap());
 
-        pingButton = outlineButton(context);
-        pingButton.setOnClickListener(view -> onPingClicked());
-        card.addView(pingButton, topMargin(13));
         return card;
     }
 
@@ -489,11 +498,16 @@ final class ExitFyDashboardFragment extends BaseFragment {
                     parsed = ExitFyDashboardState.EMPTY;
                 }
                 ExitFyDashboardState state = parsed;
+                long choicesToken = serverChoicesGeneration;
+                ExitFyServerPage choices = serverChoicesVisible ? readServerChoices() : null;
                 if (!postToUi(() -> {
                     refreshQueued.set(false);
                     if (!alive || token != renderGeneration.get()) return;
                     latestState = state;
                     applyState(state);
+                    if (choices != null && choicesToken == serverChoicesGeneration) {
+                        updateServerChoices(choices, state);
+                    }
                     if (refreshPending.get()) requestRefresh();
                 })) {
                     refreshQueued.set(false);
@@ -550,12 +564,15 @@ final class ExitFyDashboardFragment extends BaseFragment {
                 state.activePingSummary()));
         setActionEnabled(activeOpenArea, commandIdle);
         activePingView.setTextColor(pingColor(state));
-        pingButton.setEnabled(commandIdle && (state.hasActiveNode() || state.pingRunning));
+        pingButton.setEnabled(commandIdle && (state.serverCount > 0 || state.pingRunning));
         pingButton.setAlpha(pingButton.isEnabled() ? 1f : 0.45f);
         pingButton.setText(state.pingRunning
                 ? I18n.t("Отменить проверку", "Cancel check")
                     + (state.pingProgress().isEmpty() ? "" : " · " + state.pingProgress())
-                : I18n.t("Проверить задержку", "Check latency"));
+                : (state.serverCount > SubscriptionManager.MAX_PING_KEYS
+                    ? I18n.format("Проверить пинг: первые %s", "Check ping: first %s",
+                            String.valueOf(SubscriptionManager.MAX_PING_KEYS))
+                    : I18n.t("Проверить пинг серверов", "Check server ping")));
 
         // A custom source has no provider page to open.
         boolean builtInProvider = state.providerId != SettingsModel.CUSTOM_PROVIDER_ID;
@@ -883,7 +900,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
                 runSimpleCommand("cancel_ping", false);
                 return;
             }
-            if (!state.hasActiveNode()) return;
+            if (state.serverCount == 0) return;
             if (SettingsModel.PING_PROXY_GET.equals(state.pingType)) {
                 Context context = getParentActivity();
                 if (context == null) return;
@@ -894,11 +911,11 @@ final class ExitFyDashboardFragment extends BaseFragment {
                                 "The connection will be paused temporarily. exitFy will test the complete connection path, then restore the previous server."))
                         .setNegativeButton(I18n.t("Отмена", "Cancel"), null)
                         .setPositiveButton(I18n.t("Проверить", "Check"),
-                                (ignored, which) -> runCurrentPing(state.pingType))
+                                (ignored, which) -> runSourcePing(state.pingType))
                         .create();
                 showDialog(dialog);
             } else {
-                runCurrentPing(state.pingType);
+                runSourcePing(state.pingType);
             }
         } catch (Throwable error) {
             showToast(I18n.t("Не удалось запустить проверку",
@@ -919,36 +936,107 @@ final class ExitFyDashboardFragment extends BaseFragment {
                 false, this::presentServerChoices);
     }
 
+    private ExitFyServerPage readServerChoices() {
+        try {
+            return ExitFyServerPage.parse(ExitFyCommandResult.parse(ExitFyBridge.execute(
+                    new JSONObject().put("command", "list_nodes").put("offset", 0)
+                            .put("limit", SubscriptionManager.DEFAULT_PAGE_SIZE).toString())));
+        } catch (Exception unavailable) {
+            return ExitFyServerPage.INVALID;
+        }
+    }
+
     private void presentServerChoices(ExitFyCommandResult result) {
         ExitFyServerPage page = ExitFyServerPage.parse(result.data);
         if (!page.valid || page.nodes.isEmpty()) {
             openServers();
             return;
         }
-        ExitFyDashboardState current = latestState;
-        CharSequence[] labels = new CharSequence[page.nodes.size()];
-        for (int index = 0; index < page.nodes.size(); index++) {
-            ExitFyServerPage.Node node = page.nodes.get(index);
-            String name = TextUtils.isEmpty(node.name)
-                    ? I18n.t("Сервер без названия", "Unnamed server") : node.name;
-            String suffix = node.latency > 0 ? " · " + node.latency + " ms" : "";
-            boolean active = current != null && node.key.equals(current.activeKey);
-            labels[index] = (active ? "• " : "") + name + suffix;
-        }
         Activity activity = getParentActivity();
         if (activity == null) return;
-        AlertDialog.Builder builder = new AlertDialog.Builder(activity);
+        dismissServerChoices();
+        LinearLayout content = new LinearLayout(activity);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(16), 0, dp(16), 0);
+        serverChoicesPingButton = outlineButton(activity);
+        serverChoicesPingButton.setOnClickListener(view -> onPingClicked());
+        content.addView(serverChoicesPingButton, matchWrap());
+        for (ExitFyServerPage.Node node : page.nodes) {
+            TextView row = text(activity, 16, Theme.key_dialogTextBlack, false);
+            row.setPadding(dp(8), dp(12), dp(8), dp(12));
+            row.setOnClickListener(view -> {
+                dismissServerChoices();
+                selectServer(node.key);
+            });
+            content.addView(row, matchWrap());
+            serverChoiceRows.add(row);
+            serverChoiceKeys.add(node.key);
+        }
+        AlertDialog.Builder builder = new AlertDialog.Builder(activity, getResourceProvider());
         builder.setTitle(page.total > page.nodes.size()
                 ? I18n.t("Сервер", "Server") + " (" + page.nodes.size()
-                + I18n.t(" из ", " of ") + page.total + ")"
+                    + I18n.t(" из ", " of ") + page.total + ")"
                 : I18n.t("Сервер", "Server"));
-        builder.setItems(labels, (dialog, index) -> {
-            if (index < 0 || index >= page.nodes.size()) return;
-            selectServer(page.nodes.get(index).key);
-        });
+        builder.setView(content);
         builder.setNegativeButton(I18n.t("Все серверы", "All servers"),
                 (dialog, which) -> openServers());
-        showDialog(builder.create());
+        serverChoicesProvider = page.providerId;
+        serverChoicesDialog = builder.create();
+        serverChoicesVisible = true;
+        serverChoicesGeneration++;
+        updateServerChoices(page, latestState);
+        showDialog(serverChoicesDialog, dialog -> {
+            if (dialog != serverChoicesDialog) return;
+            serverChoicesVisible = false;
+            serverChoicesGeneration++;
+            serverChoicesDialog = null;
+            serverChoicesPingButton = null;
+            serverChoiceRows.clear();
+            serverChoiceKeys.clear();
+        });
+    }
+
+    private void updateServerChoices(ExitFyServerPage page, ExitFyDashboardState state) {
+        if (!serverChoicesVisible || serverChoicesPingButton == null) return;
+        if (!page.valid || page.providerId != serverChoicesProvider) {
+            dismissServerChoices();
+            return;
+        }
+        serverChoicesPingButton.setText(state.pingRunning
+                ? I18n.t("Отменить проверку", "Cancel check") + " · " + state.pingProgress()
+                : (state.serverCount > SubscriptionManager.MAX_PING_KEYS
+                    ? I18n.format("Проверить пинг: первые %s", "Check ping: first %s",
+                            String.valueOf(SubscriptionManager.MAX_PING_KEYS))
+                    : I18n.t("Проверить пинг серверов", "Check server ping")));
+        serverChoicesPingButton.setEnabled(!commandRunning.get() && state.runtimeAvailable);
+        for (int i = 0; i < serverChoiceKeys.size(); i++) {
+            String key = serverChoiceKeys.get(i);
+            ExitFyServerPage.Node found = null;
+            for (ExitFyServerPage.Node node : page.nodes) {
+                if (key.equals(node.key)) { found = node; break; }
+            }
+            TextView row = serverChoiceRows.get(i);
+            row.setEnabled(found != null && !commandRunning.get());
+            if (found == null) {
+                row.setText(I18n.t("Сервер больше недоступен", "Server no longer available"));
+            } else {
+                String name = TextUtils.isEmpty(found.name)
+                        ? I18n.t("Сервер без названия", "Unnamed server") : found.name;
+                row.setText((key.equals(state.activeKey) ? "• " : "") + name
+                        + " · " + ExitFyServersFragment.pingLabel(found));
+            }
+        }
+    }
+
+    private void dismissServerChoices() {
+        serverChoicesVisible = false;
+        serverChoicesGeneration++;
+        AlertDialog dialog = serverChoicesDialog;
+        serverChoicesDialog = null;
+        if (dialog != null) dialog.dismiss();
+        serverChoicesPingButton = null;
+        serverChoiceRows.clear();
+        serverChoiceKeys.clear();
     }
 
     private void selectServer(String key) {
@@ -957,17 +1045,15 @@ final class ExitFyDashboardFragment extends BaseFragment {
                 .put("key", key), true);
     }
 
-    private void runCurrentPing(String expectedPingType) {
+    private void runSourcePing(String expectedPingType) {
         runCommand(() -> {
-            ExitFyDashboardState current = ExitFyDashboardState.parse(
-                    ExitFyBridge.getUiState());
-            if (!current.hasActiveNode()) {
-                throw new IllegalStateException(I18n.t(
-                        "Сервер больше не выбран", "The server is no longer selected"));
+            ExitFyServerPage page = readServerChoices();
+            if (!page.valid || page.nodes.isEmpty()) {
+                throw new IllegalStateException(I18n.t("Нет серверов для проверки", "No servers to check"));
             }
-            return new JSONObject()
-                    .put("command", "ping_nodes")
-                    .put("keys", new JSONArray().put(current.activeKey))
+            JSONArray keys = new JSONArray();
+            for (ExitFyServerPage.Node node : page.nodes) keys.put(node.key);
+            return new JSONObject().put("command", "ping_nodes").put("keys", keys)
                     .put("expected_ping_type", expectedPingType);
         }, true);
     }

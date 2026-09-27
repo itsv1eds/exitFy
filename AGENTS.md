@@ -83,7 +83,7 @@ Do not do network or heavy I/O on the UI thread inside a hook. Use `client_utils
 - `MethodHook`: `before_hooked_method` / `after_hooked_method` on `param` (`thisObject`, `args`, `getResult()`, `setResult()`). `setResult` in **before** skips the original.
 - `MethodReplacement.replace_hooked_method` replaces the whole method; return a Java-compatible value (`None` for void).
 - Apply with `self.hook_method(method, handler)` or `self.hook_all_methods(clazz, name, handler)` (exitFy call-relay uses this). Unhook with the returned handle; host also unhooks on unload.
-- Weak Python callbacks: if Java only holds a weak ref, keep the hook object on `self` (exitFy keeps `_call_hooks` for that reason).
+- Keep hook handles on `self` for symmetric unload cleanup. The host also retains the Python hook objects.
 - `from java import jint` (and friends) when reflecting primitive overloads.
 
 User-facing notices: `ui.bulletin.BulletinHelper.show_info` / `show_error`. Open the last screen with `client_utils.get_last_fragment()`.
@@ -144,7 +144,7 @@ Two families, two workflows, two Go modules so SB dependencies cannot change lib
 - Xray releases: `libxray-arm64-v8a.so` + `manifest.json`
 - SB releases: `libexitfy-sb-arm64-v8a.so` + `manifest.json` + corresponding-source bundle
 
-Do not add CLI `Fatal`/`os.Exit` paths to a shared library loaded into Telegram. Do not treat GitHub asset digests as a trust root independent of GitHub (the plugin uses trust-all TLS by policy).
+Do not add CLI `Fatal`/`os.Exit` paths to a shared library loaded into Telegram. Do not treat GitHub asset digests as a trust root independent of GitHub (the plugin validates TLS certificates and hostnames).
 
 From `cores/`:
 

@@ -1007,7 +1007,7 @@ final class ExitFyServersFragment
         output.append(value);
     }
 
-    private static String pingLabel(ExitFyServerPage.Node node) {
+    static String pingLabel(ExitFyServerPage.Node node) {
         if (node.latency >= 0) {
             return node.latency + " " + I18n.t("мс", "ms");
         }

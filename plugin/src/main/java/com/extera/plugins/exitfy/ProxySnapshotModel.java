@@ -51,8 +51,15 @@ final class ProxySnapshotModel {
         final String username;
         final String password;
         final String secret;
+        final int type;
 
         ProxyValue(String address, int port, String username, String password, String secret) {
+            this(address, port, username, password, secret,
+                    secret == null || secret.isEmpty() ? 0 : 1);
+        }
+
+        ProxyValue(String address, int port, String username, String password, String secret, int type) {
+            this.type = type;
             this.address = address == null ? "" : address;
             this.port = port;
             this.username = username == null ? "" : username;
@@ -62,30 +69,31 @@ final class ProxySnapshotModel {
 
         JSONObject toJson() throws Exception {
             return new JSONObject().put("address", address).put("port", port)
-                    .put("username", username).put("password", password).put("secret", secret);
+                    .put("username", username).put("password", password).put("secret", secret).put("type", type);
         }
 
         static ProxyValue fromJson(JSONObject value) {
             if (value == null) return null;
             String address = value.optString("address", "");
             int port = value.optInt("port", 0);
-            if (address.isEmpty() || port <= 0) return null;
+            int type = value.optInt("type", value.optString("secret", "").isEmpty() ? 0 : 1);
+            if (address.isEmpty() || (type != 2 && port <= 0)) return null;
             return new ProxyValue(address, port, value.optString("username", ""),
-                    value.optString("password", ""), value.optString("secret", ""));
+                    value.optString("password", ""), value.optString("secret", ""), type);
         }
 
         @Override
         public boolean equals(Object other) {
             if (!(other instanceof ProxyValue)) return false;
             ProxyValue value = (ProxyValue) other;
-            return port == value.port && address.equals(value.address)
+            return type == value.type && port == value.port && address.equals(value.address)
                     && username.equals(value.username) && password.equals(value.password)
                     && secret.equals(value.secret);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(address, port, username, password, secret);
+            return Objects.hash(address, port, username, password, secret, type);
         }
     }
 
@@ -95,11 +103,18 @@ final class ProxySnapshotModel {
         final String username;
         final String password;
         final String secret;
+        final int type;
         final boolean enabled;
         final boolean calls;
 
         Preferences(String ip, int port, String username, String password, String secret,
                     boolean enabled, boolean calls) {
+            this(ip, port, username, password, secret, enabled, calls, -1);
+        }
+
+        Preferences(String ip, int port, String username, String password, String secret,
+                    boolean enabled, boolean calls, int type) {
+            this.type = type;
             this.ip = ip == null ? "" : ip;
             this.port = port;
             this.username = username == null ? "" : username;
@@ -117,7 +132,7 @@ final class ProxySnapshotModel {
             return new JSONObject().put("proxy_ip", ip).put("proxy_port", port)
                     .put("proxy_user", username).put("proxy_pass", password)
                     .put("proxy_secret", secret).put("proxy_enabled", enabled)
-                    .put("proxy_enabled_calls", calls);
+                    .put("proxy_enabled_calls", calls).put("proxy_type", type);
         }
 
         static Preferences fromJson(JSONObject value) {
@@ -125,7 +140,7 @@ final class ProxySnapshotModel {
             return new Preferences(value.optString("proxy_ip", ""), value.optInt("proxy_port", 1080),
                     value.optString("proxy_user", ""), value.optString("proxy_pass", ""),
                     value.optString("proxy_secret", ""), value.optBoolean("proxy_enabled", false),
-                    value.optBoolean("proxy_enabled_calls", false));
+                    value.optBoolean("proxy_enabled_calls", false), value.optInt("proxy_type", -1));
         }
     }
 }
