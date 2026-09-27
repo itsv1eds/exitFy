@@ -219,6 +219,7 @@ class TemplateLifecycleTest(unittest.TestCase):
             "auto_check_minutes": 60,
             "calls_via_proxy": True,
             "ping_type": "proxy_get",
+            "subscription_user_agent": "Happ/1.63.1",
         })
 
         values = plugin._settings_dict()
@@ -231,6 +232,7 @@ class TemplateLifecycleTest(unittest.TestCase):
         self.assertEqual(60, values["auto_check_minutes"])
         self.assertTrue(values["calls_via_proxy"])
         self.assertEqual("proxy_get", values["ping_type"])
+        self.assertEqual("Happ/1.63.1", values["subscription_user_agent"])
 
     def test_unset_settings_default_to_off_and_tcp(self):
         plugin_type, *_ = load_plugin_class()
@@ -242,6 +244,7 @@ class TemplateLifecycleTest(unittest.TestCase):
         self.assertFalse(values["refresh_on_open"])
         self.assertEqual(0, values["auto_check_minutes"])
         self.assertFalse(values["calls_via_proxy"])
+        self.assertEqual("", values["subscription_user_agent"])
 
     def test_an_unoffered_check_period_is_treated_as_off(self):
         plugin_type, *_ = load_plugin_class()

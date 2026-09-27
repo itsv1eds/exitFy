@@ -1211,9 +1211,9 @@ tasks.register("validateEmbeddedDexConfig") {
                 throw new GradleException("Native sub-screen contract is missing: ${token}")
             }
         }
-        ["ping_type", "custom_hwid", "setSetting(",
+        ["ping_type", "custom_hwid", "subscription_user_agent", "setSetting(",
          "Тип пинга", "Ping type", "\"Proxy GET\"", "\"TCP\"",
-         "\"HWID\"", "next.defaultHwid",
+         "\"HWID\"", "\"User-Agent\"", "next.defaultHwid",
          "\"Сохранить\"", "\"Сбросить\""].each { token ->
             if (!preferencesText.contains(token)) {
                 throw new GradleException("Native preferences are incomplete: ${token}")
@@ -1651,6 +1651,13 @@ tasks.register("validateEmbeddedDexConfig") {
         }
         if (runtimeText.contains("put(\"customHwid\", current.customHwid)")) {
             throw new GradleException("Full HWID must not be exposed through UI state")
+        }
+        if (!runtimeText.contains(
+                'value.put("subscriptionUserAgent",')
+                || !runtimeText.contains(
+                'value.put("customSubscriptionUserAgentSet",')) {
+            throw new GradleException(
+                    "Subscription User-Agent must be visible in Advanced settings")
         }
         ["subscriptions.selectedUiNodeInfo(current.providerId)",
          'value.put("defaultHwid", subscriptions.defaultHwid())',

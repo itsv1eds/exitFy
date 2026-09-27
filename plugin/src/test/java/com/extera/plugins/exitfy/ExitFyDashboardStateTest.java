@@ -56,6 +56,28 @@ public class ExitFyDashboardStateTest {
         assertTrue(state.customHwidSet);
         assertEquals("0123456789abcdef", state.defaultHwid);
         assertEquals("Connection refused", state.connectionIssue);
+        assertEquals(SettingsModel.subscriptionUserAgentLabel(""),
+                state.subscriptionUserAgent);
+        assertFalse(state.customSubscriptionUserAgentSet);
+    }
+
+    @Test
+    public void mapsACustomSubscriptionUserAgentOntoTheAdvancedRow()
+            throws Exception {
+        ExitFyDashboardState state = ExitFyDashboardState.parse(new JSONObject()
+                .put("runtimeAvailable", true)
+                .put("customSubscriptionUserAgentSet", true)
+                .put("subscriptionUserAgent", "Happ/1.63.1")
+                .toString());
+
+        assertTrue(state.customSubscriptionUserAgentSet);
+        assertEquals("Happ/1.63.1", state.subscriptionUserAgent);
+
+        ExitFyDashboardState withSite = ExitFyDashboardState.parse(new JSONObject()
+                .put("customSubscriptionUserAgentSet", true)
+                .put("subscriptionUserAgent", "MyClient/1.0 (+https://example.invalid)")
+                .toString());
+        assertTrue(withSite.subscriptionUserAgent.contains("https://example.invalid"));
     }
 
     @Test

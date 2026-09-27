@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -76,13 +77,16 @@ public class RuntimeModelsTest {
     public void settingsAreBoundedAndRoundTrip() throws Exception {
         SettingsModel value = SettingsModel.fromJson(
                 "{\"enabled\":true,\"provider_id\":99,"
-                        + "\"custom_hwid\":\" custom \",\"ping_type\":\"tcp\"}"
+                        + "\"custom_hwid\":\" custom \",\"ping_type\":\"tcp\","
+                        + "\"subscription_user_agent\":\" Happ/1.63.1 \"}"
         );
         assertTrue(value.enabled);
         assertEquals(SettingsModel.CUSTOM_PROVIDER_ID, value.providerId);
         assertEquals("custom", value.customHwid);
+        assertEquals("Happ/1.63.1", value.subscriptionUserAgent);
         assertEquals(SettingsModel.PING_TCP, value.pingType);
         assertEquals(6, value.schemaVersion);
+        assertEquals("Happ/1.63.1", value.toJson().getString("subscription_user_agent"));
         assertFalse(value.toJson().has("core_policy"));
     }
 
@@ -94,6 +98,7 @@ public class RuntimeModelsTest {
         assertTrue(changed.enabled);
         assertEquals(1, changed.providerId);
         assertEquals("device", changed.customHwid);
+        assertEquals("", changed.subscriptionUserAgent);
         assertEquals(SettingsModel.PING_TCP, changed.pingType);
         assertEquals(Boolean.TRUE, base.settingValue("enabled"));
         assertEquals(1, base.settingValue("provider_id"));
@@ -1890,5 +1895,29 @@ public class RuntimeModelsTest {
         assertEquals("hwid", rebuilt.customHwid);
         assertTrue(rebuilt.refreshOnOpen);
         assertEquals(60, rebuilt.autoCheckMinutes);
+        assertEquals("", rebuilt.subscriptionUserAgent);
+
+        SettingsModel withAgent = value.withSetting(
+                "subscription_user_agent", "Happ/1.63.1");
+        assertEquals("Happ/1.63.1", withAgent.subscriptionUserAgent);
+        SettingsModel afterDualCore = withAgent.withSetting("dual_core", false);
+        assertEquals("Happ/1.63.1", afterDualCore.subscriptionUserAgent);
+        assertTrue(afterDualCore.refreshOnOpen);
+        assertEquals(60, afterDualCore.autoCheckMinutes);
+        SettingsModel injected = value.withSetting(
+                "subscription_user_agent", "ok\r\nInjected: value");
+        assertFalse(injected.subscriptionUserAgent.contains("\r"));
+        assertFalse(injected.subscriptionUserAgent.contains("\n"));
+        assertEquals(
+                SettingsModel.DEFAULT_SUBSCRIPTION_USER_AGENT
+                        + " \u00b7 "
+                        + SettingsModel.FALLBACK_SUBSCRIPTION_USER_AGENT,
+                SettingsModel.subscriptionUserAgentLabel(""));
+        assertArrayEquals(new String[]{
+                        SettingsModel.DEFAULT_SUBSCRIPTION_USER_AGENT,
+                        SettingsModel.FALLBACK_SUBSCRIPTION_USER_AGENT},
+                SettingsModel.subscriptionUserAgents(""));
+        assertArrayEquals(new String[]{"Happ/1.63.1"},
+                SettingsModel.subscriptionUserAgents("Happ/1.63.1"));
     }
 }

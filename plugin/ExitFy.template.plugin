@@ -479,20 +479,24 @@ class ExitFyPlugin(BasePlugin):
         return min(max(result, 0), maximum)
 
     def _settings_dict(self):
-        raw_hwid = self.get_setting("custom_hwid", "")
-        normalized_hwid = self._normalize_hwid(raw_hwid)
-        if raw_hwid != normalized_hwid:
-            try:
-                self.set_setting("custom_hwid", normalized_hwid, reload_settings=False)
-            except Exception as exc:
-                self.log("exitFy HWID normalization failed: " + str(exc))
+        normalized_headers = {}
+        for key in ("custom_hwid", "subscription_user_agent"):
+            raw = self.get_setting(key, "")
+            normalized = self._normalize_hwid(raw)
+            if raw != normalized:
+                try:
+                    self.set_setting(key, normalized, reload_settings=False)
+                except Exception as exc:
+                    self.log("exitFy %s normalization failed: %s" % (key, exc))
+            normalized_headers[key] = normalized
         provider_value = self._provider_migration_value
         if provider_value is None:
             provider_value = self.get_setting("provider_id", 0)
         return {
             "enabled": self._as_bool(self.get_setting("enabled", False)),
             "provider_id": self._bounded_index(provider_value, CUSTOM_PROVIDER_ID),
-            "custom_hwid": normalized_hwid,
+            "custom_hwid": normalized_headers["custom_hwid"],
+            "subscription_user_agent": normalized_headers["subscription_user_agent"],
             "ping_type": self._ping_type_value(),
             "schema_version": SETTINGS_SCHEMA,
             "failover": self._as_bool(self.get_setting("failover", False)),
