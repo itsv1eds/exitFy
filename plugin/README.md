@@ -1,4 +1,4 @@
-# exitFy 4.1.0
+# exitFy 4.2
 
 `ExitFy.template.plugin` is the thin Python loader and lifecycle layer. Drawer
 and chat-action entries open a compact Telegram-native dashboard implemented as

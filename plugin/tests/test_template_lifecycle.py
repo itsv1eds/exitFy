@@ -118,7 +118,7 @@ def load_plugin_class(overrides=None):
             "/private/exitfy", "/private/bridge.so", "arm64-v8a"
         ),
         "__id__": "exitFy_v2",
-        "__version__": "4.1.0",
+        "__version__": "4.2",
         "PROVIDER_CATALOG_VERSION": 3,
         "AUTO_CHECK_MINUTE_CHOICES": (0, 15, 60, 360),
         "CALL_HOOK_TARGETS": (
