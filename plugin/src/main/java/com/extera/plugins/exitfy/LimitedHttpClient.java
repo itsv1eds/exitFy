@@ -287,6 +287,10 @@ final class LimitedHttpClient implements Closeable {
         }
     }
 
+    void ensureActive(RequestScope scope) throws IOException {
+        checkRequestActive(beginRequest(scope));
+    }
+
     private void checkRequestActive(long requestGeneration) throws IOException {
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("HTTP request interrupted");

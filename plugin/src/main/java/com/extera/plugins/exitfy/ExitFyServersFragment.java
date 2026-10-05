@@ -271,6 +271,7 @@ final class ExitFyServersFragment
         protocolRow.setValue(protocolLabel(protocol));
         refreshRow.setValue(next.refreshRunning
                 ? I18n.t("Обновление…", "Refreshing…")
+                : !next.subscriptionIssue.isEmpty() ? next.subscriptionIssue
                 : I18n.t("Готово к обновлению", "Ready to refresh"));
         pingRow.setValue(next.pingRunning
                 ? I18n.format("Проверено %s", "Checked %s",

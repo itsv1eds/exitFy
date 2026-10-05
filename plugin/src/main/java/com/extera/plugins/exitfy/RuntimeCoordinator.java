@@ -100,6 +100,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     private volatile boolean loaded;
     private volatile ProtocolParser.Node activeNode;
     private volatile String connectionIssue = "";
+    private volatile String subscriptionIssue = "";
     private volatile int localPort;
     private volatile long reconnectAt;
     private volatile ScheduledFuture<?> reconnectFuture;
@@ -387,6 +388,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         appliedSettings.markApplied(requestedRevision);
         if (previous.providerId != next.providerId) {
             restartRequired = false;
+            subscriptionIssue = "";
             coreSelectionBlocked = false;
             cancelCorePreparation(true);
             resetCoreRepairBackoff();
@@ -858,6 +860,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             // value or a hardware-derived device identifier.
             value.put("defaultHwid", subscriptions.defaultHwid());
             value.put("connectionIssue", connectionIssue);
+            value.put("subscriptionIssue", subscriptionIssue);
             value.put("serverCount", subscriptions.nodeCountFast(current.providerId));
             value.put("activeNodeInfo", activeNode == null
                     ? subscriptions.selectedUiNodeInfo(current.providerId)
@@ -2266,6 +2269,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                     requiredForStart, operation, provider, absoluteDeadline);
             cancelSubscriptionRefreshResourcesLocked();
             subscriptionRefreshTicket = ticket;
+            subscriptionIssue = "";
             if (effectiveManualAttempt != 0L) {
                 manualSubscriptionRefreshTicket = ticket;
                 manualSubscriptionRefreshAttempt = effectiveManualAttempt;
@@ -2390,6 +2394,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             boolean effectiveAnnounce = announce || completeManualRefresh(ticket);
             boolean requiredForStart = ticket.requiredForStart;
             if (error != null) {
+                subscriptionIssue = ErrorSanitizer.clean(error.getMessage());
+                if (subscriptionIssue.isEmpty()) subscriptionIssue = I18n.t(
+                        "Не удалось обновить подписку", "Subscription refresh failed");
                 if (effectiveAnnounce || requiredForStart) {
                     invalidateSettings();
                 }
@@ -2399,6 +2406,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 }
                 return;
             }
+            subscriptionIssue = "";
             ProtocolParser.Node reselected = subscriptions.selected(provider);
             if (effectiveAnnounce) invalidateSettings();
             if (settings.enabled) {

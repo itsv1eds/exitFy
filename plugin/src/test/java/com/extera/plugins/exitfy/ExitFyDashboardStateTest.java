@@ -96,6 +96,24 @@ public class ExitFyDashboardStateTest {
     }
 
     @Test
+    public void emptySourceShowsItsRefreshFailureInsteadOfAnUnhelpfulSelectionHint()
+            throws Exception {
+        ExitFyDashboardState state = ExitFyDashboardState.parse(new JSONObject()
+                .put("subscriptionIssue", "HTTP 403")
+                .toString());
+        assertEquals("HTTP 403", state.subscriptionIssue);
+        assertEquals("HTTP 403", state.nextStepHint());
+
+        ExitFyDashboardState bounded = ExitFyDashboardState.parse(new JSONObject()
+                .put("subscriptionIssue", "x".repeat(400)).toString());
+        assertEquals(180, bounded.subscriptionIssue.length());
+        ExitFyDashboardState redacted = ExitFyDashboardState.parse(new JSONObject()
+                .put("subscriptionIssue", "failed https://secret.invalid/token")
+                .toString());
+        assertEquals("", redacted.subscriptionIssue);
+    }
+
+    @Test
     public void hidesUriShapedLabelsAndBoundsUntrustedText() throws Exception {
         JSONObject value = new JSONObject()
                 .put("activeNodeInfo", new JSONObject()

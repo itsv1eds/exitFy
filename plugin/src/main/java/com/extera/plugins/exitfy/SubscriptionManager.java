@@ -359,22 +359,28 @@ final class SubscriptionManager implements Closeable {
             try {
                 SubscriptionParser.ParseResult parsed = null;
                 LimitedHttpClient.Response response = null;
-                // Some providers answer an unrecognised client with a list of
-                // unusable placeholder entries instead of servers. Retrying
-                // under a second widely accepted agent recovers those without
-                // changing what every other provider already returns.
+                Exception agentFailure = null;
+                // Panels vary both the response format and access policy by
+                // client identity. Try the Legacy identity after a refusal or
+                // an unusable body, while preserving an explicit custom agent.
                 for (String agent : SettingsModel.subscriptionUserAgents(
                         settings == null ? "" : settings.subscriptionUserAgent)) {
-                    response = http.get(candidate,
-                            requestHeaders(settings, agent), requestScope);
-                    if (response.status < 200 || response.status >= 300) {
-                        throw new IllegalStateException("HTTP " + response.status);
+                    http.ensureActive(requestScope);
+                    try {
+                        response = http.get(candidate,
+                                requestHeaders(settings, agent), requestScope);
+                        if (response.status < 200 || response.status >= 300) {
+                            throw new IllegalStateException("HTTP " + response.status);
+                        }
+                        parsed = SubscriptionParser.parseDetailed(
+                                SubscriptionParser.decodeStrictUtf8(response.body));
+                        if (!parsed.nodes.isEmpty()) break;
+                    } catch (Exception error) {
+                        agentFailure = error;
                     }
-                    parsed = SubscriptionParser.parseDetailed(
-                            SubscriptionParser.decodeStrictUtf8(response.body));
-                    if (!parsed.nodes.isEmpty()) break;
                 }
                 if (parsed == null || parsed.nodes.isEmpty()) {
+                    if (parsed == null && agentFailure != null) throw agentFailure;
                     // A source that answers an unrecognised client sends entries
                     // whose names carry a notice and whose address cannot be
                     // reached. Saying "no supported servers" there points the

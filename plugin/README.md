@@ -1,4 +1,4 @@
-# exitFy 4.2
+# exitFy 4.2.1
 
 `ExitFy.template.plugin` is the thin Python loader and lifecycle layer. Drawer
 and chat-action entries open a compact Telegram-native dashboard implemented as
@@ -12,11 +12,18 @@ the dashboard exposes one generic action which installs/checks both components
 and reports combined progress; it never exposes family names, versions,
 selection or per-family update controls.
 A subscription that answers an unrecognised client with placeholder entries
-instead of servers is retried once under a second widely accepted user agent,
+instead of servers is retried under Legacy `v2rayN/6.23`, then `clash-verge/1.0`,
 and entries pointing at an address that can never carry a tunnel are rejected
 rather than counted. Reordering the catalog moves stored subscriptions,
 selections and the saved provider choice with their provider, so nothing
 reappears under whichever provider now owns that index.
+
+Happ subscriptions containing an array of full Xray profiles are imported from
+each profile's proxy outbounds, with the profile title and transport options
+preserved. Inbounds, DNS and routing from a subscription are not installed.
+This covers clean installs in exteraGram and AyuGram, including
+`org.telegram.messenger` and `org.telegram.messenger.web`; cached servers are
+not required. Failed refreshes retain the last working list and show the cause.
 
 The dashboard offers the provider page directly, and links open through
 Telegram's own opener so t.me targets stay inside the app.
@@ -144,7 +151,7 @@ loading a different embedded DEX version fails closed until exteraGram is
 restarted.
 
 The plugin ID remains `exitFy_v2` and the settings schema is 6. Upgrading to
-beta.25 does not clear settings, custom subscriptions or custom nodes.
+4.2.1 does not clear settings, custom subscriptions or custom nodes.
 
 The 3.x plugin used the separate id `exitfy`, so the host installs this one
 beside it instead of replacing it. On first load exitFy reads that plugin's

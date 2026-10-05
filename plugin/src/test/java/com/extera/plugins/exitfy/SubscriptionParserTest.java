@@ -302,6 +302,51 @@ public class SubscriptionParserTest {
     }
 
     @Test
+    public void importsHappProfileArraysWithoutImportingTheirLocalConfiguration()
+            throws Exception {
+        JSONObject proxy = xrayVnext("vless", "profile.example",
+                "11111111-1111-1111-1111-111111111111", "none")
+                .put("tag", "proxy")
+                .put("streamSettings", new JSONObject().put("network", "xhttp")
+                        .put("xhttpSettings", new JSONObject().put("path", "/tunnel")
+                                .put("mode", "packet-up")));
+        JSONObject profile = new JSONObject().put("remarks", "📱 Mobile LTE")
+                .put("dns", new JSONObject().put("servers", new JSONArray().put("8.8.8.8")))
+                .put("inbounds", new JSONArray().put(xrayVnext("vless", "inbound.example",
+                        "22222222-2222-2222-2222-222222222222", "none")))
+                .put("routing", new JSONObject().put("rules", new JSONArray()))
+                .put("outbounds", new JSONArray().put(proxy)
+                        .put(new JSONObject().put("protocol", "freedom"))
+                        .put(new JSONObject().put("protocol", "blackhole")));
+        SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(
+                new JSONArray().put(profile).toString());
+        assertEquals(1, parsed.nodes.size());
+        assertEquals(0, parsed.rejected);
+        assertEquals("📱 Mobile LTE", parsed.nodes.get(0).name);
+        JSONObject imported = nativeXray(parsed.nodes.get(0));
+        assertEquals("packet-up", imported.getJSONObject("streamSettings")
+                .getJSONObject("xhttpSettings").getString("mode"));
+        assertFalse(imported.has("inbounds"));
+        assertFalse(imported.has("dns"));
+        assertFalse(imported.has("routing"));
+    }
+
+    @Test
+    public void anInvalidProfileDoesNotDiscardValidSiblingProfiles() throws Exception {
+        JSONObject valid = new JSONObject().put("remarks", "Working")
+                .put("outbounds", new JSONArray().put(xrayVnext("vless", "working.example",
+                        "33333333-3333-3333-3333-333333333333", "none")));
+        JSONObject metadata = new JSONObject().put("description", VLESS);
+        SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(
+                new JSONArray().put(new JSONObject().put("outbounds", "invalid"))
+                        .put(valid).put(metadata).toString());
+        assertEquals(1, parsed.nodes.size());
+        assertEquals("Working", parsed.nodes.get(0).name);
+        assertEquals(1, parsed.rejected);
+        assertTrue(parsed.reasons.contains("invalid_json"));
+    }
+
+    @Test
     public void preservesXhttpAndCurrentFinalmaskFromXrayJson() throws Exception {
         JSONObject xhttp = xrayVnext("vless", "xhttp.example",
                 "33333333-3333-3333-3333-333333333333", "none")

@@ -106,7 +106,7 @@ Runtime lives in `plugin/src/main/java/com/extera/plugins/exitfy`. The Python fi
 
 ### Subscriptions
 
-Default User-Agent list is `Happ/5.2.0`, then `clash-verge/1.0` if the first answer has no usable nodes. A non-empty `subscription_user_agent` setting **replaces** that list (no fallback). Changing UA does not reconnect; the next subscription refresh uses it.
+Default User-Agent list is `Happ/5.2.0`, then Legacy `v2rayN/6.23`, then `clash-verge/1.0` if an answer fails or has no usable nodes. A non-empty `subscription_user_agent` setting **replaces** that list (no fallback). Changing UA does not reconnect; the next subscription refresh uses it.
 
 Device/HWID headers are sent only to the URL the user/provider configured, never to rewritten mirrors or cross-origin redirects.
 

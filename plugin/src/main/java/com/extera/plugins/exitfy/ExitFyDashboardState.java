@@ -36,6 +36,7 @@ final class ExitFyDashboardState {
     final String subscriptionUserAgent;
     final String defaultHwid;
     final String connectionIssue;
+    final String subscriptionIssue;
     final boolean refreshRunning;
     final boolean importRunning;
     final boolean pingRunning;
@@ -80,6 +81,7 @@ final class ExitFyDashboardState {
                 ? SettingsModel.subscriptionUserAgentLabel("") : agent;
         defaultHwid = safeLabel(value.optString("defaultHwid", ""), 32, "");
         connectionIssue = safeLabel(value.optString("connectionIssue", ""), 180, "");
+        subscriptionIssue = safeLabel(value.optString("subscriptionIssue", ""), 180, "");
 
         JSONObject operations = value.optJSONObject("operations");
         refreshRunning = operations != null
@@ -131,6 +133,7 @@ final class ExitFyDashboardState {
                     "The connection files do not ship with the plugin and are downloaded once");
         }
         if (!hasActiveNode()) {
+            if (!refreshRunning && !subscriptionIssue.isEmpty()) return subscriptionIssue;
             return I18n.t(
                     "Откройте «Источник серверов» и выберите сервер",
                     "Open \u201cServer source\u201d and pick a server");

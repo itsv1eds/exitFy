@@ -11,8 +11,9 @@ final class SettingsModel {
     private static final int MAX_HWID_UTF8_BYTES = 1_024;
     static final String PING_PROXY_GET = "proxy_get";
     static final String PING_TCP = "tcp";
-    // Happ first; clash-verge is tried only if that answer has no servers.
+    // Retain the Legacy identity for panels that do not serve Happ configs.
     static final String DEFAULT_SUBSCRIPTION_USER_AGENT = "Happ/5.2.0";
+    static final String LEGACY_SUBSCRIPTION_USER_AGENT = "v2rayN/6.23";
     static final String FALLBACK_SUBSCRIPTION_USER_AGENT = "clash-verge/1.0";
 
     final boolean enabled;
@@ -269,6 +270,7 @@ final class SettingsModel {
         if (custom == null || custom.isEmpty()) {
             return new String[]{
                     DEFAULT_SUBSCRIPTION_USER_AGENT,
+                    LEGACY_SUBSCRIPTION_USER_AGENT,
                     FALLBACK_SUBSCRIPTION_USER_AGENT,
             };
         }
@@ -278,6 +280,7 @@ final class SettingsModel {
     static String subscriptionUserAgentLabel(String custom) {
         if (custom == null || custom.isEmpty()) {
             return DEFAULT_SUBSCRIPTION_USER_AGENT
+                    + " \u00b7 " + LEGACY_SUBSCRIPTION_USER_AGENT
                     + " \u00b7 " + FALLBACK_SUBSCRIPTION_USER_AGENT;
         }
         return custom;

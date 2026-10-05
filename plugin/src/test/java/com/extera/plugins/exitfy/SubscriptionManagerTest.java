@@ -4,6 +4,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 
+import static org.junit.Assert.fail;
+
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.File;
@@ -118,6 +120,37 @@ public class SubscriptionManagerTest {
             assertTrue(server.lastRequest().contains("User-Agent: Happ/1.63.1"));
             assertFalse(server.lastRequest().contains(
                     SettingsModel.DEFAULT_SUBSCRIPTION_USER_AGENT));
+        } finally {
+            manager.close();
+            http.close();
+            server.close();
+            TestFiles.deleteRecursively(root);
+        }
+    }
+
+    @Test
+    public void defaultAgentsRecoverARefusedHappRequestAndCustomAgentsDoNotFallback()
+            throws Exception {
+        MiniServer server = new MiniServer(new AtomicReference<>(A1), new AtomicInteger(200));
+        server.requiredAgent = SettingsModel.LEGACY_SUBSCRIPTION_USER_AGENT;
+        File root = Files.createTempDirectory("exitfy-legacy-agent").toFile();
+        LimitedHttpClient http = new LimitedHttpClient();
+        SubscriptionManager manager = new SubscriptionManager(new AtomicStore(root), http);
+        try {
+            manager.addCustomUrl("http://127.0.0.1:" + server.port() + "/first");
+            assertEquals(1, manager.refresh(SettingsModel.CUSTOM_PROVIDER_ID,
+                    SettingsModel.defaults()).size());
+            assertEquals(2, server.requests());
+            assertTrue(server.lastRequest().contains("User-Agent: v2rayN/6.23"));
+            try {
+                manager.refresh(SettingsModel.CUSTOM_PROVIDER_ID, SettingsModel.defaults()
+                        .withSetting("subscription_user_agent", "Custom/1.0"));
+                fail("A custom agent must not silently switch identity");
+            } catch (IllegalStateException refused) {
+                assertEquals("HTTP 403", refused.getMessage());
+            }
+            assertEquals(3, server.requests());
+            assertEquals(1, manager.nodes(SettingsModel.CUSTOM_PROVIDER_ID).size());
         } finally {
             manager.close();
             http.close();
@@ -1616,6 +1649,7 @@ public class SubscriptionManagerTest {
         private final CountDownLatch releaseResponse;
         private final AtomicInteger requests = new AtomicInteger();
         private volatile String lastRequest = "";
+        private volatile String requiredAgent = "";
         private volatile boolean running = true;
 
         MiniServer(AtomicReference<String> firstBody, AtomicInteger secondStatus) throws Exception {
@@ -1660,6 +1694,11 @@ public class SubscriptionManagerTest {
                     boolean second = request.startsWith("GET /second ");
                     int status = second ? secondStatus.get() : 200;
                     String body = second ? B1 : firstBody.get();
+                    if (!requiredAgent.isEmpty()
+                            && !request.contains("User-Agent: " + requiredAgent + "\r\n")) {
+                        status = 403;
+                        body = "Client not supported";
+                    }
                     String title = second ? "Second source" : "First source";
                     byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
                     String headers = "HTTP/1.1 " + status + (status == 200 ? " OK" : " Error") + "\r\n"

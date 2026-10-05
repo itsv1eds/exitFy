@@ -332,13 +332,7 @@ final class SubscriptionParser {
             if (root instanceof JSONObject) {
                 JSONObject object = (JSONObject) root;
                 if (object.has("outbounds")) {
-                    Object rawOutbounds = object.opt("outbounds");
-                    if (!(rawOutbounds instanceof JSONArray)) {
-                        rejections.reject("invalid_json");
-                        return;
-                    }
-                    collectExplicitOutbounds((JSONArray) rawOutbounds,
-                            nodes, rejections, budget);
+                    collectProfileOutbounds(object, nodes, rejections, budget);
                 } else if (isProxyOutbound(object)) {
                     collectExplicitOutbound(object, nodes, rejections, budget);
                 } else {
@@ -355,7 +349,9 @@ final class SubscriptionParser {
                         throw new ImportInterruptedException();
                     }
                     JSONObject object = values.optJSONObject(i);
-                    if (object != null && isProxyOutbound(object)) {
+                    if (object != null && object.has("outbounds")) {
+                        collectProfileOutbounds(object, nodes, rejections, budget);
+                    } else if (object != null && isProxyOutbound(object)) {
                         collectExplicitOutbound(object, nodes, rejections, budget);
                     } else if (values.opt(i) instanceof String
                             || values.opt(i) instanceof JSONArray) {
@@ -380,7 +376,23 @@ final class SubscriptionParser {
         }
     }
 
-    private static void collectExplicitOutbounds(JSONArray values,
+    private static void collectProfileOutbounds(JSONObject profile,
+                                                List<ProtocolParser.Node> nodes,
+                                                RejectionTracker rejections,
+                                                CandidateBudget budget) {
+        Object rawOutbounds = profile.opt("outbounds");
+        if (!(rawOutbounds instanceof JSONArray)) {
+            rejections.reject("invalid_json");
+            return;
+        }
+        // A profile can contain listeners, routing and metadata. Only its
+        // explicit proxy outbounds become servers; none of that surrounding
+        // configuration is installed into the local core.
+        collectExplicitOutbounds((JSONArray) rawOutbounds,
+                xrayDisplayName(profile), nodes, rejections, budget);
+    }
+
+    private static void collectExplicitOutbounds(JSONArray values, String profileName,
                                                  List<ProtocolParser.Node> nodes,
                                                  RejectionTracker rejections,
                                                  CandidateBudget budget) {
@@ -390,11 +402,19 @@ final class SubscriptionParser {
             }
             JSONObject object = values.optJSONObject(i);
             if (object == null || !isProxyOutbound(object)) continue;
-            collectExplicitOutbound(object, nodes, rejections, budget);
+            collectExplicitOutbound(object, profileName.isEmpty()
+                    ? xrayDisplayName(object) : profileName, nodes, rejections, budget);
         }
     }
 
     private static void collectExplicitOutbound(JSONObject object,
+                                                 List<ProtocolParser.Node> nodes,
+                                                 RejectionTracker rejections,
+                                                 CandidateBudget budget) {
+        collectExplicitOutbound(object, xrayDisplayName(object), nodes, rejections, budget);
+    }
+
+    private static void collectExplicitOutbound(JSONObject object, String displayName,
                                                  List<ProtocolParser.Node> nodes,
                                                  RejectionTracker rejections,
                                                  CandidateBudget budget) {
@@ -403,7 +423,7 @@ final class SubscriptionParser {
             validateOutboundShape(object);
             if (isXrayOutboundShape(object)) {
                 nodes.add(ProtocolParser.fromXrayOutbound("",
-                        xrayDisplayName(object), object));
+                        displayName, object));
                 return;
             }
             ImportHints hints = new ImportHints();

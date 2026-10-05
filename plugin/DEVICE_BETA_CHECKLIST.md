@@ -1,14 +1,22 @@
-# exitFy 4.2 device checklist
+# exitFy 4.2.1 device checklist
 
 Device testing is performed by the beta tester after receiving
 `exitfy.plugin`. Use real `arm64-v8a` hardware only:
 
 - One Android 10/API 29 arm64 device and one current Android arm64 device.
 - exteraGram 12.5.1 (`e17f1bde…`) and 12.8.1 (`ab284232…`).
-- Confirm the plugin is `exitFy_v2`, version `4.2`, schema 6, and an
+- Confirm the plugin is `exitFy_v2`, version `4.2.1`, schema 6, and an
   upgrade preserves settings, subscriptions and nodes. Legacy string, numeric
   and malformed `core_policy` values must become the inert `auto` tombstone;
   no core policy may reach DEX or appear in UI.
+- Check a fresh AyuGram installation (`org.telegram.messenger` or
+  `org.telegram.messenger.web`) with the default User-Agent and empty source
+  caches: refresh Shrimp, Elix, Sworkle and a custom subscription returning an
+  array of full Xray profiles. Servers and profile names must appear without
+  manually changing the User-Agent. Compare an upgraded exteraGram install.
+- A refused Happ request must retry as Legacy `v2rayN/6.23`; a configured custom
+  User-Agent must not fall back. If every attempt fails, show the reason in the
+  source screen and retain any previously saved servers.
 - Open the source card and confirm it presents the native server browser.
   Provider selection must respect disabled built-in slots. An old removed
   built-in selection must fall back to Elix; an old Custom selection and its
@@ -221,7 +229,7 @@ Device testing is performed by the beta tester after receiving
   the mapped families working and take effect only in the next process.
 
 An artifact may be handed off once the mandatory local pipeline passes. The 100
-connect/disconnect cycles and 72-hour soak are gates for stable `4.2`, which
+connect/disconnect cycles and 72-hour soak are gates for stable `4.2.1`, which
 also requires no crash/ANR, stuck proxy, leaked workers or secrets in
 user-visible errors. The core experiment is excluded from those gates: it ships
 off by default and is not part of the stable path.

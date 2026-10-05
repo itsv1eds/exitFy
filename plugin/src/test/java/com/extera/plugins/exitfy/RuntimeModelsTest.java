@@ -234,7 +234,7 @@ public class RuntimeModelsTest {
         try {
             String valid = new org.json.JSONObject()
                     .put("pluginId", "exitFy_v2")
-                    .put("pluginVersion", "4.2")
+                    .put("pluginVersion", "4.2.1")
                     .put("settingsSchema", 6)
                     .put("dataDir", root.getAbsolutePath())
                     .put("nativeBridgePath", bridge.getAbsolutePath())
@@ -256,13 +256,13 @@ public class RuntimeModelsTest {
             }
             try {
                 BootstrapConfig.parse(valid.replace(
-                        "4.2", "4.0.0-beta.23"));
+                        "4.2.1", "4.0.0-beta.23"));
                 throw new AssertionError("old bootstrap version accepted");
             } catch (IllegalArgumentException expected) {
                 assertTrue(expected.getMessage().contains("version"));
             }
             File versionedBridge = new File(root,
-                    "bridge/4.2/arm64-v8a/libexitfy_bridge.so");
+                    "bridge/4.2.1/arm64-v8a/libexitfy_bridge.so");
             assertTrue(versionedBridge.getParentFile().mkdirs());
             assertTrue(versionedBridge.createNewFile());
             try {
@@ -1911,10 +1911,13 @@ public class RuntimeModelsTest {
         assertEquals(
                 SettingsModel.DEFAULT_SUBSCRIPTION_USER_AGENT
                         + " \u00b7 "
+                        + SettingsModel.LEGACY_SUBSCRIPTION_USER_AGENT
+                        + " \u00b7 "
                         + SettingsModel.FALLBACK_SUBSCRIPTION_USER_AGENT,
                 SettingsModel.subscriptionUserAgentLabel(""));
         assertArrayEquals(new String[]{
                         SettingsModel.DEFAULT_SUBSCRIPTION_USER_AGENT,
+                        SettingsModel.LEGACY_SUBSCRIPTION_USER_AGENT,
                         SettingsModel.FALLBACK_SUBSCRIPTION_USER_AGENT},
                 SettingsModel.subscriptionUserAgents(""));
         assertArrayEquals(new String[]{"Happ/1.63.1"},
