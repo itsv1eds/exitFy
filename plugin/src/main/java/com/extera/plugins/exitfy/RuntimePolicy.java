@@ -18,7 +18,12 @@ final class RuntimePolicy {
     static boolean activeConfigurationChanged(ProtocolParser.Node active,
                                               ProtocolParser.Node reselected) {
         if (active == null || reselected == null) return true;
-        return !active.normalizedKey.equals(reselected.normalizedKey);
+        if (active.normalizedKey.equals(reselected.normalizedKey)) return false;
+        try {
+            return !ProtocolParser.importKey(active).equals(ProtocolParser.importKey(reselected));
+        } catch (Exception invalid) {
+            return true;
+        }
     }
 
     /**

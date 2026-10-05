@@ -160,6 +160,48 @@ public class SubscriptionManagerTest {
     }
 
     @Test
+    public void refreshingAPoolAliasKeepsItsServerSelectedUnderTheStandaloneName()
+            throws Exception {
+        JSONObject old = new JSONObject().put("protocol", "vless").put("tag", "proxy-2")
+                .put("settings", new JSONObject().put("vnext", new JSONArray()
+                        .put(new JSONObject().put("address", "bravo.example").put("port", 443)
+                                .put("users", new JSONArray().put(new JSONObject()
+                                        .put("id", "11111111-1111-1111-1111-111111111111")
+                                        .put("encryption", "none"))))));
+        AtomicReference<String> body = new AtomicReference<>(new JSONObject()
+                .put("remarks", "Old pool alias")
+                .put("outbounds", new JSONArray().put(old)).toString());
+        MiniServer server = new MiniServer(body, new AtomicInteger(200));
+        File root = Files.createTempDirectory("exitfy-pool-selection").toFile();
+        LimitedHttpClient http = new LimitedHttpClient();
+        SubscriptionManager manager = new SubscriptionManager(new AtomicStore(root), http);
+        try {
+            int provider = SettingsModel.CUSTOM_PROVIDER_ID;
+            manager.addCustomUrl("http://127.0.0.1:" + server.port() + "/first");
+            manager.refresh(provider, SettingsModel.defaults());
+            ProtocolParser.Node selected = manager.selected(provider);
+            JSONObject bravo = new JSONObject(old.toString()).put("tag", "proxy");
+            JSONObject alpha = new JSONObject(bravo.toString());
+            alpha.getJSONObject("settings").getJSONArray("vnext").getJSONObject(0)
+                    .put("address", "alpha.example");
+            body.set(new JSONArray().put(new JSONObject().put("remarks", "Alpha")
+                            .put("outbounds", new JSONArray().put(alpha)))
+                    .put(new JSONObject().put("remarks", "Bravo")
+                            .put("outbounds", new JSONArray().put(bravo))).toString());
+            assertEquals(2, manager.refresh(provider, SettingsModel.defaults()).size());
+            ProtocolParser.Node refreshed = manager.selected(provider);
+            assertEquals("Bravo", refreshed.name);
+            assertEquals("bravo.example", refreshed.outbound.getString("server"));
+            assertFalse(RuntimePolicy.activeConfigurationChanged(selected, refreshed));
+        } finally {
+            manager.close();
+            http.close();
+            server.close();
+            TestFiles.deleteRecursively(root);
+        }
+    }
+
+    @Test
     public void defaultHwidIsStableAndSelectedNodeHasACompactProjection()
             throws Exception {
         File root = Files.createTempDirectory("exitfy-default-hwid").toFile();

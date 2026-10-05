@@ -142,12 +142,20 @@ final class SubscriptionParser {
 
     private static void addExactBounded(Map<String, ProtocolParser.Node> values,
                                         ProtocolParser.Node node, RejectionTracker rejections) {
-        if (node == null || values.containsKey(node.normalizedKey)) return;
+        if (node == null) return;
+        String key;
+        try {
+            key = ProtocolParser.importKey(node);
+        } catch (Exception invalid) {
+            rejections.reject(reasonCode(invalid));
+            return;
+        }
+        if (values.containsKey(key)) return;
         if (values.size() >= MAX_SOURCE_NODES) {
             rejections.rejectLimit(1);
             return;
         }
-        values.put(node.normalizedKey, node);
+        values.put(key, node);
     }
 
     private static boolean containsKnownLink(String value) {
@@ -344,19 +352,30 @@ final class SubscriptionParser {
                 }
             } else {
                 JSONArray values = (JSONArray) root;
+                List<JSONObject> pools = new ArrayList<>();
                 for (int i = 0; i < values.length(); i++) {
                     if ((i & 1023) == 0 && Thread.currentThread().isInterrupted()) {
                         throw new ImportInterruptedException();
                     }
                     JSONObject object = values.optJSONObject(i);
                     if (object != null && object.has("outbounds")) {
-                        collectProfileOutbounds(object, nodes, rejections, budget);
+                        if (proxyOutboundCount(object.optJSONArray("outbounds")) > 1) {
+                            pools.add(object);
+                        } else {
+                            collectProfileOutbounds(object, nodes, rejections, budget);
+                        }
                     } else if (object != null && isProxyOutbound(object)) {
                         collectExplicitOutbound(object, nodes, rejections, budget);
                     } else if (values.opt(i) instanceof String
                             || values.opt(i) instanceof JSONArray) {
                         walkJsonLinks(values.opt(i), links, 0, false, budget);
                     }
+                }
+                // A panel may list a pool first and repeat its members as
+                // named standalone profiles. Prefer those names, then import
+                // any pool-only members without pretending each is a balancer.
+                for (JSONObject pool : pools) {
+                    collectProfileOutbounds(pool, nodes, rejections, budget);
                 }
             }
         } catch (StackOverflowError tooDeep) {
@@ -389,21 +408,40 @@ final class SubscriptionParser {
         // explicit proxy outbounds become servers; none of that surrounding
         // configuration is installed into the local core.
         collectExplicitOutbounds((JSONArray) rawOutbounds,
-                xrayDisplayName(profile), nodes, rejections, budget);
+                proxyOutboundCount((JSONArray) rawOutbounds) == 1
+                        ? xrayDisplayName(profile) : "", nodes, rejections, budget);
+    }
+
+    private static int proxyOutboundCount(JSONArray values) {
+        int count = 0;
+        for (int i = 0; values != null && i < values.length(); i++) {
+            if ((i & 1023) == 0 && Thread.currentThread().isInterrupted()) {
+                throw new ImportInterruptedException();
+            }
+            if (isProxyOutbound(values.optJSONObject(i))) count++;
+        }
+        return count;
     }
 
     private static void collectExplicitOutbounds(JSONArray values, String profileName,
                                                  List<ProtocolParser.Node> nodes,
                                                  RejectionTracker rejections,
                                                  CandidateBudget budget) {
+        int proxyIndex = 0;
         for (int i = 0; i < values.length(); i++) {
             if ((i & 1023) == 0 && Thread.currentThread().isInterrupted()) {
                 throw new ImportInterruptedException();
             }
             JSONObject object = values.optJSONObject(i);
             if (object == null || !isProxyOutbound(object)) continue;
-            collectExplicitOutbound(object, profileName.isEmpty()
-                    ? xrayDisplayName(object) : profileName, nodes, rejections, budget);
+            proxyIndex++;
+            String name = profileName.isEmpty() ? xrayDisplayName(object) : profileName;
+            if (name.isEmpty() || (profileName.isEmpty()
+                    && name.equals(object.optString("tag", ""))
+                    && name.matches("(?i)(proxy|outbound)([-_]?\\d+)?"))) {
+                name = I18n.format("Сервер %s", "Server %s", proxyIndex);
+            }
+            collectExplicitOutbound(object, name, nodes, rejections, budget);
         }
     }
 

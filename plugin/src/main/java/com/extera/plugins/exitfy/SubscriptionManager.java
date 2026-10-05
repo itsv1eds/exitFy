@@ -263,11 +263,19 @@ final class SubscriptionManager implements Closeable {
                     long oldUpdatedAt = source.optLong("updatedAt", 0L);
                     JSONArray oldNodes = source.optJSONArray("nodes");
                     String oldCustomTitle = customTitleLocked(url);
+                    String providerKey = String.valueOf(boundedProvider(providerId));
+                    JSONObject selections = data.getJSONObject("activeKeys");
+                    String oldSelection = selections.optString(providerKey, "");
+                    String nextSelection = refreshedSelectionKey(
+                            oldSelection, oldNodes, fetched.nodes);
                     JSONObject mutationOwner = data;
                     try {
                         source.put("title", fetched.title);
                         source.put("updatedAt", System.currentTimeMillis());
                         source.put("nodes", storeNodes(fetched.nodes));
+                        if (!oldSelection.equals(nextSelection)) {
+                            selections.put(providerKey, nextSelection);
+                        }
                         if (boundedProvider(providerId) == CUSTOM_PROVIDER_ID) {
                             updateCustomTitleLocked(url, fetched.title);
                         }
@@ -290,6 +298,9 @@ final class SubscriptionManager implements Closeable {
                         if (data == mutationOwner) {
                             source.put("title", oldTitle).put("updatedAt", oldUpdatedAt)
                                     .put("nodes", oldNodes == null ? new JSONArray() : oldNodes);
+                            if (!oldSelection.equals(nextSelection)) {
+                                selections.put(providerKey, oldSelection);
+                            }
                             if (boundedProvider(providerId) == CUSTOM_PROVIDER_ID) {
                                 updateCustomTitleLocked(url, oldCustomTitle);
                             }
@@ -343,6 +354,28 @@ final class SubscriptionManager implements Closeable {
                 || (cancellation != null && cancellation.cancelled())
                 || (absoluteDeadlineNanos != Long.MAX_VALUE
                 && System.nanoTime() >= absoluteDeadlineNanos);
+    }
+
+    private static String refreshedSelectionKey(String selectedKey, JSONArray previous,
+                                                List<ProtocolParser.Node> refreshed)
+            throws Exception {
+        if (selectedKey.isEmpty()) return selectedKey;
+        for (ProtocolParser.Node node : refreshed) {
+            if (selectedKey.equals(node.normalizedKey)) return selectedKey;
+        }
+        for (int i = 0; previous != null && i < previous.length(); i++) {
+            JSONObject stored = previous.optJSONObject(i);
+            if (stored == null || !selectedKey.equals(stored.optString("normalizedKey", ""))) {
+                continue;
+            }
+            ProtocolParser.Node oldNode = ProtocolParser.fromStoredJson(stored);
+            if (!selectedKey.equals(oldNode.normalizedKey)) continue;
+            String identity = ProtocolParser.importKey(oldNode);
+            for (ProtocolParser.Node node : refreshed) {
+                if (identity.equals(ProtocolParser.importKey(node))) return node.normalizedKey;
+            }
+        }
+        return selectedKey;
     }
 
     private static void ensureRefreshActive(long absoluteDeadlineNanos,

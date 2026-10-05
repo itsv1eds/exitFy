@@ -3,6 +3,8 @@ package com.extera.plugins.exitfy;
 import org.json.JSONObject;
 import org.junit.Test;
 
+import static org.junit.Assert.assertNotEquals;
+
 import java.io.File;
 import java.math.BigInteger;
 import java.lang.reflect.Method;
@@ -1780,6 +1782,24 @@ public class RuntimeModelsTest {
     }
 
     @Test
+    public void retaggingAPoolMemberDoesNotReconnectTheSameNativeServer() throws Exception {
+        JSONObject source = new JSONObject().put("protocol", "vless").put("tag", "proxy-2")
+                .put("settings", new JSONObject().put("vnext", new org.json.JSONArray()
+                        .put(new JSONObject().put("address", "selected.example").put("port", 443)
+                                .put("users", new org.json.JSONArray().put(new JSONObject()
+                                        .put("id", "11111111-1111-1111-1111-111111111111")
+                                        .put("encryption", "none"))))));
+        ProtocolParser.Node before = ProtocolParser.fromXrayOutbound("", "Pool member", source);
+        ProtocolParser.Node named = ProtocolParser.fromXrayOutbound("", "Standalone",
+                new JSONObject(source.toString()).put("tag", "proxy"));
+        assertNotEquals(before.normalizedKey, named.normalizedKey);
+        assertFalse(RuntimePolicy.activeConfigurationChanged(before, named));
+        source.getJSONObject("settings").getJSONArray("vnext").getJSONObject(0).put("port", 8443);
+        assertTrue(RuntimePolicy.activeConfigurationChanged(before,
+                ProtocolParser.fromXrayOutbound("", "Different endpoint", source)));
+    }
+
+    @Test
     public void failoverMovesToTheNextServerAndWrapsAround() throws Exception {
         String base = "vless://33333333-3333-3333-3333-333333333333@edge.example:443"
                 + "?security=tls&sni=edge.example";
@@ -1812,11 +1832,14 @@ public class RuntimeModelsTest {
     }
 
     @Test
-    public void failoverAndTheCoreExperimentAreOffUntilAskedFor() {
-        // Switching servers changes the exit country under the user, and the
-        // second core maps a runtime that cannot be unmapped.
+    public void dualCoreDefaultsOnWhileExplicitOffAndFailoverRemainOff() {
         assertFalse(SettingsModel.defaults().failover);
-        assertFalse(SettingsModel.defaults().dualCore);
+        assertTrue(SettingsModel.defaults().dualCore);
+        assertTrue(SettingsModel.fromJson("{}").dualCore);
+        assertFalse(SettingsModel.fromJson("{\"dual_core\":false}").dualCore);
+        SettingsModel disabled = SettingsModel.defaults().withSetting("dual_core", false);
+        assertFalse(SettingsModel.fromJson(disabled.toJson().toString()).dualCore);
+        assertFalse(disabled.withSetting("refresh_on_open", true).dualCore);
         assertFalse(SettingsModel.fromJson("{}").failover);
         assertFalse(SettingsModel.fromJson("{\"failover\":\"yes\"}").failover);
         assertTrue(SettingsModel.fromJson("{\"failover\":true}").failover);

@@ -29,6 +29,13 @@ Device testing is performed by the beta tester after receiving
   rejected before any exitFy runtime file is created. These negative cases may
   be covered by the local tests when matching physical hardware is unavailable.
 
+- Refresh a source with an auto-selection profile followed by the same named
+  servers: pool members must not repeat the auto-selection title or duplicate
+  standalone servers. A pool-only endpoint must remain available. Selecting
+  an old pool alias before refresh must retain that endpoint afterward.
+- With no saved `dual_core` value, two-core support must start enabled. An
+  explicit saved off value must survive restarts and changes to other settings.
+
 ## Dashboard and direct settings entry
 
 - Confirm both drawer and chat-action entries open the compact exitFy dashboard

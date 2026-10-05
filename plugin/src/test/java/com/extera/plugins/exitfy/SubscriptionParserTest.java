@@ -4,6 +4,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 
+import static org.junit.Assert.assertNotEquals;
+
 import java.nio.charset.StandardCharsets;
 import java.io.ByteArrayOutputStream;
 import java.security.MessageDigest;
@@ -329,6 +331,49 @@ public class SubscriptionParserTest {
         assertFalse(imported.has("inbounds"));
         assertFalse(imported.has("dns"));
         assertFalse(imported.has("routing"));
+    }
+
+    @Test
+    public void poolMembersUseStandaloneNamesInsteadOfRepeatingTheAutoSelectionTitle()
+            throws Exception {
+        JSONObject first = xrayVnext("vless", "alpha.example",
+                "11111111-1111-1111-1111-111111111111", "none").put("tag", "proxy-2");
+        JSONObject second = xrayVnext("vless", "bravo.example",
+                "22222222-2222-2222-2222-222222222222", "none").put("tag", "proxy-3");
+        JSONObject pool = new JSONObject().put("remarks", "Auto selection")
+                .put("routing", new JSONObject().put("balancers", new JSONArray()
+                        .put(new JSONObject().put("tag", "AUTO"))))
+                .put("outbounds", new JSONArray().put(first).put(second));
+        JSONObject alpha = new JSONObject().put("remarks", "Alpha")
+                .put("outbounds", new JSONArray()
+                        .put(new JSONObject(first.toString()).put("tag", "proxy")));
+        JSONObject bravo = new JSONObject().put("remarks", "Bravo")
+                .put("outbounds", new JSONArray()
+                        .put(new JSONObject(second.toString()).put("tag", "proxy")));
+        SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(
+                new JSONArray().put(pool).put(alpha).put(bravo).toString());
+        assertEquals(2, parsed.nodes.size());
+        assertEquals(0, parsed.rejected);
+        assertEquals("Alpha", parsed.nodes.get(0).name);
+        assertEquals("Bravo", parsed.nodes.get(1).name);
+    }
+
+    @Test
+    public void poolOnlyMembersRemainAvailableAndDifferentTransportsAreNotDeduplicated()
+            throws Exception {
+        JSONObject first = xrayVnext("vless", "pool.example",
+                "33333333-3333-3333-3333-333333333333", "none").put("tag", "proxy");
+        JSONObject second = new JSONObject(first.toString()).put("tag", "proxy-2")
+                .put("streamSettings", new JSONObject().put("network", "ws")
+                        .put("wsSettings", new JSONObject().put("path", "/different")));
+        SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(
+                new JSONArray().put(new JSONObject().put("remarks", "Auto selection")
+                        .put("outbounds", new JSONArray().put(first).put(second))).toString());
+        assertEquals(2, parsed.nodes.size());
+        assertEquals(I18n.format("Сервер %s", "Server %s", 1), parsed.nodes.get(0).name);
+        assertEquals(I18n.format("Сервер %s", "Server %s", 2), parsed.nodes.get(1).name);
+        assertNotEquals(ProtocolParser.importKey(parsed.nodes.get(0)),
+                ProtocolParser.importKey(parsed.nodes.get(1)));
     }
 
     @Test

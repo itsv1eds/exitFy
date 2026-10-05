@@ -284,6 +284,16 @@ final class ProtocolParser {
         return node;
     }
 
+    static String importKey(Node node) throws Exception {
+        // The renderer replaces an outbound's tag with its local routing tag.
+        // A pool member and a standalone profile can therefore run identical
+        // settings despite different source tags. Keep stored selection keys
+        // unchanged; this equivalence is only used while importing a source.
+        return node.xrayOutbound == null ? node.normalizedKey
+                : "xray:" + sha256(canonical(
+                XrayNativeOutbound.runtimeOutbound(node.xrayOutbound, "proxy")));
+    }
+
     static JSONObject buildConfig(Node node, int localPort, String username, String password) throws Exception {
         if (node == null) throw new IllegalArgumentException("node is missing");
         validateNeutralOutbound(node.outbound);

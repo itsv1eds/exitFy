@@ -112,7 +112,7 @@ Device/HWID headers are sent only to the URL the user/provider configured, never
 
 ### Cores at runtime
 
-Selection is adaptive and automatic. The dashboard never names an engine. One Go family may be mapped per process unless the `dual_core` experiment is on (mapping the second family is process-lifetime; turning it off needs an exteraGram restart). `calls_via_proxy` also needs a restart.
+Selection is adaptive and automatic. The dashboard never names an engine. One Go family may be mapped per process unless the `dual_core` experiment is on (the default) (mapping the second family is process-lifetime; turning it off needs an exteraGram restart). `calls_via_proxy` also needs a restart.
 
 TCP ping is the default: it does not steal Telegram's proxy. Proxy GET is the full-path check. Scheduled auto-check is always TCP. `failover` is stored-off; the build must keep it gated by the setting.
 

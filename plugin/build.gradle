@@ -1756,8 +1756,8 @@ tasks.register("verifyFailoverStaysOptIn") {
             throw new GradleException("Stored failover must default to off")
         }
         if (!settingsText.contains(
-                "this(enabled, providerId, customHwid, schemaVersion, pingType, false, false);")) {
-            throw new GradleException("Settings built without the flags must leave them off")
+                "this(enabled, providerId, customHwid, schemaVersion, pingType, true, false);")) {
+            throw new GradleException("Default settings must enable dual core and leave failover off")
         }
         String coordinatorText = coordinatorFile.text
         if (!coordinatorText.contains("if (!settings.failover")) {

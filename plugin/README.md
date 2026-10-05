@@ -21,6 +21,12 @@ reappears under whichever provider now owns that index.
 Happ subscriptions containing an array of full Xray profiles are imported from
 each profile's proxy outbounds, with the profile title and transport options
 preserved. Inbounds, DNS and routing from a subscription are not installed.
+A pool is imported after standalone profiles: identical native outbounds
+with different routing tags are listed once under their standalone server
+names. Members available only in a pool remain selectable. The pool's title
+is not assigned to every member. Refreshing an old pool alias preserves its
+selected endpoint without reconnecting when its running settings are unchanged.
+
 This covers clean installs in exteraGram and AyuGram, including
 `org.telegram.messenger` and `org.telegram.messenger.web`; cached servers are
 not required. Failed refreshes retain the last working list and show the cause.
@@ -133,7 +139,7 @@ build refuses a version of it that is not gated by the setting.
 Component versions are reported by the `core_versions` command and shown under
 Advanced. The dashboard still never names an engine.
 
-The `dual_core` setting, off by default and offered as an experiment under
+The `dual_core` setting, on by default and offered as an experiment under
 Advanced, lifts that restriction: the JNI bridge holds one slot per family and
 maps the second on demand, so a server the mapped family cannot run no longer
 waits for a restart. Only one core ever runs — the running one is stopped

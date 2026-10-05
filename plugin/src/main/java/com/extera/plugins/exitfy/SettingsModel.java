@@ -32,7 +32,7 @@ final class SettingsModel {
 
     SettingsModel(boolean enabled, int providerId, String customHwid,
                   int schemaVersion, String pingType) {
-        this(enabled, providerId, customHwid, schemaVersion, pingType, false, false);
+        this(enabled, providerId, customHwid, schemaVersion, pingType, true, false);
     }
 
     SettingsModel(boolean enabled, int providerId, String customHwid,
@@ -87,7 +87,7 @@ final class SettingsModel {
                     object.optString("custom_hwid", ""),
                     object.optInt("schema_version", 6),
                     object.optString("ping_type", PING_TCP),
-                    object.optBoolean("dual_core", false),
+                    object.optBoolean("dual_core", true),
                     object.optBoolean("failover", false),
                     object.optBoolean("refresh_on_open", false),
                     object.optInt("auto_check_minutes", 0),

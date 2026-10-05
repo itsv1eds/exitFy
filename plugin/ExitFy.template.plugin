@@ -500,7 +500,7 @@ class ExitFyPlugin(BasePlugin):
             "ping_type": self._ping_type_value(),
             "schema_version": SETTINGS_SCHEMA,
             "failover": self._as_bool(self.get_setting("failover", False)),
-            "dual_core": self._as_bool(self.get_setting("dual_core", False)),
+            "dual_core": self._as_bool(self.get_setting("dual_core", True)),
             "refresh_on_open": self._as_bool(
                 self.get_setting("refresh_on_open", False)
             ),

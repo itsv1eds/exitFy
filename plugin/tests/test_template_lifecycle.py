@@ -234,17 +234,25 @@ class TemplateLifecycleTest(unittest.TestCase):
         self.assertEqual("proxy_get", values["ping_type"])
         self.assertEqual("Happ/1.63.1", values["subscription_user_agent"])
 
-    def test_unset_settings_default_to_off_and_tcp(self):
+    def test_unset_settings_default_to_dual_core_and_tcp(self):
         plugin_type, *_ = load_plugin_class()
         values = plugin_type()._settings_dict()
 
         self.assertEqual("tcp", values["ping_type"])
         self.assertFalse(values["failover"])
-        self.assertFalse(values["dual_core"])
+        self.assertTrue(values["dual_core"])
         self.assertFalse(values["refresh_on_open"])
         self.assertEqual(0, values["auto_check_minutes"])
         self.assertFalse(values["calls_via_proxy"])
         self.assertEqual("", values["subscription_user_agent"])
+
+    def test_explicit_dual_core_off_survives_other_setting_changes(self):
+        plugin_type, *_ = load_plugin_class()
+        plugin = plugin_type()
+        plugin.settings["dual_core"] = False
+        self.assertFalse(plugin._settings_dict()["dual_core"])
+        plugin.settings["refresh_on_open"] = True
+        self.assertFalse(plugin._settings_dict()["dual_core"])
 
     def test_an_unoffered_check_period_is_treated_as_off(self):
         plugin_type, *_ = load_plugin_class()
