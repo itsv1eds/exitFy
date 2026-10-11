@@ -13,6 +13,7 @@ from verify_singbox_artifacts import PREFIX, verify
 
 BUILD_TAGS = ["badlinkname", "tfogo_checklinkname0", "with_quic", "with_utls"]
 NDK_VERSION = "27.2.12479018"
+AWG_WRAPPER_REVISION_FLOOR = 1_000_000
 
 
 def sha256(path: Path) -> str:
@@ -40,8 +41,8 @@ def main() -> None:
     release_match = re.fullmatch(
         rf"sb-{re.escape(args.upstream_tag)}-w([1-9][0-9]*)", args.release_tag
     )
-    if release_match is None or int(release_match.group(1)) < 2:
-        raise ValueError("ABI 2 release tag must use wrapper revision w2 or newer")
+    if release_match is None or int(release_match.group(1)) < AWG_WRAPPER_REVISION_FLOOR:
+        raise ValueError("AWG releases require the reserved wrapper revision range")
     if not re.fullmatch(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?", args.go_version):
         raise ValueError("invalid upstream Go version")
     for label, value in (
@@ -72,7 +73,6 @@ def main() -> None:
         "schema": 3,
         "coreApi": 2,
         "configContract": 1,
-        "capabilities": ["amneziawg"],
         "family": "sing_box",
         "releaseTag": args.release_tag,
         "upstream": {

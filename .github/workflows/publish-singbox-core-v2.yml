@@ -58,7 +58,9 @@ jobs:
       # a monotonic reservation band so a stale draft from an earlier commit
       # cannot capture the candidate tag.  Bump this epoch if this workflow's
       # run-number counter is ever reset.
-      WRAPPER_REVISION_EPOCH: "1000"
+      # This signed revision range declares AWG support without adding fields
+      # to schema 3, which older plugin versions validate exactly.
+      WRAPPER_REVISION_EPOCH: "1000000"
     defaults:
       run:
         working-directory: cores

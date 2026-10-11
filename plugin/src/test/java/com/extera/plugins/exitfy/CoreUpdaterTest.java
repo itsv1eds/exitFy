@@ -36,6 +36,37 @@ import static org.junit.Assert.assertTrue;
 
 public class CoreUpdaterTest {
     @Test
+    public void signedAwgRevisionDownloadsWithTheExistingManifestSchema() throws Exception {
+        java.security.KeyPairGenerator generator = java.security.KeyPairGenerator.getInstance("EC");
+        generator.initialize(new java.security.spec.ECGenParameterSpec("secp256r1"));
+        java.security.KeyPair pair = generator.generateKeyPair();
+        String publicKey = java.util.Base64.getEncoder().encodeToString(pair.getPublic().getEncoded());
+        for (int revision : new int[]{999999, 1000001}) {
+            File root = Files.createTempDirectory("exitfy-awg-signed-revision").toFile();
+            byte[] core = fakeCore((byte) 74);
+            try (LimitedHttpClient http = new LimitedHttpClient();
+                 CoreServer server = new CoreServer(core, CoreFamily.SING_BOX, (release, manifest) -> {
+                     String tag = "sb-v1.13.14-w" + revision;
+                     release.put("tag_name", tag);
+                     manifest.put("releaseTag", tag);
+                     assertEquals(10, manifest.length());
+                     assertFalse(manifest.has("capabilities"));
+                 }).sign(pair.getPrivate())) {
+                CoreUpdater updater = new CoreUpdater(new AtomicStore(root), http, "arm64-v8a",
+                        CoreFamily.SING_BOX, server.baseUrl() + "/releases");
+                updater.useManifestPublicKey(publicKey);
+                updater.requireAwgSupport(true);
+                assertTrue(updater.checkForUpdate(true));
+                assertEquals(revision >= 1000000, updater.hasUsableCore());
+                assertEquals(revision >= 1000000, updater.supportsAwgDigest(sha256(core)));
+                updater.requireAwgSupport(false);
+                assertTrue(updater.hasUsableCore());
+                assertArrayEquals(core, Files.readAllBytes(updater.prepareForFirstLoad().toPath()));
+            } finally { TestFiles.deleteRecursively(root); }
+        }
+    }
+
+    @Test
     public void awgCapabilityIsBoundToAnInstalledDigestAndDoesNotDisableOtherProtocols() throws Exception {
         File root = Files.createTempDirectory("exitfy-awg-capability").toFile();
         LimitedHttpClient http = new LimitedHttpClient();

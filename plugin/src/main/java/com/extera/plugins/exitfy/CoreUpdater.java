@@ -42,6 +42,7 @@ class CoreUpdater {
     private static final int CORE_API = 2;
     private static final int CONFIG_CONTRACT = 1;
     private static final int MANIFEST_SCHEMA = 3;
+    private static final int AWG_WRAPPER_REVISION_FLOOR = 1_000_000;
     private static final int MIN_ANDROID_API = 29;
     private static final String ANDROID_ABI = "arm64-v8a";
     private static final String CORE_ORIGIN = "itsv1eds/exitFy";
@@ -337,9 +338,9 @@ class CoreUpdater {
         }
 
         String selectedVersion = release.optString("tag_name", family.id);
-        JSONArray capabilities = manifest.optJSONArray("capabilities");
-        boolean supportsAwg = family == CoreFamily.SING_BOX && capabilities != null
-                && containsCapability(capabilities, "amneziawg");
+        ReleaseVersion verifiedRelease = ReleaseVersion.parse(selectedVersion, family);
+        boolean supportsAwg = family == CoreFamily.SING_BOX && verifiedRelease != null
+                && verifiedRelease.wrapper >= AWG_WRAPPER_REVISION_FLOOR;
         boolean shouldDownload = withInspectedState(state -> {
             repairOwnedInvalidVersions(selectedVersion, expectedDigest, state);
             if (isRejectedCurrentContract()
@@ -1954,11 +1955,6 @@ class CoreUpdater {
                 (activeSupported && !rollbackRequested)
                         || pendingSupported
                         || (rollbackRequested && backupSupported));
-    }
-
-    private static boolean containsCapability(JSONArray values, String name) {
-        for (int i=0; i<values.length(); i++) if (name.equals(values.optString(i, ""))) return true;
-        return false;
     }
 
     private void rememberAwgDigest(String digest, boolean supported) throws Exception {

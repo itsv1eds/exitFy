@@ -87,12 +87,7 @@ def verify_remote_release(
     if release.get("target_commitish") != wrapper_commit:
         raise ValueError("release target commit is stale")
 
-    allowed_top = TOP_LEVEL
-    if family == "sing_box" and isinstance(manifest, dict) and "capabilities" in manifest:
-        allowed_top = TOP_LEVEL | {"capabilities"}
-    manifest = _exact_keys(manifest, allowed_top, "manifest")
-    if "capabilities" in manifest and manifest["capabilities"] != ["amneziawg"]:
-        raise ValueError("unsupported SB capabilities")
+    manifest = _exact_keys(manifest, TOP_LEVEL, "manifest")
     if (
         manifest.get("schema") != 3
         or manifest.get("coreApi") != 2

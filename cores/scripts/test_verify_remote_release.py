@@ -129,23 +129,22 @@ class RemoteReleaseTest(unittest.TestCase):
                 release, manifest, raw = fixture(family)
                 verify_remote_release(release, manifest, raw, family, UPSTREAM, WRAPPER)
 
-    def test_awg_capability_accepts_only_the_supported_singbox_contract(self) -> None:
-        for family, capabilities, accepted in (
-            ("sing_box", ["amneziawg"], True),
-            ("sing_box", ["amneziawg", "unknown"], False),
-            ("sing_box", "amneziawg", False),
-            ("sing_box", [], False),
-            ("xray", ["amneziawg"], False),
-        ):
-            with self.subTest(family=family, capabilities=capabilities):
+    def test_awg_revision_keeps_the_schema_accepted_by_older_clients(self) -> None:
+        for extra_field in (False, True):
+            with self.subTest(extra_field=extra_field):
+                family = "sing_box"
                 release, manifest, _ = fixture(family)
-                manifest["capabilities"] = capabilities
+                tag = "sb-v1.13.14-w1000001"
+                release["tag_name"] = tag
+                manifest["releaseTag"] = tag
+                if extra_field:
+                    manifest["capabilities"] = ["amneziawg"]
                 raw = (json.dumps(manifest, sort_keys=True) + "\n").encode()
                 asset(release, "manifest.json").update({
                     "size": len(raw),
                     "digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
                 })
-                if accepted:
+                if not extra_field:
                     verify_remote_release(release, manifest, raw, family, UPSTREAM, WRAPPER)
                 else:
                     with self.assertRaises(ValueError):

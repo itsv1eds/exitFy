@@ -7,14 +7,14 @@ import json
 import re
 from pathlib import Path
 
-from generate_singbox_manifest import BUILD_TAGS, NDK_VERSION
+from generate_singbox_manifest import AWG_WRAPPER_REVISION_FLOOR, BUILD_TAGS, NDK_VERSION
 from verify_artifacts import ABI_LAYOUT, REQUIRED_EXPORTS, inspect_elf
 from verify_singbox_artifacts import PREFIX, verify
 
 
 TOP_LEVEL_KEYS = {
     "schema", "coreApi", "configContract", "family", "releaseTag",
-    "upstream", "wrapper", "minAndroidApi", "requiredExports", "assets", "capabilities",
+    "upstream", "wrapper", "minAndroidApi", "requiredExports", "assets",
 }
 
 
@@ -41,7 +41,6 @@ def main() -> None:
         value.get("schema") != 3
         or value.get("coreApi") != 2
         or value.get("configContract") != 1
-        or value.get("capabilities") != ["amneziawg"]
         or value.get("family") != "sing_box"
         or value.get("minAndroidApi") != 29
         or set(value.get("requiredExports", [])) != REQUIRED_EXPORTS
@@ -52,6 +51,9 @@ def main() -> None:
     wrapper = value.get("wrapper") or {}
     source = wrapper.get("sourceBundle") or {}
     release_tag = value.get("releaseTag", "")
+    revision = re.fullmatch(r"sb-v[0-9]+\.[0-9]+\.[0-9]+-w([1-9][0-9]*)", release_tag)
+    if revision is None or int(revision.group(1)) < AWG_WRAPPER_REVISION_FLOOR:
+        raise ValueError("SB manifest does not identify an AWG-capable wrapper")
     upstream_tag = upstream.get("tag", "")
     if (
         upstream.get("repository") != "SagerNet/sing-box"
