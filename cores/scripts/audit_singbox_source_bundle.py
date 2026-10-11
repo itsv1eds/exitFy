@@ -116,19 +116,25 @@ class AllowedBinary:
     sha256: str
 
 
-# These are the only non-UTF-8 files in the pinned golang.org/x/net v0.50.0
-# vendor tree. The reviewed module ZIP reproduces the exact go.sum checksum
-# h1:ucWh9eiCGyDR3vtzso0WMQinm2Dnt8cFMuQa9K33J60=.
+# Reviewed embedded data from golang.org/x/net v0.57.0 and protobuf v1.36.11.
+# The module ZIPs reproduce the exact pinned go.sum checksums:
+# h1:K5+3DljvIuDG9/Jv9rvyMywYNFCQ9RSUY6OOTTkT+tE= and
+# h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBNVE=.
 ALLOWED_BINARY_FILES = {
     PurePosixPath("singbox/vendor/golang.org/x/net/publicsuffix/data/children"):
         AllowedBinary(
-            3484,
-            "bda2852d2be3d2187bcb45acedf9973af4ceeead7cec45dfd22f17424f746b9d",
+            3744,
+            "761402a681757153843a161c71955577e76a5ef96abc1a845d20a9a96304bfb7",
         ),
     PurePosixPath("singbox/vendor/golang.org/x/net/publicsuffix/data/nodes"):
         AllowedBinary(
-            50500,
-            "4291647663383213ccefb726abacf571c5d76904ee939e0e3feb41898bb43102",
+            52665,
+            "47ed63d4f3763b7e4515345e1f06054d3bff97c6175a6f53466218e633a0b9cb",
+        ),
+    PurePosixPath("singbox/vendor/google.golang.org/protobuf/internal/editiondefaults/editions_defaults.binpb"):
+        AllowedBinary(
+            154,
+            "c79ef4d8baed55566a8c8c9b18d25e96aee124020ca8e1913058ac491a63c6ed",
         ),
 }
 SYSTEM_ROOT_ALIASES = {
@@ -1209,9 +1215,9 @@ def validate_reproducible_metadata(
         if member.type != tarfile.REGTYPE or member.mode not in {0o644, 0o755}:
             failures.append(f"noncanonical archive file metadata: {member.name}")
 
+    expected_path = member.name + "/" if member.isdir() else member.name
     try:
-        member.name.encode("ascii", "strict")
-        path_needs_pax = len(member.name) > tarfile.LENGTH_NAME
+        path_needs_pax = len(expected_path.encode("ascii", "strict")) > tarfile.LENGTH_NAME
     except UnicodeEncodeError:
         path_needs_pax = True
     expected_keys = {"path"} if path_needs_pax else set()
@@ -1219,7 +1225,6 @@ def validate_reproducible_metadata(
     if actual_keys != expected_keys:
         failures.append(f"noncanonical archive PAX metadata: {member.name}")
     if "path" in member.pax_headers:
-        expected_path = member.name + "/" if member.isdir() else member.name
         if member.pax_headers["path"] != expected_path:
             failures.append(f"noncanonical archive PAX path: {member.name}")
 

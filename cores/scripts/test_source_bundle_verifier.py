@@ -158,6 +158,30 @@ class SourceBundleVerifierTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Git LFS pointer is forbidden"):
             verifier.audit_bundle(bundle)
 
+    def test_directory_pax_boundary_includes_the_trailing_slash(self) -> None:
+        for length in (99, 100, 101):
+            with self.subTest(directory_name_length=length):
+                directory = "root/" + "d" * (length - len("root/"))
+                bundle = self.directory / f"directory-boundary-{length}.tar.gz"
+                write_bundle(bundle, canonical_file_entries({directory + "/file.go": b"package example\n"}))
+                self.assertEqual(1, verifier.audit_bundle(bundle))
+
+    def test_protobuf_embedded_defaults_remain_digest_pinned(self) -> None:
+        relative = PurePosixPath(
+            "singbox/vendor/google.golang.org/protobuf/internal/editiondefaults/editions_defaults.binpb"
+        )
+        self.assertEqual(
+            verifier.AllowedBinary(
+                154,
+                "c79ef4d8baed55566a8c8c9b18d25e96aee124020ca8e1913058ac491a63c6ed",
+            ),
+            verifier.ALLOWED_BINARY_FILES[relative],
+        )
+        bundle = self.directory / "tampered-edition-defaults.tar.gz"
+        write_bundle(bundle, canonical_file_entries({"root/" + str(relative): b"\0" * 154}))
+        with self.assertRaisesRegex(ValueError, "reviewed size and digest"):
+            verifier.audit_bundle(bundle)
+
     def test_streams_members_with_a_hard_count_bound(self) -> None:
         long_name = "root/" + "a" * 101
         valid = self.directory / "valid.tar.gz"
@@ -947,7 +971,7 @@ class SourceBundleVerifierTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "member padding"):
             verifier.audit_bundle(hidden_padding_path)
 
-    def test_enforces_text_policy_with_two_exact_binary_exceptions(self) -> None:
+    def test_enforces_text_policy_with_exact_reviewed_binary_exceptions(self) -> None:
         children = (
             "root/singbox/vendor/golang.org/x/net/publicsuffix/data/children"
         )
@@ -967,8 +991,8 @@ class SourceBundleVerifierTest(unittest.TestCase):
 
         self.assertEqual(
             verifier.AllowedBinary(
-                3484,
-                "bda2852d2be3d2187bcb45acedf9973af4ceeead7cec45dfd22f17424f746b9d",
+                3744,
+                "761402a681757153843a161c71955577e76a5ef96abc1a845d20a9a96304bfb7",
             ),
             verifier.ALLOWED_BINARY_FILES[
                 PurePosixPath(
@@ -978,8 +1002,8 @@ class SourceBundleVerifierTest(unittest.TestCase):
         )
         self.assertEqual(
             verifier.AllowedBinary(
-                50500,
-                "4291647663383213ccefb726abacf571c5d76904ee939e0e3feb41898bb43102",
+                52665,
+                "47ed63d4f3763b7e4515345e1f06054d3bff97c6175a6f53466218e633a0b9cb",
             ),
             verifier.ALLOWED_BINARY_FILES[
                 PurePosixPath(
