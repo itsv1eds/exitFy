@@ -13,6 +13,8 @@ Xray-core revision and other dependencies.
 The produced exitFy SB libraries include code from:
 
 - SagerNet/sing-box: https://github.com/SagerNet/sing-box
+- AmneziaWG Go: https://github.com/amnezia-vpn/amneziawg-go (MIT;
+  WireGuard-derived, notice in `singbox/LICENSE.amneziawg-go`)
 - the exact Go module graph recorded in `singbox/go.mod` and `singbox/go.sum`
 
 The combined SB shared libraries are distributed under GPL-3.0-or-later.

@@ -102,17 +102,21 @@ Runtime lives in `plugin/src/main/java/com/extera/plugins/exitfy`. The Python fi
 - ActionBar is back-only. No about overflow, version in the bar, clipboard import, or Telegram-proxy shortcut there.
 - Settings changes (`set_setting`) derive and publish the **complete** `SettingsModel` under one lock. Rebuilding with a short constructor silently drops sibling fields — use the full constructor / `copy(...)`.
 - Strings that users see go through `I18n.t("Русский", "English")`.
-- Advanced settings include ping type, HWID, **User-Agent**, refresh-on-open, scheduled TCP checks, call relay experiment, failover, component versions, dual-core experiment.
+- Advanced settings include ping type, HWID, **User-Agent**, refresh-on-open, scheduled TCP checks, call relay experiment, failover, component versions, dual-core experiment, balancer mode and tutorial replay. `sort_by_ping` orders the full filtered server list before pagination. `tutorial_step` persists progress against the actual step count.
 
 ### Subscriptions
 
-Default User-Agent list is `Happ/5.2.0`, then Legacy `v2rayN/6.23`, then `clash-verge/1.0` if an answer fails or has no usable nodes. A non-empty `subscription_user_agent` setting **replaces** that list (no fallback). Changing UA does not reconnect; the next subscription refresh uses it.
+The single default User-Agent is `Happ/5.2.0`. A non-empty `subscription_user_agent` setting **replaces** it. Do not retry a source under another client identity. Changing UA does not reconnect; the next subscription refresh uses it.
 
 Device/HWID headers are sent only to the URL the user/provider configured, never to rewritten mirrors or cross-origin redirects.
 
 ### Cores at runtime
 
 Selection is adaptive and automatic. The dashboard never names an engine. One Go family may be mapped per process unless the `dual_core` experiment is on (the default) (mapping the second family is process-lifetime; turning it off needs an exteraGram restart). `calls_via_proxy` also needs a restart.
+
+AmneziaWG imports `.conf` into a private neutral outbound and runs inside exitFy SB using the official userspace implementation. Its signed manifest must declare `amneziawg`; old mapped SB builds require a restart after installing a capable build. No extra Go family or native ABI is added. Balancers use Xray round-robin/least-ping routing and the synchronized burst observer; SB-only members are authenticated loopback hops through one side SB instance. Stop both instances before full-path probes and on unload.
+
+Local port preferences are stored privately. Never infer ownership from a loopback address or port; only exact session markers and credentials establish ownership. Exclude foreign stored/current proxy ports and always reserve 12334 and 10808.
 
 TCP ping is the default: it does not steal Telegram's proxy. Proxy GET is the full-path check. Scheduled auto-check is always TCP. `failover` is stored-off; the build must keep it gated by the setting.
 

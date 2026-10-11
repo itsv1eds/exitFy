@@ -42,11 +42,11 @@ The SB adapter uses an embedded deprecation manager rather than sing-box's CLI
 stderr manager: upstream CLI `Fatal` logging calls `os.Exit(1)`, which is never
 safe from a shared library loaded into an Android application process.
 
-Release integrity uses GitHub's asset digest plus the SHA-256 values in the
-manifest. This detects corruption but does not add a trust root independent
-from GitHub Releases. exitFy deliberately downloads through trust-all TLS;
-under that accepted policy, the hashes do not prevent a targeted MITM from
-replacing the `.so`, manifest, and advertised digest together.
+Release integrity requires a detached ECDSA P-256 signature over the exact
+manifest bytes, checked against the public key compiled into the plugin.
+The signed manifest pins each ELF's SHA-256, size, ABI and runtime contract.
+HTTP validates certificates and hostnames; asset mirrors do not replace the
+signature or digest checks. Unsigned manifests are rejected.
 
 Workflow build/test jobs are read-only. A separate serialized publisher has
 the minimal `contents: write` permission, records exact module pins, creates a
@@ -68,32 +68,22 @@ runner or Action starts. Candidate artifact names are stable for the workflow
 run, so both a full rerun and a failed-publisher-only rerun consume the same
 verified candidate.
 
-## Enabling manifest signatures
+## Manifest signatures
 
-The digest chain in a release proves that the downloaded bytes match what the
-release listing reported. It cannot prove that the listing itself was genuine,
-so the listing is the one thing exitFy never fetches through a mirror — which
-is also why a network that blocks `api.github.com` blocks updates outright.
-A detached signature is pinned to a key rather than to the transport and
-removes that constraint.
+The publishers use the repository secret `CORE_SIGNING_KEY`; it must contain
+the maintainer's PEM-encoded ECDSA P-256 private key. The plugin pins the matching
+public key and requires every accepted manifest to have a valid detached
+signature. A missing secret is a publishing error, not a reason to release
+unsigned components. Private keys must remain outside Git.
 
-Everything except the key is in place, and the publisher step was exercised
-both ways from a workstation: without the secret it produces no signature and
-leaves the release contract untouched, and with a throwaway key it produces a
-signature that verifies against the matching public key without the key
-reaching the candidate directory. To turn it on:
+The SB manifest also declares `capabilities: ["amneziawg"]`. The plugin records
+this capability only for a verified signed manifest and its exact binary digest.
+An older mapped SB library is not given an AWG configuration; the plugin requests
+an updated component and, when necessary, a client restart.
 
-    openssl ecparam -name prime256v1 -genkey -noout -out core-signing.pem
-    openssl ec -in core-signing.pem -pubout -outform DER | base64 | tr -d '\n'
-
-Add the contents of `core-signing.pem` as the repository secret
-`CORE_SIGNING_KEY`, keep the file offline, and put the printed public key into
-`MANIFEST_PUBLIC_KEY` in the plugin's `CoreUpdater`. Publishers sign every new
-manifest once the secret exists, and the client requires a valid signature once
-the public key is set — releases published before that point stop being
-accepted, which is the intent. Leaving the public key empty keeps the previous
-behaviour and claims no guarantee, so an unsigned release is never presented
-as verified.
+The SB wrapper registers the official AmneziaWG userspace implementation as an
+outbound. It opens no system VPN interface and needs no extra relay. Its Go
+module graph and MIT notice are included in the corresponding-source bundle.
 
 ## Local build
 
@@ -110,7 +100,7 @@ installed NDK, then run:
 
 For the separate SB module, use the Go version declared in `singbox/go.mod`:
 
-    (cd singbox && go test -tags 'with_quic,with_utls,badlinkname,tfogo_checklinkname0' ./...)
+    (cd singbox && go test -race -ldflags=-checklinkname=0 -tags 'with_quic,with_utls,badlinkname,tfogo_checklinkname0' ./...)
     ./scripts/build_singbox_android.sh dist
     ./scripts/verify_singbox_artifacts.py dist
     expected_head="$(git rev-parse HEAD)"

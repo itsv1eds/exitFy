@@ -71,13 +71,14 @@ Device testing is performed by the beta tester after receiving
   install action and combined stage/progress. No family name, version, policy,
   selection, per-family status, update button or update dialog may be
   reachable.
-- Verify provider selection, search, every protocol filter, 50-item pagination,
+- Verify provider selection, search, every protocol filter, 10/25/50/100/200-item pagination,
   explicit node selection, node details, page ping/cancel,
   previous/next, referral, manual-key add/delete, custom-subscription
   add/delete and clear-nodes confirmation. Provider/filter/search changes must
   reset the page offset, and unavailable providers must not be selectable.
-- Open Advanced and verify only Proxy GET/TCP ping type, HWID replacement and
-  explicit reset. Its description and rows must not mention cores. The saved
+- Open Advanced and verify TCP/Proxy GET ping type, HWID replacement/reset,
+  User-Agent, refresh/check schedules, calls, failover, dual cores, component
+  versions, balancer and tutorial replay. The saved
   HWID itself must never be prefilled or shown.
 - During refreshes and pings, rotate the device and leave/reopen screens;
   stale callbacks must not update destroyed views or execute twice.
@@ -91,7 +92,7 @@ Device testing is performed by the beta tester after receiving
 
 - On a fresh install, confirm only
   [itsv1eds/exitFy](https://github.com/itsv1eds/exitFy) is contacted.
-  The handoff builds sing-box v1.13.19 and Xray v26.7.28; the wrapper
+  The publishers resolve current stable sing-box and libXray releases; the wrapper
   revision advances with every core commit, so record the `wN` actually
   installed instead of expecting a fixed tag.
 - The mirror fallback was verified against the published
@@ -240,3 +241,32 @@ connect/disconnect cycles and 72-hour soak are gates for stable `4.2.1`, which
 also requires no crash/ANR, stuck proxy, leaked workers or secrets in
 user-visible errors. The core experiment is excluded from those gates: it ships
 off by default and is not part of the stable path.
+
+## Happ, AWG, balancer and onboarding
+
+- Refresh every built-in provider and a custom subscription with the single
+  Happ identity; capture only counts and diagnostics, never credentials.
+- Verify first-use tutorial progress survives reopening/restarting; replay it
+  from Advanced and confirm no automatic network/connection action occurs.
+- Import `.conf` from a document provider and clipboard text, including IPv6,
+  multiple peers, preshared keys, signature packets and keepalive ranges. Test
+  actual Telegram traffic and calls against the user's own AWG server.
+- Test installation of an AWG-capable SB release while an old SB library is
+  mapped: a translated restart notice must appear, without quarantine or crash.
+- With two local/owned servers, verify Round Robin distributes new connections
+  and Sticky Session chooses the fastest. Existing TCP sessions must survive
+  a change in the observer's preferred server. Include a mixed Xray/AWG pool.
+- Hide/remove/refresh pool members; the running group must rebuild. Disable,
+  run Proxy GET, cancel it, resume and unload: both components must stop/restore
+  together. TCP checks must not pause the active connection.
+- Sort by ping with more than one page; successful results must be ordered
+  across page boundaries and unknown/failed results must follow them.
+- Keep foreign proxies on 10808, 12334 and another stored loopback port. Verify
+  their entries remain intact, exitFy chooses another port and reuses its own
+  free preferred port after reconnect/restart.
+- Replace one 4.2.1 artifact with another 4.2.1 build while the process remains
+  running. It must ask in Russian/English to fully restart, then load the new
+  build and retain all settings.
+
+These are device acceptance checks. Local JVM/Go tests and a successful build
+alone do not mark them as completed.

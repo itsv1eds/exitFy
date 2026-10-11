@@ -10,11 +10,10 @@ live in the dashboard and its own Android View sub-fragments. Core selection
 and updates remain automatic. Whenever either connection component is missing,
 the dashboard exposes one generic action which installs/checks both components
 and reports combined progress; it never exposes family names, versions,
-selection or per-family update controls.
-A subscription that answers an unrecognised client with placeholder entries
-instead of servers is retried under Legacy `v2rayN/6.23`, then `clash-verge/1.0`,
-and entries pointing at an address that can never carry a tunnel are rejected
-rather than counted. Reordering the catalog moves stored subscriptions,
+selection or per-family update controls. Component versions are listed only in Advanced.
+Subscriptions use one default client identity, `Happ/5.2.0`. Advanced can replace
+it with one custom User-Agent; failed responses never trigger another identity.
+Unreachable placeholder entries are rejected rather than counted. Reordering the catalog moves stored subscriptions,
 selections and the saved provider choice with their provider, so nothing
 reappears under whichever provider now owns that index.
 
@@ -63,7 +62,7 @@ atomically, so a concurrent native settings callback cannot restore stale
 sibling values.
 
 The server browser keeps search, protocol and page offset only in fragment
-memory. It exposes at most 50 bounded node summaries per page and
+memory. It offers 10 / 25 / 50 / 100 / 200 bounded node summaries per page and
 never renders node keys, raw proxy URIs, subscription URLs or the stored HWID.
 It supports provider selection, explicit node selection, manual-node and custom
 subscription management, refresh, page ping/cancel, pagination, referral and
@@ -82,9 +81,9 @@ family selects that family; a dual-compatible server selects the sole ready
 family, or sing-box when readiness is equal. Ready means a compatible
 active/pending release or an available requested rollback. Xray is therefore
 selected automatically for configurations such as XHTTP and mKCP which cannot
-be represented by sing-box. Only one Go core family may be mapped in a process. An incompatible mapped
-family keeps the existing restart-required fail-closed state; opening or
-starting one family never falls back to the other in the same process.
+be represented by sing-box. The dual-core experiment is enabled by default and allows both families to be
+mapped. Disabling it cannot unmap a Go library and requires a process restart.
+A library already mapped at an incompatible revision is never overwritten.
 
 The active server card opens the current source's servers directly, so
 switching does not require the server screen. That screen lists 50 servers per
@@ -292,3 +291,39 @@ for debug/androidTest and are never embedded in the release plugin.
 There is no Android emulator/device smoke job in CI. Real-device verification
 is performed by the beta tester using `DEVICE_BETA_CHECKLIST.md`. The reference
 `exitfy_old.plugin` is not a build or runtime input.
+
+## Connection and onboarding features
+
+`balance_mode` is off by default. With multiple servers, Advanced offers Round
+Robin (new connections rotate through healthy members) and Sticky Session
+(new connections choose the fastest healthy member). Existing TCP connections
+keep their route. Xray uses its synchronized burst observer for full-path HTTPS
+checks every minute; this is separate from the scheduled TCP-check preference.
+SB-only members, including AWG, run behind authenticated private loopback
+inbounds in one side SB instance. Every member is retained, up to the explicit
+256-member limit; larger groups are rejected with an explanation.
+
+Sorting by ping applies to the entire filtered source before pagination;
+unchecked and failed nodes follow successful checks. Full-path checks can use
+both mapped families and pause/restore both balancer components together.
+
+The server screen imports AmneziaWG `.conf` from a file or pasted text.
+Interface addresses, multiple peers, preshared keys, DNS, MTU and AWG
+obfuscation parameters are preserved, including signature packets and keepalive
+ranges. No interface shell commands are executed. The tunnel runs inside the
+signed SB component in userspace and carries Telegram traffic without a system
+VPN, root, another plugin or a relay service. Oversized handshake parameters
+are rejected before a background native goroutine can allocate them. Keys and
+obfuscation material stay in private storage and are redacted from errors.
+
+The plugin remembers its own preferred SOCKS port, checks whether it is free,
+and excludes ports belonging to stored/current foreign loopback proxies.
+Ports 12334 and 10808 are always reserved. Ownership still requires exact
+session credentials/markers; an address or port alone never identifies a proxy
+as exitFy's.
+
+First use offers a tutorial with the actual step count and persisted progress.
+Advanced can replay it. Opening the tutorial never starts a connection,
+refresh or download. Each generated artifact also carries a DEX/native build
+identity, so replacing 4.2.1 with a different 4.2.1 build asks for a complete
+client restart in the user's language instead of reusing stale Java code.
