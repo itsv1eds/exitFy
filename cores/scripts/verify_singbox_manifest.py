@@ -14,7 +14,7 @@ from verify_singbox_artifacts import PREFIX, verify
 
 TOP_LEVEL_KEYS = {
     "schema", "coreApi", "configContract", "family", "releaseTag",
-    "upstream", "wrapper", "minAndroidApi", "requiredExports", "assets",
+    "upstream", "wrapper", "minAndroidApi", "requiredExports", "assets", "capabilities",
 }
 
 
@@ -41,6 +41,7 @@ def main() -> None:
         value.get("schema") != 3
         or value.get("coreApi") != 2
         or value.get("configContract") != 1
+        or value.get("capabilities") != ["amneziawg"]
         or value.get("family") != "sing_box"
         or value.get("minAndroidApi") != 29
         or set(value.get("requiredExports", [])) != REQUIRED_EXPORTS

@@ -129,6 +129,28 @@ class RemoteReleaseTest(unittest.TestCase):
                 release, manifest, raw = fixture(family)
                 verify_remote_release(release, manifest, raw, family, UPSTREAM, WRAPPER)
 
+    def test_awg_capability_accepts_only_the_supported_singbox_contract(self) -> None:
+        for family, capabilities, accepted in (
+            ("sing_box", ["amneziawg"], True),
+            ("sing_box", ["amneziawg", "unknown"], False),
+            ("sing_box", "amneziawg", False),
+            ("sing_box", [], False),
+            ("xray", ["amneziawg"], False),
+        ):
+            with self.subTest(family=family, capabilities=capabilities):
+                release, manifest, _ = fixture(family)
+                manifest["capabilities"] = capabilities
+                raw = (json.dumps(manifest, sort_keys=True) + "\n").encode()
+                asset(release, "manifest.json").update({
+                    "size": len(raw),
+                    "digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
+                })
+                if accepted:
+                    verify_remote_release(release, manifest, raw, family, UPSTREAM, WRAPPER)
+                else:
+                    with self.assertRaises(ValueError):
+                        verify_remote_release(release, manifest, raw, family, UPSTREAM, WRAPPER)
+
     def test_changed_remote_digest_forces_new_revision(self) -> None:
         release, manifest, raw = fixture("xray")
         release["assets"][0]["digest"] = "sha256:" + "9" * 64

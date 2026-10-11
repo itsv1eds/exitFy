@@ -1,0 +1,51 @@
+{
+  "route": {
+    "final": "pool-out-0",
+    "rules": [{
+      "inbound": ["pool-in-0"],
+      "outbound": "pool-out-0"
+    }],
+    "default_domain_resolver": "dns-primary"
+  },
+  "log": {"level": "panic"},
+  "outbounds": [{
+    "awg": {},
+    "server": "127.0.0.1",
+    "listen_port": 0,
+    "local_address": ["10.23.0.2/32"],
+    "dns": ["1.1.1.1"],
+    "peers": [{
+      "public_key": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=",
+      "endpoint": "127.0.0.1:29999",
+      "allowed_ips": ["0.0.0.0/0"],
+      "persistent_keepalive_interval": 0
+    }],
+    "server_port": 29999,
+    "private_key": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=",
+    "tag": "pool-out-0",
+    "type": "amneziawg",
+    "mtu": 1280
+  }],
+  "dns": {"servers": [
+    {
+      "server": "1.1.1.1",
+      "tag": "dns-primary",
+      "type": "udp"
+    },
+    {
+      "server": "8.8.8.8",
+      "tag": "dns-secondary",
+      "type": "udp"
+    }
+  ]},
+  "inbounds": [{
+    "listen_port": 51595,
+    "tag": "pool-in-0",
+    "type": "socks",
+    "listen": "127.0.0.1",
+    "users": [{
+      "password": "test-pass",
+      "username": "test-user"
+    }]
+  }]
+}

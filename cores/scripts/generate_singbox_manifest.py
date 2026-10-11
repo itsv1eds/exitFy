@@ -72,6 +72,7 @@ def main() -> None:
         "schema": 3,
         "coreApi": 2,
         "configContract": 1,
+        "capabilities": ["amneziawg"],
         "family": "sing_box",
         "releaseTag": args.release_tag,
         "upstream": {

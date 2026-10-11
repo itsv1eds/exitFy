@@ -10,6 +10,8 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/itsv1eds/exitfy/cores/singbox/internal/awg"
+
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/experimental/deprecated"
 	"github.com/sagernet/sing-box/include"
@@ -24,7 +26,7 @@ const (
 	maxErrorRunes         = 1024
 	maxErrorBytes         = 4096
 	secretKeyPattern      = `proxy-authorization|pre_shared_key|pre-shared-key|` +
-		`private_key|private-key|obfs-password|obfs_password|authorization|` +
+		`awg|i[1-5]|header_protection_key|preshared_key|private_key|private-key|obfs-password|obfs_password|authorization|` +
 		`refresh_token|access_token|client_secret|auth_str|auth-str|` +
 		`legacy_seed|legacy-seed|x-api-key|x_api_key|api-key|api_key|` +
 		`password|passwd|username|encryption|headers|cookie|token|secret|` +
@@ -108,7 +110,11 @@ func Start(configJSON string) (err error) {
 
 	baseCtx := context.Background()
 	baseCtx = service.ContextWith(baseCtx, newEmbeddedDeprecatedManager())
-	baseCtx = include.Context(baseCtx)
+	registry := include.OutboundRegistry()
+	awg.Register(registry)
+	baseCtx = box.Context(baseCtx, include.InboundRegistry(), registry,
+		include.EndpointRegistry(), include.DNSTransportRegistry(), include.ServiceRegistry(),
+		include.CertificateProviderRegistry())
 	options, err := SJSON.UnmarshalExtendedContext[option.Options](
 		baseCtx, []byte(configJSON),
 	)
@@ -428,7 +434,7 @@ func decodeHexQuad(value string) (uint32, bool) {
 
 func isSecretKey(value string) bool {
 	switch strings.ToLower(value) {
-	case "password", "passwd", "pass", "token", "access_token", "refresh_token",
+	case "awg", "header_protection_key", "preshared_key", "i1", "i2", "i3", "i4", "i5", "password", "passwd", "pass", "token", "access_token", "refresh_token",
 		"client_secret", "secret", "uuid", "proxy-authorization", "authorization",
 		"auth_str", "auth-str", "auth", "obfs-password", "obfs_password", "obfs",
 		"encryption", "private_key", "private-key", "privatekey", "pre_shared_key",
