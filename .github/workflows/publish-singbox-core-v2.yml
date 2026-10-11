@@ -108,6 +108,8 @@ jobs:
           go_mod="$(gh api "repos/SagerNet/sing-box/contents/go.mod?ref=$upstream_commit" \
             --jq .content | base64 --decode)"
           go_version="$(awk '$1 == "go" { print $2; exit }' <<<"$go_mod")"
+          wrapper_go="$(awk '$1 == "go" { print $2; exit }' singbox/go.mod)"
+          go_version="$(printf '%s\n%s\n' "$go_version" "$wrapper_go" | sort -V | tail -n 1)"
           if [[ ! "$go_version" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
             echo "Unsupported Go version: $go_version" >&2
             exit 1
@@ -189,9 +191,20 @@ jobs:
           go-version: ${{ steps.resolve.outputs.go_version }}
           cache: false
 
-      - name: Set up Android SDK
+      - name: Use the runner Android SDK with Java 21
         if: steps.resolve.outputs.build_needed == 'true'
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        run: |
+          set -euo pipefail
+          sdkmanager_bin="${ANDROID_HOME:?}/cmdline-tools/latest/bin/sdkmanager"
+          java_home="${JAVA_HOME_21_X64:?}"
+          test -x "$sdkmanager_bin"
+          test -x "$java_home/bin/java"
+          echo "JAVA_HOME=$java_home" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$java_home/bin" >> "$GITHUB_PATH"
+          echo "$(dirname "$sdkmanager_bin")" >> "$GITHUB_PATH"
+          JAVA_HOME="$java_home" "$sdkmanager_bin" --version
 
       - name: Isolate verified Go module downloads
         if: steps.resolve.outputs.build_needed == 'true'
@@ -232,7 +245,7 @@ jobs:
         run: |
           set -euo pipefail
           cd singbox
-          go test -tags "$SB_BUILD_TAGS" ./...
+          go test -race -ldflags=-checklinkname=0 -tags "$SB_BUILD_TAGS" ./...
           cd ..
           /usr/bin/git -c core.fsmonitor=false -c core.hooksPath=/dev/null \
             show "$GITHUB_SHA:cores/scripts/verify_build_inputs.py" \
