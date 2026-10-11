@@ -10,6 +10,7 @@ final class BootstrapConfig {
 
     final String pluginId;
     final String pluginVersion;
+    final String pluginBuild;
     final File dataDir;
     final String nativeBridgePath;
     final String nativeAbi;
@@ -21,9 +22,10 @@ final class BootstrapConfig {
     final String migratedHwid;
 
     private BootstrapConfig(String pluginId, String pluginVersion, File dataDir, String nativeBridgePath,
-                            String nativeAbi, String migratedHwid) {
+                            String nativeAbi, String migratedHwid, String pluginBuild) {
         this.pluginId = pluginId;
         this.pluginVersion = pluginVersion;
+        this.pluginBuild = pluginBuild;
         this.dataDir = dataDir;
         this.nativeBridgePath = nativeBridgePath;
         this.nativeAbi = nativeAbi;
@@ -62,7 +64,11 @@ final class BootstrapConfig {
         }
         String migratedHwid = value.optString("migratedHwid", "").trim();
         if (!migratedHwid.matches("[0-9a-f]{16}")) migratedHwid = "";
+        String pluginBuild = value.optString("pluginBuild", "");
+        if (!pluginBuild.isEmpty() && !pluginBuild.matches("[0-9a-f]{64}")) {
+            throw new IllegalArgumentException("invalid plugin build identity");
+        }
         return new BootstrapConfig(pluginId, pluginVersion, dataDir,
-                canonicalBridge.getPath(), abi, migratedHwid);
+                canonicalBridge.getPath(), abi, migratedHwid, pluginBuild);
     }
 }

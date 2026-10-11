@@ -25,6 +25,9 @@ final class ExitFyDashboardState {
     // Retained as the existing restart handoff; this release adds no restart UI.
     final boolean restartRequired;
     final String pingType;
+    final String balanceMode;
+    final boolean sortByPing;
+    final int tutorialStep;
     final boolean dualCore;
     final boolean failover;
     final boolean refreshOnOpen;
@@ -66,7 +69,10 @@ final class ExitFyDashboardState {
                 value.optString("pingType", SettingsModel.PING_TCP),
                 SettingsModel.PING_TCP))
                 ? SettingsModel.PING_PROXY_GET : SettingsModel.PING_TCP;
-        dualCore = value.optBoolean("dualCore", false);
+        balanceMode = value.optString("balanceMode", "off");
+        sortByPing = value.optBoolean("sortByPing", false);
+        tutorialStep = Math.max(0, Math.min(16, value.optInt("tutorialStep", 0)));
+        dualCore = value.optBoolean("dualCore", true);
         failover = value.optBoolean("failover", false);
         refreshOnOpen = value.optBoolean("refreshOnOpen", false);
         autoCheckMinutes = value.optInt("autoCheckMinutes", 0);

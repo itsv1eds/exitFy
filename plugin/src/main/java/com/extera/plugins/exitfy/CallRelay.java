@@ -70,6 +70,7 @@ final class CallRelay implements Closeable {
     private Selector selector;
     private Thread worker;
     private volatile boolean running;
+    private volatile boolean closed;
 
     CallRelay(String proxyHost, int proxyPort, String username, String password) {
         this.proxyHost = proxyHost == null ? "127.0.0.1" : proxyHost;
@@ -92,6 +93,7 @@ final class CallRelay implements Closeable {
         }
         String key = targetIp + ":" + targetPort;
         synchronized (lock) {
+            if (closed) throw new IOException("call relay is closed");
             Mapping existing = mappings.get(key);
             if (existing != null && existing.usable()) {
                 existing.lastActivity = System.currentTimeMillis();
@@ -111,31 +113,44 @@ final class CallRelay implements Closeable {
         // on Android that is the main thread, where opening a socket throws.
         // The handshake happens here instead and the caller only waits.
         Mapping mapping;
+        Future<Mapping> pending = null;
         try {
-            Future<Mapping> pending = opener.submit(
-                    (Callable<Mapping>) () -> openMapping(targetIp, targetPort));
+            pending = opener.submit((Callable<Mapping>) () -> {
+                Mapping opened = openMapping(targetIp, targetPort);
+                if (closed || Thread.currentThread().isInterrupted()) {
+                    closeQuietly(opened);
+                    throw new IOException("call relay is closed");
+                }
+                return opened;
+            });
             mapping = pending.get(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (Exception error) {
+            if (pending != null && !pending.cancel(true) && pending.isDone()) {
+                try { closeQuietly(pending.get()); } catch (Exception ignored) { }
+            }
             Throwable cause = error.getCause() == null ? error : error.getCause();
             lastRefusal = ErrorSanitizer.clean(cause.getMessage() == null
                     ? cause.getClass().getSimpleName() : cause.getMessage());
             throw error instanceof Exception ? (Exception) error : new IOException(error);
         }
         synchronized (lock) {
+            if (closed || mappings.size() >= MAX_MAPPINGS) {
+                closeQuietly(mapping);
+                throw new IOException(closed ? "call relay is closed" : "too many call endpoints");
+            }
             Mapping raced = mappings.get(key);
             if (raced != null && raced.usable()) {
                 closeQuietly(mapping);
                 return raced.localPort;
             }
+            try { ensureWorkerLocked(); }
+            catch (IOException error) { closeQuietly(mapping); throw error; }
             mappings.put(key, mapping);
             mapped.incrementAndGet();
-            ensureWorkerLocked();
+            // The pump registers channels itself, outside the selector's select lock.
+            pendingRegistrations.add(mapping);
+            selector.wakeup();
         }
-        // Registering a channel blocks while the pump sits in select(), so the
-        // pump picks new mappings up itself.
-        pendingRegistrations.add(mapping);
-        Selector current = selector;
-        if (current != null) current.wakeup();
         return mapping.localPort;
     }
 
@@ -165,6 +180,8 @@ final class CallRelay implements Closeable {
         Selector closing;
         List<Mapping> current;
         synchronized (lock) {
+            if (closed) return;
+            closed = true;
             running = false;
             stopping = worker;
             closing = selector;
@@ -177,10 +194,6 @@ final class CallRelay implements Closeable {
         pendingRegistrations.clear();
         if (closing != null) {
             closing.wakeup();
-            try {
-                closing.close();
-            } catch (IOException ignored) {
-            }
         }
         if (stopping != null) {
             try {
@@ -188,6 +201,9 @@ final class CallRelay implements Closeable {
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
             }
+        }
+        if (closing != null && (stopping == null || !stopping.isAlive())) {
+            try { closing.close(); } catch (IOException ignored) { }
         }
         for (Mapping mapping : current) closeQuietly(mapping);
     }
@@ -313,35 +329,42 @@ final class CallRelay implements Closeable {
     }
 
     private void pump() {
-        ByteBuffer buffer = ByteBuffer.allocateDirect(MAX_DATAGRAM_BYTES);
-        while (running) {
-            Selector current;
-            synchronized (lock) {
-                current = selector;
-            }
-            if (current == null) return;
-            registerPending(current);
-            try {
-                current.select(1_000L);
-            } catch (IOException stopped) {
-                return;
-            } catch (RuntimeException ignored) {
-                continue;
-            }
-            if (!running) return;
-            Iterator<SelectionKey> keys = current.selectedKeys().iterator();
-            while (keys.hasNext()) {
-                SelectionKey key = keys.next();
-                keys.remove();
-                if (!key.isValid() || !key.isReadable()) continue;
-                Mapping mapping = (Mapping) key.attachment();
-                try {
-                    if (key.channel() == mapping.client) forwardToCore(mapping, buffer);
-                    else forwardToClient(mapping, buffer);
-                } catch (Exception ignored) {
+        Selector owned;
+        synchronized (lock) { owned = selector; }
+        if (owned == null) return;
+        try {
+            ByteBuffer buffer = ByteBuffer.allocateDirect(MAX_DATAGRAM_BYTES);
+            while (running) {
+                Selector current;
+                synchronized (lock) {
+                    current = selector;
                 }
+                if (current == null) return;
+                registerPending(current);
+                try {
+                    current.select(1_000L);
+                } catch (IOException stopped) {
+                    return;
+                } catch (RuntimeException ignored) {
+                    continue;
+                }
+                if (!running) return;
+                Iterator<SelectionKey> keys = current.selectedKeys().iterator();
+                while (keys.hasNext()) {
+                    SelectionKey key = keys.next();
+                    keys.remove();
+                    if (!key.isValid() || !key.isReadable()) continue;
+                    Mapping mapping = (Mapping) key.attachment();
+                    try {
+                        if (key.channel() == mapping.client) forwardToCore(mapping, buffer);
+                        else forwardToClient(mapping, buffer);
+                    } catch (Exception ignored) {
+                    }
+                }
+                expireIdle();
             }
-            expireIdle();
+        } finally {
+            try { owned.close(); } catch (IOException ignored) { }
         }
     }
 

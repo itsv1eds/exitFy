@@ -19,6 +19,7 @@ final class ExitFyPreferencesFragment
 
     private ExitFyDashboardState state = ExitFyDashboardState.EMPTY;
     private SettingRow pingTypeRow;
+    private SettingRow balanceRow;
     private SettingRow customHwidRow;
     private SettingRow subscriptionUserAgentRow;
     private SettingRow dualCoreRow;
@@ -45,6 +46,28 @@ final class ExitFyPreferencesFragment
 
     @Override
     protected void buildContent(Context context, LinearLayout content) {
+        SettingRow tutorial = settingRow(context, R.drawable.msg_help,
+                I18n.t("Как пользоваться exitFy", "How to use exitFy"),
+                I18n.t("Запустить обучение с первого шага", "Replay the tutorial from the first step"));
+        setSafeClick(tutorial.view, () -> executeCommand(() -> new JSONObject()
+                .put("command", "set_setting").put("key", "tutorial_step").put("value", 0), false,
+                result -> {
+                    if (!result.ok) return;
+                    ExitFyTutorial tour = new ExitFyTutorial();
+                    tour.setCurrentAccount(currentAccount);
+                    presentFragment(tour);
+                }));
+        content.addView(tutorial.view, sectionParams());
+        balanceRow = settingRow(context, R.drawable.msg_stats,
+                I18n.t("Балансировщик", "Balancer"),
+                I18n.t("Round Robin — распределять новые соединения; Sticky Session — самый быстрый сервер",
+                        "Round Robin distributes new connections; Sticky Session uses the fastest server"));
+        setSafeClick(balanceRow.view, () -> showChoiceDialog(I18n.t("Балансировщик", "Balancer"),
+                new CharSequence[]{I18n.t("Выключено", "Off"), "Round Robin", "Sticky Session"},
+                "round_robin".equals(state.balanceMode) ? 1 : "sticky".equals(state.balanceMode) ? 2 : 0,
+                index -> setSetting("balance_mode", new String[]{"off", "round_robin", "sticky"}[index])));
+        content.addView(balanceRow.view, sectionParams());
+
         pingTypeRow = settingRow(context, R.drawable.msg_speed,
                 I18n.t("Тип пинга", "Ping type"), "");
         setSafeClick(pingTypeRow.view, this::showPingTypeDialog);
@@ -133,6 +156,9 @@ final class ExitFyPreferencesFragment
             return;
         }
         if (next.runtimeAvailable) {
+            balanceRow.setValue("off".equals(next.balanceMode) ? I18n.t("Выключено", "Off")
+                    : "round_robin".equals(next.balanceMode) ? "Round Robin" : "Sticky Session");
+            balanceRow.setEnabled(next.serverCount > 1);
             pingTypeRow.setValue(pingTypeLabel(next.pingType));
             customHwidRow.setValue(next.customHwidSet
                     ? I18n.t("Настроен", "Configured")
@@ -157,6 +183,9 @@ final class ExitFyPreferencesFragment
             }
         } else {
             String unavailable = I18n.t("Runtime недоступен", "Runtime unavailable");
+            balanceRow.setValue("off".equals(next.balanceMode) ? I18n.t("Выключено", "Off")
+                    : "round_robin".equals(next.balanceMode) ? "Round Robin" : "Sticky Session");
+            balanceRow.setEnabled(next.serverCount > 1);
             pingTypeRow.setValue(unavailable);
             customHwidRow.setValue(unavailable);
             subscriptionUserAgentRow.setValue(unavailable);

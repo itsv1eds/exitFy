@@ -424,11 +424,47 @@ public class NativeCoreRuntimeTest {
         }
     }
 
+    @Test
+    public void awgCannotReachAnOldMappedLibraryAndWorksAfterRestart() throws Exception {
+        File root = Files.createTempDirectory("exitfy-awg-feature-floor").toFile();
+        LimitedHttpClient http = new LimitedHttpClient();
+        NativeCoreRuntime runtime = null;
+        try {
+            File core = new File(root, "sing.so");
+            Files.write(core.toPath(), new byte[]{7});
+            FakeUpdater sb = new FakeUpdater(root, http, CoreFamily.SING_BOX,
+                    new CoreUpdater.LoadTarget(core, 2));
+            FakeUpdater xray = new FakeUpdater(root, http, CoreFamily.XRAY, null);
+            FakeNativeCalls calls = new FakeNativeCalls();
+            runtime = new NativeCoreRuntime(sb, xray, calls);
+            assertTrue(runtime.start(CoreFamily.SING_BOX, "{}").ok);
+            assertTrue(runtime.stop(1000L));
+            runtime.requireAwgSupport(true);
+            assertTrue(runtime.start(CoreFamily.SING_BOX, "{}").missingCore);
+            sb.awgReady = true;
+            assertTrue(runtime.start(CoreFamily.SING_BOX, "{}").restartRequired);
+            assertEquals(1, calls.startCalls.get());
+            assertFalse(runtime.isQuarantined());
+            runtime.shutdownForUnload(1000L);
+            NativeCoreRuntime.resetProcessStateForTests();
+            calls = new FakeNativeCalls();
+            runtime = new NativeCoreRuntime(sb, xray, calls);
+            assertTrue(runtime.start(CoreFamily.SING_BOX, "{}").ok);
+            assertTrue(NativeCoreRuntime.mappedAwgSupported());
+            assertEquals(1, calls.startCalls.get());
+        } finally {
+            if (runtime != null) runtime.shutdownForUnload(1000L);
+            http.close();
+            TestFiles.deleteRecursively(root);
+        }
+    }
+
     private static final class FakeUpdater extends CoreUpdater {
         final AtomicInteger prepareCalls = new AtomicInteger();
         final AtomicInteger updateCalls = new AtomicInteger();
         final CoreUpdater.LoadTarget target;
         final boolean candidate;
+        boolean awgReady;
 
         FakeUpdater(File root, LimitedHttpClient http, CoreFamily family,
                     CoreUpdater.LoadTarget target) throws Exception {
@@ -460,6 +496,12 @@ public class NativeCoreRuntimeTest {
             updateCalls.incrementAndGet();
             return true;
         }
+
+        @Override boolean hasUsableCore() {
+            return awgRequired() ? target != null && awgReady : super.hasUsableCore();
+        }
+
+        @Override boolean supportsAwgDigest(String digest) { return awgReady; }
 
         @Override
         boolean isCandidate() {

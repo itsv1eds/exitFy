@@ -1803,6 +1803,9 @@ final class ProtocolParser {
         neutralInteger(outbound, "server_port", true, 1, 65535);
 
         switch (protocol) {
+            case "amneziawg":
+                AwgConfigParser.validateOutbound(outbound);
+                break;
             case "vless":
                 requireOnlyNeutralKeys(outbound, "VLESS outbound", "type", "server",
                         "server_port", "uuid", "encryption", "packet_encoding", "flow",

@@ -10,11 +10,13 @@ def load_dex_runtime(namespace):
     template = pathlib.Path(__file__).resolve().parents[1] / "ExitFy.template.plugin"
     tree = ast.parse(template.read_text(encoding="utf-8"), filename=str(template))
     selected = []
-    names = {"__version__", "ENTRY_CLASS", "DEX_KEEPER_PREFIX", "DEX_KEEPER_NAME"}
+    names = {"__version__", "ENTRY_CLASS", "DEX_KEEPER_PREFIX", "DEX_KEEPER_NAME", "DEX_BUILD_ID", "_TRANSLATIONS"}
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(
             isinstance(target, ast.Name) and target.id in names for target in node.targets
         ):
+            selected.append(node)
+        elif isinstance(node, ast.FunctionDef) and node.name in {"_t", "_is_russian"}:
             selected.append(node)
         elif isinstance(node, ast.ClassDef) and node.name == "DexRuntime":
             selected.append(node)
@@ -163,7 +165,7 @@ class DexKeeperTemplateTest(unittest.TestCase):
     def test_same_version_keeper_reuses_loader_without_reading_payload(self):
         loaded_class = object()
         loader = FakeLoader(loaded_class)
-        keeper_name = "exitfy-dex-keeper:exitFy_v2:" + template_version()
+        keeper_name = "exitfy-dex-keeper:exitFy_v2:" + template_version() + ":__EXITFY_BUILD_ID__"
         namespace = self.namespace([FakeThread(keeper_name, loader)])
         runtime_type = load_dex_runtime(namespace)
 
@@ -181,20 +183,29 @@ class DexKeeperTemplateTest(unittest.TestCase):
         ])
         runtime_type = load_dex_runtime(namespace)
 
-        with self.assertRaisesRegex(RuntimeError, "restart exteraGram"):
+        with self.assertRaisesRegex(RuntimeError, "Fully close and reopen"):
             runtime_type().prepare()
         self.assertEqual(0, loader.calls)
 
     def test_duplicate_same_version_keepers_fail_closed(self):
         loader = FakeLoader(object())
-        keeper_name = "exitfy-dex-keeper:exitFy_v2:" + template_version()
+        keeper_name = "exitfy-dex-keeper:exitFy_v2:" + template_version() + ":__EXITFY_BUILD_ID__"
         namespace = self.namespace([
             FakeThread(keeper_name, loader),
             FakeThread(keeper_name, loader),
         ])
         runtime_type = load_dex_runtime(namespace)
 
-        with self.assertRaisesRegex(RuntimeError, "ambiguous"):
+        with self.assertRaisesRegex(RuntimeError, "Fully close and reopen"):
+            runtime_type().prepare()
+        self.assertEqual(0, loader.calls)
+
+    def test_same_version_different_build_requests_a_restart(self):
+        loader = FakeLoader(object())
+        namespace = self.namespace([FakeThread(
+            "exitfy-dex-keeper:exitFy_v2:" + template_version() + ":old-build", loader)])
+        runtime_type = load_dex_runtime(namespace)
+        with self.assertRaisesRegex(RuntimeError, "Fully close and reopen"):
             runtime_type().prepare()
         self.assertEqual(0, loader.calls)
 

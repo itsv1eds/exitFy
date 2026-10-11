@@ -97,6 +97,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
     private View advancedCard;
     private View providerPageCard;
     private View restartCard;
+    private boolean tutorialPresented;
     private ImageView connectionIconView;
 
     @Override
@@ -520,6 +521,17 @@ final class ExitFyDashboardFragment extends BaseFragment {
     }
 
     private void applyState(ExitFyDashboardState state) {
+        if (!tutorialPresented && state.runtimeAvailable && state.tutorialStep < ExitFyTutorial.count()
+                && fragmentView != null) {
+            tutorialPresented = true;
+            fragmentView.postDelayed(() -> {
+                if (!alive || getParentActivity() == null) return;
+                ExitFyTutorial tutorial = new ExitFyTutorial();
+                tutorial.setCurrentAccount(currentAccount);
+                presentFragment(tutorial);
+            }, 350L);
+        }
+
         if (connectButton == null) return;
         connectionStatusView.setText(state.connectionTitle());
         connectionStatusView.setTextColor(connectionColor(state.runtimeState));

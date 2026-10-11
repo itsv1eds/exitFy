@@ -1211,7 +1211,7 @@ tasks.register("validateEmbeddedDexConfig") {
                 throw new GradleException("Native sub-screen contract is missing: ${token}")
             }
         }
-        ["ping_type", "custom_hwid", "subscription_user_agent", "setSetting(",
+        ["ping_type", "custom_hwid", "subscription_user_agent", "balance_mode", "tutorial_step", "setSetting(",
          "Тип пинга", "Ping type", "\"Proxy GET\"", "\"TCP\"",
          "\"HWID\"", "\"User-Agent\"", "next.defaultHwid",
          "\"Сохранить\"", "\"Сбросить\""].each { token ->
@@ -1599,7 +1599,8 @@ tasks.register("validateEmbeddedDexConfig") {
                     "DEX load/updateSettings must share best-effort unload cleanup")
         }
         if (!bridgeText.contains("DEX_KEEPER_NAME = DEX_KEEPER_PREFIX + \"${pluginVersion}\"")
-                || !bridgeText.contains("new Thread(new DexKeeper(), DEX_KEEPER_NAME)")
+                || !bridgeText.contains("new Thread(new DexKeeper(), dexKeeperName)")
+                || !bridgeText.contains("bootstrap.pluginBuild")
                 || !bridgeText.contains("keeper.setDaemon(true)")
                 || !bridgeText.contains(
                 "keeper.setContextClassLoader(ExitFyBridge.class.getClassLoader())")
@@ -1878,10 +1879,15 @@ tasks.register("buildDex") {
         }
 
         String generated = pluginTemplateFile.getText("UTF-8")
+        String nativeBundle = readNativeBundleFromAar(aarFile)
+        def buildIdentity = java.security.MessageDigest.getInstance("SHA-256")
+        buildIdentity.update(dexFile.bytes)
+        buildIdentity.update(nativeBundle.getBytes("UTF-8"))
+        generated = generated.replace("__EXITFY_BUILD_ID__", buildIdentity.digest().encodeHex().toString())
         generated = replacePayloadBlock(generated, dexBeginMarker, dexEndMarker,
                 deflate(dexFile.bytes).encodeBase64().toString())
         generated = replacePayloadBlock(generated, nativeBeginMarker, nativeEndMarker,
-                readNativeBundleFromAar(aarFile))
+                nativeBundle)
 
         outputPlugin.parentFile.mkdirs()
         File staged = new File(outputPlugin.parentFile, ".${outputPlugin.name}.tmp")
@@ -2245,6 +2251,13 @@ tasks.register("verifyPluginArtifact") {
         }
 
         byte[] bundleJson = inflate(payloadFromBlock(text, nativeBeginMarker, nativeEndMarker).decodeBase64())
+        def expectedBuildIdentity = java.security.MessageDigest.getInstance("SHA-256")
+        expectedBuildIdentity.update(dex)
+        expectedBuildIdentity.update(payloadFromBlock(text, nativeBeginMarker, nativeEndMarker).getBytes("UTF-8"))
+        String buildIdentity = expectedBuildIdentity.digest().encodeHex().toString()
+        if (!text.contains("DEX_BUILD_ID = \"${buildIdentity}\"") || text.contains("__EXITFY_BUILD_ID__")) {
+            throw new GradleException("Plugin build identity differs from its DEX/JNI payloads")
+        }
         Map bundle = (Map) new JsonSlurper().parseText(new String(bundleJson, StandardCharsets.UTF_8))
         if ((bundle.format as int) != 1 || bundle.version != pluginVersion) {
             throw new GradleException("Native bundle metadata is invalid")

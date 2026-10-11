@@ -60,6 +60,7 @@ final class NativeCoreRuntime implements Closeable {
     private static volatile boolean processDualCore;
     private static volatile int processLoadedCoreApi;
     private static volatile boolean processQuarantined;
+    private static volatile boolean processAwgSupported;
     private static final Object PROCESS_CLEANUP_MONITOR = new Object();
     // A timed-out JNI call can outlive its RuntimeCoordinator. Keep cleanup
     // ownership process-wide so every plugin reload does not create another
@@ -147,9 +148,16 @@ final class NativeCoreRuntime implements Closeable {
                         "Предыдущее подключение ещё завершается; повторите попытку",
                         "The previous connection is still stopping; try again"));
             }
+            if (family == CoreFamily.SING_BOX && updater.awgRequired()) {
+                if (!updater.hasUsableCore()) return StartResult.missing(I18n.t(
+                        "Для AmneziaWG требуется обновление компонентов; загрузка выполняется в фоне",
+                        "AmneziaWG needs updated components; downloading in the background"));
+                if (isFamilyLoaded(family) && !processAwgSupported) return restartRequired();
+            }
             if (running) {
                 if (runningFamily == family) return StartResult.ok();
-                // Both cores may be mapped, but only one ever runs: the other
+                // This runtime runs one family; a mixed balancer owns a
+                // separate SB runtime. The other mapped family here
                 // must be stopped before this one takes over the connection.
                 if (!processDualCore || !stopWithin(
                         nativeCallBudget(deadline, STOP_TIMEOUT_SECONDS))) {
@@ -188,6 +196,7 @@ final class NativeCoreRuntime implements Closeable {
                 // only and must never be reopened by JNI.
                 final String corePath = loadTarget.file.getAbsolutePath();
                 final int coreApi = loadTarget.coreApi;
+                final boolean awgSupported = updater.supportsAwgDigest(loadTarget.digest);
                 final AtomicBoolean openSubmitted = new AtomicBoolean();
                 String openError;
                 try {
@@ -224,6 +233,7 @@ final class NativeCoreRuntime implements Closeable {
                 }
                 processNativeOpened = true;
                 rememberLoadedFamily(family);
+                if (family == CoreFamily.SING_BOX) processAwgSupported = awgSupported;
                 processLoadedCoreApi = coreApi;
                 nativeOpenPhase = false;
 
@@ -256,6 +266,9 @@ final class NativeCoreRuntime implements Closeable {
                 }
             }
 
+            if (family == CoreFamily.SING_BOX && updater.awgRequired() && !processAwgSupported) {
+                return restartRequired();
+            }
             if (shutdownRequested) {
                 return StartResult.error(I18n.t(
                         "Runtime завершает работу", "Runtime is shutting down"));
@@ -403,7 +416,7 @@ final class NativeCoreRuntime implements Closeable {
         return updater(family).checkForUpdate(force, observer);
     }
 
-    private static boolean isFamilyLoaded(CoreFamily family) {
+    static boolean isFamilyLoaded(CoreFamily family) {
         return processLoadedFamilies.contains(family);
     }
 
@@ -444,6 +457,8 @@ final class NativeCoreRuntime implements Closeable {
         return updater(family).hasUsableCore();
     }
 
+    void requireAwgSupport(boolean required) { updater(CoreFamily.SING_BOX).requireAwgSupport(required); }
+
     boolean verifyLocalReadiness(CoreFamily family) throws Exception {
         return updater(family).verifyLocalReadiness();
     }
@@ -455,6 +470,8 @@ final class NativeCoreRuntime implements Closeable {
     CoreFamily loadedFamily() {
         return processLoadedFamily;
     }
+
+    static boolean mappedAwgSupported() { return processAwgSupported; }
 
     CoreFamily runningFamily() {
         return runningFamily;
@@ -871,6 +888,7 @@ final class NativeCoreRuntime implements Closeable {
     }
 
     static void resetProcessStateForTests() {
+        processAwgSupported = false;
         processNativeOpened = false;
         processLoadedFamily = null;
         processLoadedFamilies = java.util.Collections.emptyList();

@@ -55,7 +55,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     private final CoreUpdater singBoxUpdater;
     private final CoreUpdater xrayUpdater;
     private final NativeCoreRuntime nativeCore;
+    private final NativeCoreRuntime balancerSideCore;
     private final ProxySession proxySession;
+    private final LocalPortAllocator localPorts;
     private final ConnectionStateMachine stateMachine = new ConnectionStateMachine();
     private final ScheduledThreadPoolExecutor coordinator;
     private final ThreadPoolExecutor coreExecutor;
@@ -99,6 +101,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     private volatile SettingsModel requestedSettings = SettingsModel.defaults();
     private volatile boolean loaded;
     private volatile ProtocolParser.Node activeNode;
+    private volatile String activePoolKey = "";
+    private volatile int activePoolCount;
+    private volatile boolean activePoolUsesSide;
     private volatile String connectionIssue = "";
     private volatile String subscriptionIssue = "";
     private volatile int localPort;
@@ -161,7 +166,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         this.xrayUpdater = new CoreUpdater(
                 store, coreHttp, bootstrap.nativeAbi, CoreFamily.XRAY);
         this.nativeCore = new NativeCoreRuntime(singBoxUpdater, xrayUpdater);
+        this.balancerSideCore = new NativeCoreRuntime(singBoxUpdater, xrayUpdater);
         this.proxySession = new ProxySession(store);
+        this.localPorts = new LocalPortAllocator(store);
         this.coordinator = new ScheduledThreadPoolExecutor(1, runnable -> {
             Thread thread = new Thread(runnable, "exitfy-coordinator");
             thread.setDaemon(true);
@@ -273,10 +280,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         if (decision.providerId == value.providerId && enabled == value.enabled) return value;
         // Carry every field: rebuilding with the short constructor silently
         // reset the settings this method does not name.
-        return new SettingsModel(enabled, decision.providerId, value.customHwid,
-                value.schemaVersion, value.pingType, value.dualCore, value.failover,
-                value.refreshOnOpen, value.autoCheckMinutes, value.callsViaProxy,
-                value.subscriptionUserAgent);
+        return value.withSetting("enabled", enabled).withSetting("provider_id", decision.providerId);
     }
 
     private String setSettingFromUi(String key, Object rawValue) {
@@ -328,6 +332,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
 
     private void recordChangedSettingRevisions(SettingsModel previous, SettingsModel next,
                                                long revision) {
+        if (!previous.balanceMode.equals(next.balanceMode)) settingPersistenceRevisions.record("balance_mode", revision);
+        if (previous.sortByPing != next.sortByPing) settingPersistenceRevisions.record("sort_by_ping", revision);
+        if (previous.tutorialStep != next.tutorialStep) settingPersistenceRevisions.record("tutorial_step", revision);
         if (previous.enabled != next.enabled) {
             settingPersistenceRevisions.record("enabled", revision);
         }
@@ -521,7 +528,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 String protocol = SubscriptionManager.requireUiProtocol(
                         request.optString("protocol", "all"));
                 return response(true, "", subscriptions.uiState(
-                        settings.providerId, offset, limit, query, protocol)
+                        settings.providerId, offset, limit, query, protocol, settings.sortByPing)
                         .toString()).toString();
             }
             if ("add_node".equals(command)) {
@@ -602,6 +609,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                             && key.equals(selectedBeforeRemoval.normalizedKey);
                     boolean removed = subscriptions.removeManualNode(key);
                     if (removed && settings.enabled && (removedSelection
+                            || settings.providerId == SettingsModel.CUSTOM_PROVIDER_ID
+                            && !"off".equals(settings.balanceMode)
                             || activeNode != null && key.equals(activeNode.normalizedKey))) {
                         cancelCorePreparation(true);
                         requestReconnect("manual_node_deleted");
@@ -843,6 +852,10 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             providerAvailability.put(true);
             value.put("providerAvailability", providerAvailability);
             value.put("pingType", current.pingType);
+            value.put("balanceMode", current.balanceMode);
+            value.put("sortByPing", current.sortByPing);
+            value.put("tutorialStep", current.tutorialStep);
+            value.put("tutorialComplete", current.tutorialStep >= ExitFyTutorial.count());
             value.put("dualCore", current.dualCore);
             value.put("failover", current.failover);
             value.put("refreshOnOpen", current.refreshOnOpen);
@@ -862,9 +875,15 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             value.put("connectionIssue", connectionIssue);
             value.put("subscriptionIssue", subscriptionIssue);
             value.put("serverCount", subscriptions.nodeCountFast(current.providerId));
-            value.put("activeNodeInfo", activeNode == null
+            JSONObject activeInfo = activeNode == null
                     ? subscriptions.selectedUiNodeInfo(current.providerId)
-                    : subscriptions.uiNodeInfo(current.providerId, activeNode.normalizedKey));
+                    : subscriptions.uiNodeInfo(current.providerId, activeNode.normalizedKey);
+            if (activeInfo != null && activePoolCount > 1) {
+                activeInfo.put("name", I18n.format("Балансировщик · %s серверов", "Balancer · %s servers", activePoolCount))
+                        .put("protocol", "balancer").put("transport", current.balanceMode)
+                        .put("security", "").put("latency", -1).put("pingStatus", "idle");
+            }
+            value.put("activeNodeInfo", activeInfo);
             // Keep the pre-existing restart handoff contract intact. Restart
             // actions/notifications are intentionally deferred to a separate
             // release even though this iteration removes every core control.
@@ -1032,17 +1051,14 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     }
 
     private boolean servicesHealthy() {
-        return localPort > 0 && nativeCore.isRunning() && isLoopbackListening(localPort);
+        return localPort > 0 && nativeCore.isRunning()
+                && (!activePoolUsesSide || balancerSideCore.isRunning()) && isLoopbackListening(localPort);
     }
 
     private void disableFromJava(String reason) {
         if (!settings.enabled) return;
         SettingsModel previous = settings;
-        SettingsModel disabled = new SettingsModel(false, previous.providerId,
-                previous.customHwid, previous.schemaVersion, previous.pingType,
-                previous.dualCore, previous.failover,
-                previous.refreshOnOpen, previous.autoCheckMinutes,
-                previous.callsViaProxy, previous.subscriptionUserAgent);
+        SettingsModel disabled = previous.withSetting("enabled", false);
         long persistRevision;
         synchronized (settingsRequestLock) {
             synchronized (subscriptionRefreshControl) {
@@ -1064,11 +1080,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     private void switchToCustomProviderFromJava() {
         if (settings.providerId == SettingsModel.CUSTOM_PROVIDER_ID) return;
         SettingsModel previous = settings;
-        SettingsModel custom = new SettingsModel(previous.enabled, SettingsModel.CUSTOM_PROVIDER_ID,
-                previous.customHwid, previous.schemaVersion, previous.pingType,
-                previous.dualCore, previous.failover,
-                previous.refreshOnOpen, previous.autoCheckMinutes,
-                previous.callsViaProxy, previous.subscriptionUserAgent);
+        SettingsModel custom = previous.withSetting("provider_id", SettingsModel.CUSTOM_PROVIDER_ID);
         long persistRevision;
         synchronized (settingsRequestLock) {
             synchronized (subscriptionRefreshControl) {
@@ -1124,7 +1136,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             coreSelectionBlocked = false;
             connectionIssue = "";
             transition(RuntimeState.STARTING);
-            int port = findFreeLoopbackPort();
+            int port = localPorts.allocate(proxySession.reservedLoopbackPorts(), true);
             ProxySession.Credentials credentials = ProxySession.newCredentials();
             ProtocolParser.Node selected = subscriptions.selected(settings.providerId);
             if (!skipRefresh && subscriptions.isStale(settings.providerId)) {
@@ -1136,7 +1148,14 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             }
             if (selected == null) throw new IllegalStateException(I18n.t(
                     "Нет доступных proxy-серверов", "No proxy servers available"));
-            CoreFamily family = resolveCore(selected);
+            List<ProtocolParser.Node> pool = subscriptions.nodes(settings.providerId);
+            boolean balancing = !"off".equals(settings.balanceMode) && pool.size() > 1;
+            boolean awgNeeded = "amneziawg".equals(selected.outbound.optString("type"));
+            if (balancing) for (ProtocolParser.Node node : pool) {
+                awgNeeded |= "amneziawg".equals(node.outbound.optString("type"));
+            }
+            nativeCore.requireAwgSupport(awgNeeded);
+            CoreFamily family = balancing ? CoreFamily.XRAY : resolveCore(selected);
             requiredCore = family;
             CoreFamily loadedFamily = nativeCore.loadedFamily();
             restartRequired = CoreProcessState.requiresRestart(loadedFamily, family);
@@ -1151,12 +1170,38 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                     return false;
                 }
             }
-            JSONObject config = family == CoreFamily.SING_BOX
-                    ? ProtocolParser.buildConfig(selected, port,
-                    credentials.username, credentials.password)
-                    : XrayConfigRenderer.build(selected, port,
-                    credentials.username, credentials.password);
-            if (!revisionGate.isCurrent(operation, loaded, settings.enabled)) return false;
+            JSONObject config;
+            boolean sideUsed = false;
+            if (balancing) {
+                BalancerConfigRenderer.Plan plan = BalancerConfigRenderer.build(
+                        pool, port, credentials, settings.balanceMode,
+                        localPorts, proxySession.reservedLoopbackPorts());
+                if (plan.side != null) {
+                    if (!settings.dualCore) throw new IllegalStateException(I18n.t(
+                            "Для этой группы включите «Два ядра» в «Дополнительно»",
+                            "Enable Both cores in Advanced for this group"));
+                    if (!isCoreUsable(CoreFamily.SING_BOX)) {
+                        requestCorePreparation(CoreFamily.SING_BOX, selected.normalizedKey);
+                        throw new IllegalStateException(I18n.t("Устанавливаются компоненты балансировщика",
+                                "Installing balancer components"));
+                    }
+                    NativeCoreRuntime.StartResult sideResult = balancerSideCore.start(
+                            CoreFamily.SING_BOX, plan.side.toString(), boundedWait(absoluteDeadline, 12_000L));
+                    if (!sideResult.ok) {
+                        if (sideResult.restartRequired) restartRequired = true;
+                        if (sideResult.missingCore) requestCorePreparation(CoreFamily.SING_BOX, selected.normalizedKey);
+                        throw new IllegalStateException(sideResult.error);
+                    }
+                    sideUsed = true;
+                }
+                config = plan.main;
+            } else config = family == CoreFamily.SING_BOX
+                    ? ProtocolParser.buildConfig(selected, port, credentials.username, credentials.password)
+                    : XrayConfigRenderer.build(selected, port, credentials.username, credentials.password);
+            if (!revisionGate.isCurrent(operation, loaded, settings.enabled)) {
+                stopServicesOnly(absoluteDeadline);
+                return false;
+            }
             NativeCoreRuntime.StartResult result;
             if (absoluteDeadline == Long.MAX_VALUE) {
                 result = nativeCore.start(family, config.toString());
@@ -1164,13 +1209,17 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 long remaining = remainingMillis(absoluteDeadline);
                 // Keep enough of the page deadline for the guarded Telegram
                 // proxy activation after StartCore returns.
-                if (remaining <= 2_100L) return false;
+                if (remaining <= 2_100L) {
+                    stopServicesOnly(absoluteDeadline);
+                    return false;
+                }
                 result = nativeCore.start(family, config.toString(), remaining - 2_000L);
             }
             if (result.restartRequired) {
                 restartRequired = true;
             }
             if (result.missingCore) {
+                stopServicesOnly(absoluteDeadline);
                 requestCorePreparation(family, selected.normalizedKey);
                 fail(new IllegalStateException(result.error));
                 return false;
@@ -1204,6 +1253,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 published = revisionGate.isCurrent(operation, loaded, settings.enabled);
                 if (published) {
                     activeNode = selected;
+                    activePoolKey = balancing ? BalancerConfigRenderer.poolKey(pool) : "";
+                    activePoolCount = balancing ? pool.size() : 0;
+                    activePoolUsesSide = sideUsed;
                     connectionIssue = "";
                     localPort = port;
                     openCallRelay(port, credentials);
@@ -1312,6 +1364,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         finishProxySession(preserveCurrentTelegramProxy);
         stopServicesOnly();
         activeNode = null;
+        activePoolKey = "";
+        activePoolCount = 0;
+        activePoolUsesSide = false;
         connectionIssue = "";
         localPort = 0;
         closeCallRelay();
@@ -1337,6 +1392,10 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         try {
             long timeout = boundedWait(absoluteDeadline, 3_000L);
             nativeCore.stop(timeout);
+        } catch (Throwable ignored) {
+        }
+        try {
+            balancerSideCore.stop(boundedWait(absoluteDeadline, 3_000L));
         } catch (Throwable ignored) {
         }
     }
@@ -1717,8 +1776,15 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 // A page probe must not turn into an unbounded core download.
                 // The one process-wide Go family must already be mapped by a
                 // connection attempt.
-                CoreFamily family = nativeCore.loadedFamily();
-                if (family == null) {
+                CoreFamily preferred = nativeCore.runningFamily();
+                if (preferred == null) preferred = nativeCore.loadedFamily();
+                if (preferred == null && NativeCoreRuntime.isFamilyLoaded(CoreFamily.XRAY)) {
+                    preferred = CoreFamily.XRAY;
+                }
+                if (preferred == null && NativeCoreRuntime.isFamilyLoaded(CoreFamily.SING_BOX)) {
+                    preferred = CoreFamily.SING_BOX;
+                }
+                if (preferred == null) {
                     // Say so on every row: silently clearing the statuses left
                     // the user with no idea why nothing was measured.
                     for (ProtocolParser.Node node : nodes) {
@@ -1732,39 +1798,50 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 resumeGuard = pauseConnectionForProbe(
                         absoluteDeadline, token, runtimeOperation);
                 probeResumeGuard = resumeGuard;
-                List<ProtocolParser.Node> compatible = new ArrayList<>();
+                java.util.Map<CoreFamily, List<ProtocolParser.Node>> groups = new java.util.LinkedHashMap<>();
                 for (ProtocolParser.Node node : nodes) {
-                    if (node.supports(family)) {
-                        compatible.add(node);
-                    } else {
+                    CoreFamily family = node.supports(preferred) ? preferred
+                            : (preferred == CoreFamily.XRAY ? CoreFamily.SING_BOX : CoreFamily.XRAY);
+                    if (!node.supports(family) || !NativeCoreRuntime.isFamilyLoaded(family)
+                            || "amneziawg".equals(node.outbound.optString("type"))
+                            && !NativeCoreRuntime.mappedAwgSupported()) {
                         subscriptions.setProbeResult(node.normalizedKey, "restart_required", -1L);
                         pingCompleted++;
+                    } else {
+                        groups.computeIfAbsent(family, ignored -> new ArrayList<>()).add(node);
                     }
                 }
-                for (int offset = 0; offset < compatible.size() && isPingCurrent(token); offset += 4) {
-                    if (!RuntimePolicy.hasProxyProbeBatchBudget(
-                            remainingMillis(probeDeadline))) break;
-                    int end = Math.min(compatible.size(), offset + 4);
-                    List<ProtocolParser.Node> batch = new ArrayList<>(compatible.subList(offset, end));
-                    List<Integer> ports = uniqueLoopbackPorts(batch.size());
-                    NativeCoreRuntime.StartResult started = nativeCore.start(
-                            family, ProbeConfigRenderer.build(family, batch, ports).toString());
-                    if (!started.ok) {
-                        String status = started.restartRequired ? "restart_required" : "start_failed";
-                        for (ProtocolParser.Node node : batch) {
-                            subscriptions.setProbeResult(node.normalizedKey, status, -1L);
-                            pingCompleted++;
+                for (java.util.Map.Entry<CoreFamily, List<ProtocolParser.Node>> group : groups.entrySet()) {
+                    CoreFamily family = group.getKey();
+                    List<ProtocolParser.Node> compatible = group.getValue();
+                    for (int offset = 0; offset < compatible.size() && isPingCurrent(token); offset += 4) {
+                        if (!RuntimePolicy.hasProxyProbeBatchBudget(
+                                remainingMillis(probeDeadline))) break;
+                        int end = Math.min(compatible.size(), offset + 4);
+                        List<ProtocolParser.Node> batch = new ArrayList<>(compatible.subList(offset, end));
+                        nativeCore.requireAwgSupport(batch.stream().anyMatch(
+                                node -> "amneziawg".equals(node.outbound.optString("type"))));
+                        List<Integer> ports = uniqueLoopbackPorts(batch.size());
+                        NativeCoreRuntime.StartResult started = nativeCore.start(
+                                family, ProbeConfigRenderer.build(family, batch, ports).toString());
+                        if (!started.ok) {
+                            String status = started.restartRequired ? "restart_required" : "start_failed";
+                            for (ProtocolParser.Node node : batch) {
+                                subscriptions.setProbeResult(node.normalizedKey, status, -1L);
+                                pingCompleted++;
+                            }
+                            if (nativeCore.isQuarantined()) break;
+                            continue;
                         }
+                        List<ProbeOutcome> outcomes = probeBatch(
+                                batch, ports, token, probeDeadline, socksSession);
+                        if (!isPingCurrent(token)) break;
+                        for (ProbeOutcome outcome : outcomes) {
+                            publishProbeResult(outcome);
+                        }
+                        nativeCore.stop(Math.min(3_000L, remainingMillis(probeDeadline)));
                         if (nativeCore.isQuarantined()) break;
-                        continue;
                     }
-                    List<ProbeOutcome> outcomes = probeBatch(
-                            batch, ports, token, probeDeadline, socksSession);
-                    if (!isPingCurrent(token)) break;
-                    for (ProbeOutcome outcome : outcomes) {
-                        publishProbeResult(outcome);
-                    }
-                    nativeCore.stop(Math.min(3_000L, remainingMillis(probeDeadline)));
                     if (nativeCore.isQuarantined()) break;
                 }
                 subscriptions.cancelPendingProbes(nodes);
@@ -1918,7 +1995,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             throw new ProxySession.ExternalProxyChangeException();
         }
         ProxySession.StateGuard guard = pendingGuard == null ? currentGuard : pendingGuard;
-        if (!nativeCore.stop(Math.min(3_000L, remainingMillis(deadline)))) {
+        boolean sideStopped = balancerSideCore.stop(Math.min(3_000L, remainingMillis(deadline)));
+        boolean mainStopped = nativeCore.stop(Math.min(3_000L, remainingMillis(deadline)));
+        if (!sideStopped || !mainStopped) {
             throw new IllegalStateException("core stop failed before probe");
         }
         localPort = 0;
@@ -2086,14 +2165,15 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
 
     private static boolean isQuicOnly(ProtocolParser.Node node) {
         String type = node == null ? "" : node.outbound.optString("type", "");
-        return "hysteria".equals(type) || "hysteria2".equals(type) || "tuic".equals(type);
+        return "hysteria".equals(type) || "hysteria2".equals(type) || "tuic".equals(type)
+                || "amneziawg".equals(type);
     }
 
-    private static List<Integer> uniqueLoopbackPorts(int count) throws Exception {
+    private List<Integer> uniqueLoopbackPorts(int count) throws Exception {
         List<Integer> values = new ArrayList<>();
         int attempts = 0;
         while (values.size() < count && attempts++ < 64) {
-            int port = findFreeLoopbackPort();
+            int port = localPorts.allocate(proxySession.reservedLoopbackPorts(), false);
             if (!values.contains(port)) values.add(port);
         }
         if (values.size() != count) throw new IllegalStateException("cannot reserve probe ports");
@@ -2416,8 +2496,10 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 // never refreshes successfully keeps the provider stale, so
                 // the next start refreshed again and the connection dropped
                 // in a loop. Only a changed active configuration justifies it.
-                reconnect = !requiredForStart
-                        && RuntimePolicy.activeConfigurationChanged(activeNode, reselected);
+                boolean poolChanged = !"off".equals(settings.balanceMode)
+                        && !activePoolKey.equals(BalancerConfigRenderer.poolKey(subscriptions.nodes(provider)));
+                reconnect = !requiredForStart && (poolChanged
+                        || RuntimePolicy.activeConfigurationChanged(activeNode, reselected));
             }
         }
         if (startRequired) startInternal(operation);
@@ -2767,12 +2849,13 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         try {
             ProtocolParser.Node selected = subscriptions.selected(settings.providerId);
             if (selected == null) return;
-            CoreFamily selectedFamily = CoreSelector.select(selected,
+            CoreFamily selectedFamily = !"off".equals(settings.balanceMode) ? CoreFamily.XRAY : CoreSelector.select(selected,
                     nativeCore.loadedFamily(),
                     isCoreUsable(CoreFamily.SING_BOX),
                     isCoreUsable(CoreFamily.XRAY),
                     providerCoverage());
-            if (RuntimePolicy.shouldReconnectAfterCoreInstall(
+            if ((!"off".equals(settings.balanceMode) && loaded && settings.enabled)
+                    || RuntimePolicy.shouldReconnectAfterCoreInstall(
                     loaded, settings.enabled, nativeCore.loadedFamily(),
                     selectedFamily, family)) {
                 requestReconnect("core_installed");
@@ -3180,6 +3263,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             if (!isPingCurrent(token)) return;
             int checkedPort = localPort;
             runtimeHealthy = checkedPort > 0 && nativeCore.isRunning()
+                    && (!activePoolUsesSide || balancerSideCore.isRunning())
                     && isLoopbackListening(checkedPort);
         } catch (Throwable error) {
             return;
@@ -3349,8 +3433,10 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         // daemon starts also prevents an older queued UI completion from
         // erasing a replacement coordinator's marker.
         proxySession.beginShutdown();
+        localPorts.close();
         proxySession.cancelPending();
         nativeCore.beginShutdown();
+        balancerSideCore.beginShutdown();
         try {
             if (connectivity != null) connectivity.unregisterNetworkCallback(networkCallback);
         } catch (Throwable ignored) {
@@ -3386,6 +3472,10 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         coordinator.shutdownNow();
         try {
             nativeCore.shutdownForUnload(remainingMillis(deadline));
+        } catch (Throwable ignored) {
+        }
+        try {
+            balancerSideCore.shutdownForUnload(remainingMillis(deadline));
         } catch (Throwable ignored) {
         }
         awaitWithin(proxyRestore, deadline);

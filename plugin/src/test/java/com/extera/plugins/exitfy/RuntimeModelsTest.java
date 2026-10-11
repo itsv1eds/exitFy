@@ -1931,17 +1931,9 @@ public class RuntimeModelsTest {
                 "subscription_user_agent", "ok\r\nInjected: value");
         assertFalse(injected.subscriptionUserAgent.contains("\r"));
         assertFalse(injected.subscriptionUserAgent.contains("\n"));
-        assertEquals(
-                SettingsModel.DEFAULT_SUBSCRIPTION_USER_AGENT
-                        + " \u00b7 "
-                        + SettingsModel.LEGACY_SUBSCRIPTION_USER_AGENT
-                        + " \u00b7 "
-                        + SettingsModel.FALLBACK_SUBSCRIPTION_USER_AGENT,
+        assertEquals(SettingsModel.DEFAULT_SUBSCRIPTION_USER_AGENT,
                 SettingsModel.subscriptionUserAgentLabel(""));
-        assertArrayEquals(new String[]{
-                        SettingsModel.DEFAULT_SUBSCRIPTION_USER_AGENT,
-                        SettingsModel.LEGACY_SUBSCRIPTION_USER_AGENT,
-                        SettingsModel.FALLBACK_SUBSCRIPTION_USER_AGENT},
+        assertArrayEquals(new String[]{SettingsModel.DEFAULT_SUBSCRIPTION_USER_AGENT},
                 SettingsModel.subscriptionUserAgents(""));
         assertArrayEquals(new String[]{"Happ/1.63.1"},
                 SettingsModel.subscriptionUserAgents("Happ/1.63.1"));

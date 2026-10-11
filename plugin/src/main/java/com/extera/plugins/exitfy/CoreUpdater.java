@@ -94,6 +94,16 @@ class CoreUpdater {
     private final InspectionHook inspectionHook;
     private JSONObject metadata;
     private volatile ReadinessSnapshot readinessSnapshot;
+    private volatile boolean awgRequired;
+    private volatile boolean awgOnDisk;
+    private volatile java.util.Set<String> awgDigests = java.util.Collections.emptySet();
+
+    void requireAwgSupport(boolean required) { awgRequired = required && family == CoreFamily.SING_BOX; }
+    boolean supportsAwgDigest(String digest) { return awgDigests.contains(digest); }
+    boolean awgRequired() { return awgRequired; }
+    private boolean awgAvailable() {
+        return awgOnDisk;
+    }
 
     CoreUpdater(AtomicStore store, LimitedHttpClient http,
                 String abi, CoreFamily family) throws Exception {
@@ -277,6 +287,7 @@ class CoreUpdater {
             boolean recentlyChecked = lastCheck > 0L && elapsed >= 0L
                     && elapsed < CHECK_INTERVAL_MS;
             return force || !recentlyChecked
+                    || (awgRequired && !awgAvailable())
                     || ownedVersionNeedsRepair
                     || (noUsableCore && !ownedPending && !rejectedCooldown);
         });
@@ -326,6 +337,9 @@ class CoreUpdater {
         }
 
         String selectedVersion = release.optString("tag_name", family.id);
+        JSONArray capabilities = manifest.optJSONArray("capabilities");
+        boolean supportsAwg = family == CoreFamily.SING_BOX && capabilities != null
+                && containsCapability(capabilities, "amneziawg");
         boolean shouldDownload = withInspectedState(state -> {
             repairOwnedInvalidVersions(selectedVersion, expectedDigest, state);
             if (isRejectedCurrentContract()
@@ -350,6 +364,7 @@ class CoreUpdater {
                     && CORE_ORIGIN.equals(state.pending.origin)
                     && state.pending.coreApi == manifestCoreApi;
             if (activeCurrent || pendingCurrent) {
+                rememberAwgDigest(expectedDigest, supportsAwg);
                 metadata.put("lastCheck", now);
                 saveMetadata();
                 return false;
@@ -395,6 +410,7 @@ class CoreUpdater {
                     stagedMoved[0] = true;
                     metadata.put("pendingDigest", expectedDigest);
                     metadata.put("pendingVersion", selectedVersion);
+                    rememberAwgDigest(expectedDigest, supportsAwg);
                     metadata.put("pendingOrigin", CORE_ORIGIN);
                     metadata.put("pendingCoreApi", manifestCoreApi);
                     metadata.put("pendingManifestSchema", MANIFEST_SCHEMA);
@@ -874,11 +890,11 @@ class CoreUpdater {
     }
 
     boolean requiresNewCore() {
-        return readinessSnapshot.requiresNewCore;
+        return readinessSnapshot.requiresNewCore || awgRequired && !awgAvailable();
     }
 
     boolean hasUsableCore() {
-        return readinessSnapshot.usable;
+        return readinessSnapshot.usable && (!awgRequired || awgAvailable());
     }
 
     boolean verifyLocalReadiness() throws Exception {
@@ -1912,9 +1928,18 @@ class CoreUpdater {
     }
 
     private void refreshReadinessSnapshot() {
+        java.util.Set<String> capable = new java.util.HashSet<>();
+        JSONArray knownAwg = metadata.optJSONArray("awgDigests");
+        for (int i = 0; knownAwg != null && i < Math.min(knownAwg.length(), 8); i++) {
+            String digest = knownAwg.optString(i, "");
+            if (isDigest(digest)) capable.add(digest);
+        }
+        awgDigests = java.util.Collections.unmodifiableSet(capable);
         boolean activeSupported = activeFile().isFile() && metadataContract("active");
         boolean pendingSupported = pendingFile().isFile() && metadataContract("pending");
         boolean backupSupported = backupFile().isFile() && metadataContract("backup");
+        awgOnDisk = (activeSupported && supportsAwgDigest(metadata.optString("activeDigest", "")))
+                || (pendingSupported && supportsAwgDigest(metadata.optString("pendingDigest", "")));
         boolean unsupportedPresent = (activeFile().isFile() && !activeSupported)
                 || (pendingFile().isFile() && !pendingSupported)
                 || (backupFile().isFile() && !backupSupported)
@@ -1929,6 +1954,22 @@ class CoreUpdater {
                 (activeSupported && !rollbackRequested)
                         || pendingSupported
                         || (rollbackRequested && backupSupported));
+    }
+
+    private static boolean containsCapability(JSONArray values, String name) {
+        for (int i=0; i<values.length(); i++) if (name.equals(values.optString(i, ""))) return true;
+        return false;
+    }
+
+    private void rememberAwgDigest(String digest, boolean supported) throws Exception {
+        JSONArray next = new JSONArray();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        if (supported) { next.put(digest); seen.add(digest); }
+        for (String prefix : new String[]{"active", "backup", "pending"}) {
+            String previous = metadata.optString(prefix + "Digest", "");
+            if (supportsAwgDigest(previous) && seen.add(previous)) next.put(previous);
+        }
+        metadata.put("awgDigests", next);
     }
 
     private boolean metadataContract(String prefix) {

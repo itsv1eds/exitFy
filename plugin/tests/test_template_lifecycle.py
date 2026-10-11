@@ -119,6 +119,7 @@ def load_plugin_class(overrides=None):
         ),
         "__id__": "exitFy_v2",
         "__version__": "4.2.1",
+        "DEX_BUILD_ID": "a" * 64,
         "PROVIDER_CATALOG_VERSION": 3,
         "AUTO_CHECK_MINUTE_CHOICES": (0, 15, 60, 360),
         "CALL_HOOK_TARGETS": (
@@ -220,6 +221,9 @@ class TemplateLifecycleTest(unittest.TestCase):
             "calls_via_proxy": True,
             "ping_type": "proxy_get",
             "subscription_user_agent": "Happ/1.63.1",
+            "balance_mode": "sticky",
+            "sort_by_ping": True,
+            "tutorial_step": 5,
         })
 
         values = plugin._settings_dict()
@@ -233,6 +237,9 @@ class TemplateLifecycleTest(unittest.TestCase):
         self.assertTrue(values["calls_via_proxy"])
         self.assertEqual("proxy_get", values["ping_type"])
         self.assertEqual("Happ/1.63.1", values["subscription_user_agent"])
+        self.assertEqual("sticky", values["balance_mode"])
+        self.assertTrue(values["sort_by_ping"])
+        self.assertEqual(5, values["tutorial_step"])
 
     def test_unset_settings_default_to_dual_core_and_tcp(self):
         plugin_type, *_ = load_plugin_class()

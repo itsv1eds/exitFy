@@ -110,7 +110,8 @@ final class RuntimePolicy {
 
     static boolean connectionSettingsChanged(SettingsModel previous, SettingsModel next) {
         return previous == null || next == null || previous.enabled != next.enabled
-                || previous.providerId != next.providerId;
+                || previous.providerId != next.providerId
+                || !previous.balanceMode.equals(next.balanceMode);
     }
 
     static ProviderSelectionDecision normalizeProviderSelection(

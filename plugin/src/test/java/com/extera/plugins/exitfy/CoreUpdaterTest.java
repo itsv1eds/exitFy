@@ -35,6 +35,32 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class CoreUpdaterTest {
+    @Test
+    public void awgCapabilityIsBoundToAnInstalledDigestAndDoesNotDisableOtherProtocols() throws Exception {
+        File root = Files.createTempDirectory("exitfy-awg-capability").toFile();
+        LimitedHttpClient http = new LimitedHttpClient();
+        try {
+            AtomicStore store = new AtomicStore(root);
+            byte[] core = fakeCore((byte) 74);
+            store.writeBytes("core/sing_box/active/libvless.so", core);
+            JSONObject metadata = new JSONObject().put("activeDigest", sha256(core))
+                    .put("activeVersion", "sb-v1.13.20-w1008").put("activeOrigin", "itsv1eds/exitFy")
+                    .put("activeCoreApi", 2).put("activeManifestSchema", 3)
+                    .put("activeMinAndroidApi", 29).put("activeAbi", "arm64-v8a");
+            store.writeJson("core/sing_box/core.json", metadata);
+            CoreUpdater legacy = new CoreUpdater(store, http, "arm64-v8a", CoreFamily.SING_BOX);
+            assertTrue(legacy.hasUsableCore());
+            legacy.requireAwgSupport(true);
+            assertFalse(legacy.hasUsableCore()); assertTrue(legacy.requiresNewCore());
+            legacy.requireAwgSupport(false); assertTrue(legacy.hasUsableCore());
+            metadata.put("awgDigests", new JSONArray().put(sha256(core)));
+            store.writeJson("core/sing_box/core.json", metadata);
+            CoreUpdater updated = new CoreUpdater(store, http, "arm64-v8a", CoreFamily.SING_BOX);
+            updated.requireAwgSupport(true);
+            assertTrue(updated.hasUsableCore()); assertTrue(updated.supportsAwgDigest(sha256(core)));
+            assertFalse(updated.supportsAwgDigest(sha256(fakeCore((byte) 75))));
+        } finally { http.close(); TestFiles.deleteRecursively(root); }
+    }
 
     static {
         // These fixtures exercise digest, ELF and asset-set handling. Signature

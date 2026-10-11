@@ -101,6 +101,10 @@ final class SubscriptionParser {
         int structuredStart = firstNonWhitespace(text);
         try {
             if (structuredStart >= 0
+                    && AwgConfigParser.looksLike(text)) {
+                try { structuredNodes.add(AwgConfigParser.parse(text)); }
+                catch (Exception error) { rejections.reject(reasonCode(error)); }
+            } else if (structuredStart >= 0
                     && (text.charAt(structuredStart) == '{' || text.charAt(structuredStart) == '[')) {
                 collectJson(text, links, structuredNodes, rejections, budget);
             } else if (looksLikeClashProxyYaml(text)) {
@@ -349,6 +353,7 @@ final class SubscriptionParser {
                     // never searched for runnable URI text.
                     walkJsonLinks(object.opt("links"), links, 0, false, budget);
                     walkJsonLinks(object.opt("ssConfLinks"), links, 0, true, budget);
+                    collectWrappedProfiles(object, links, nodes, rejections, budget, 0);
                 }
             } else {
                 JSONArray values = (JSONArray) root;
@@ -366,6 +371,10 @@ final class SubscriptionParser {
                         }
                     } else if (object != null && isProxyOutbound(object)) {
                         collectExplicitOutbound(object, nodes, rejections, budget);
+                    } else if (object != null) {
+                        walkJsonLinks(object.opt("links"), links, 0, false, budget);
+                        walkJsonLinks(object.opt("ssConfLinks"), links, 0, true, budget);
+                        collectWrappedProfiles(object, links, nodes, rejections, budget, 0);
                     } else if (values.opt(i) instanceof String
                             || values.opt(i) instanceof JSONArray) {
                         walkJsonLinks(values.opt(i), links, 0, false, budget);
@@ -410,6 +419,34 @@ final class SubscriptionParser {
         collectExplicitOutbounds((JSONArray) rawOutbounds,
                 proxyOutboundCount((JSONArray) rawOutbounds) == 1
                         ? xrayDisplayName(profile) : "", nodes, rejections, budget);
+    }
+
+    private static void collectWrappedProfiles(JSONObject wrapper, List<String> links,
+                                                List<ProtocolParser.Node> nodes,
+                                                RejectionTracker rejections, CandidateBudget budget,
+                                                int depth) {
+        if (depth > 8) { rejections.reject("json_depth_exceeded"); return; }
+        for (String key : new String[]{"response", "data", "configs", "profiles"}) {
+            Object value = wrapper.opt(key);
+            List<JSONObject> pools = new ArrayList<>();
+            JSONArray items = value instanceof JSONArray ? (JSONArray) value : new JSONArray();
+            if (value instanceof JSONObject) items.put(value);
+            for (int i = 0; i < items.length(); i++) {
+                if ((i & 1023) == 0 && Thread.currentThread().isInterrupted()) throw new ImportInterruptedException();
+                JSONObject profile = items.optJSONObject(i);
+                if (profile == null) continue;
+                if (profile.has("outbounds")) {
+                    if (proxyOutboundCount(profile.optJSONArray("outbounds")) > 1) pools.add(profile);
+                    else collectProfileOutbounds(profile, nodes, rejections, budget);
+                } else if (isProxyOutbound(profile)) collectExplicitOutbound(profile, nodes, rejections, budget);
+                else {
+                    walkJsonLinks(profile.opt("links"), links, 0, false, budget);
+                    walkJsonLinks(profile.opt("ssConfLinks"), links, 0, true, budget);
+                    collectWrappedProfiles(profile, links, nodes, rejections, budget, depth + 1);
+                }
+            }
+            for (JSONObject pool : pools) collectProfileOutbounds(pool, nodes, rejections, budget);
+        }
     }
 
     private static int proxyOutboundCount(JSONArray values) {

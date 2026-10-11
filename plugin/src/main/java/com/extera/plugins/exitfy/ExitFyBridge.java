@@ -29,6 +29,7 @@ public final class ExitFyBridge {
     private static boolean bridgeLoaded;
     private static String bridgePath = "";
     private static boolean dexKeeperStarted;
+    private static String dexKeeperName = DEX_KEEPER_NAME;
 
     private ExitFyBridge() {
     }
@@ -46,6 +47,11 @@ public final class ExitFyBridge {
                 throw new IllegalStateException("arm64-v8a primary process ABI required");
             }
             BootstrapConfig bootstrap = BootstrapConfig.parse(bootstrapJson);
+            String expectedKeeper = DEX_KEEPER_NAME + (bootstrap.pluginBuild.isEmpty() ? "" : ":" + bootstrap.pluginBuild);
+            if (dexKeeperStarted && !dexKeeperName.equals(expectedKeeper)) throw new IllegalStateException(I18n.t(
+                    "Плагин обновлён. Полностью закройте клиент и откройте снова.",
+                    "Plugin updated. Fully close and reopen the client."));
+            dexKeeperName = expectedKeeper;
             if (!bridgeLoaded) {
                 loadNativeBridge(bootstrap.nativeBridgePath);
                 bridgeLoaded = true;
@@ -173,7 +179,7 @@ public final class ExitFyBridge {
     /** Package-private so unit tests can verify process-lifetime idempotence. */
     static synchronized void ensureDexKeeper() {
         if (dexKeeperStarted) return;
-        Thread keeper = new Thread(new DexKeeper(), DEX_KEEPER_NAME);
+        Thread keeper = new Thread(new DexKeeper(), dexKeeperName);
         keeper.setDaemon(true);
         keeper.setContextClassLoader(ExitFyBridge.class.getClassLoader());
         keeper.start();

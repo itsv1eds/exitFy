@@ -56,7 +56,7 @@ final class SubscriptionManager implements Closeable {
     private static final Set<String> UI_PROTOCOLS = Collections.unmodifiableSet(
             new LinkedHashSet<>(java.util.Arrays.asList(
                     "all", "vless", "vmess", "trojan", "shadowsocks",
-                    "hysteria", "hysteria2", "tuic")));
+                    "hysteria", "hysteria2", "tuic", "amneziawg")));
     // Ordered like the catalog.
     private static final String[] REFERRALS = {
             "https://t.me/invisibleshrimpbot?start=exitfy",
@@ -726,6 +726,11 @@ final class SubscriptionManager implements Closeable {
 
     JSONObject uiState(int providerId, int requestedOffset, int requestedLimit,
                        String requestedQuery, String requestedProtocol) {
+        return uiState(providerId, requestedOffset, requestedLimit, requestedQuery, requestedProtocol, false);
+    }
+
+    JSONObject uiState(int providerId, int requestedOffset, int requestedLimit,
+                       String requestedQuery, String requestedProtocol, boolean sortByPing) {
         int bounded = boundedProvider(providerId);
         ViewSnapshot snapshot = viewSnapshot;
         JSONObject result = new JSONObject();
@@ -741,6 +746,9 @@ final class SubscriptionManager implements Closeable {
                 if (!"all".equals(protocol) && !protocol.equals(value.protocol)) continue;
                 if (!query.isEmpty() && !value.searchText.contains(query)) continue;
                 values.add(value);
+            }
+            if (sortByPing) {
+                values.sort((left, right) -> Long.compare(sortLatency(left.key), sortLatency(right.key)));
             }
             int total = values.size();
             int offset = Math.min(requested, total);
@@ -780,6 +788,15 @@ final class SubscriptionManager implements Closeable {
         } catch (Exception ignored) {
         }
         return result;
+    }
+
+    long latency(String key) {
+        return cachedLatency(latencyCache, key);
+    }
+
+    private long sortLatency(String key) {
+        long value = latency(key);
+        return value < 0 ? Long.MAX_VALUE : value;
     }
 
     JSONObject uiNodeInfo(int providerId, String key) {

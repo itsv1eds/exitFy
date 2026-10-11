@@ -143,7 +143,7 @@ final class ProxySession implements Closeable {
         ProxySnapshotModel owned = snapshot.withOwnedFingerprint(fingerprint(requested));
         JSONObject ownedJson = owned.toJson()
                 .put(RETAIN_ACTIVATION_GUARD, true)
-                .put(SESSION_NONCE, randomToken(16));
+                .put(SESSION_NONCE, randomToken(16)).put("ownedPort", port);
         rememberSessionSnapshot(ownedJson);
         try {
             writeSessionMarker(ownedJson);
@@ -199,6 +199,23 @@ final class ProxySession implements Closeable {
             }
             throw error;
         }
+    }
+
+    java.util.Set<Integer> reservedLoopbackPorts() throws Exception {
+        return runOnUi(beginOperation(), DEFAULT_UI_TIMEOUT_MS, () -> {
+            java.util.Set<Integer> ports = new java.util.HashSet<>();
+            for (SharedConfig.ProxyInfo info : backend().list()) {
+                ProxySnapshotModel.ProxyValue value = ProxyCompat.read(info);
+                if (value != null && LocalPortAllocator.isLoopback(value.address)) ports.add(value.port);
+            }
+            ProxySnapshotModel.ProxyValue current = ProxyCompat.read(backend().current());
+            if (current != null && LocalPortAllocator.isLoopback(current.address)) ports.add(current.port);
+            SharedPreferences preferences = MessagesController.getGlobalMainSettings();
+            if (LocalPortAllocator.isLoopback(preferences.getString("proxy_ip", ""))) {
+                ports.add(preferences.getInt("proxy_port", 0));
+            }
+            return ports;
+        });
     }
 
     StateGuard captureState(long timeoutMillis) throws Exception {

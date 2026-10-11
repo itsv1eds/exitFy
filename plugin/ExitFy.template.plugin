@@ -32,7 +32,8 @@ __sdk_version__ = ">=1.4.3.3"
 
 ENTRY_CLASS = "com.extera.plugins.exitfy.ExitFyBridge"
 DEX_KEEPER_PREFIX = "exitfy-dex-keeper:exitFy_v2:"
-DEX_KEEPER_NAME = DEX_KEEPER_PREFIX + __version__
+DEX_BUILD_ID = "__EXITFY_BUILD_ID__"
+DEX_KEEPER_NAME = DEX_KEEPER_PREFIX + __version__ + ":" + DEX_BUILD_ID
 SETTINGS_SCHEMA = 6
 PROVIDER_CATALOG_VERSION = 3
 AUTO_CHECK_MINUTE_CHOICES = (0, 15, 60, 360)
@@ -66,6 +67,10 @@ Process = jclass("android.os.Process")
 LocaleController = jclass("org.telegram.messenger.LocaleController")
 
 _TRANSLATIONS = {
+    "restart_update": (
+        "Плагин обновлён. Полностью закройте клиент и откройте снова, чтобы загрузить новую версию exitFy.",
+        "Plugin updated. Fully close and reopen the client to load the new exitFy version.",
+    ),
     "runtime_not_started": ("exitFy не запущен: ", "exitFy did not start: "),
     "runtime_unavailable": ("Runtime exitFy недоступен", "exitFy runtime is unavailable"),
     "menu_settings": ("Настройки exitFy", "exitFy settings"),
@@ -277,20 +282,20 @@ class DexRuntime:
                 incompatible.append(name)
 
         if incompatible:
-            raise RuntimeError("another exitFy DEX version is retained; restart exteraGram")
+            raise RuntimeError(_t("restart_update"))
         if not matching:
             return None
         if len(matching) != 1:
-            raise RuntimeError("ambiguous retained exitFy DEX; restart exteraGram")
+            raise RuntimeError(_t("restart_update"))
         try:
             loader = matching[0].getContextClassLoader()
             if loader is None:
-                raise RuntimeError("retained exitFy DEX has no class loader; restart exteraGram")
+                raise RuntimeError(_t("restart_update"))
             return loader, loader.loadClass(ENTRY_CLASS)
         except RuntimeError:
             raise
         except Exception as exc:
-            raise RuntimeError("retained exitFy DEX is unusable; restart exteraGram: " + str(exc))
+            raise RuntimeError(_t("restart_update")) from exc
 
     def invoke(self, method_name, *args):
         self.prepare()
@@ -401,6 +406,7 @@ class ExitFyPlugin(BasePlugin):
         self._runtime_ready = False
         self._provider_migration_value = None
         self._legacy_import = None
+        self._tutorial_offered = False
 
     def on_plugin_load(self):
         try:
@@ -412,6 +418,7 @@ class ExitFyPlugin(BasePlugin):
             bootstrap = {
                 "pluginId": __id__,
                 "pluginVersion": __version__,
+                "pluginBuild": DEX_BUILD_ID,
                 "settingsSchema": SETTINGS_SCHEMA,
                 "dataDir": data_dir,
                 "nativeBridgePath": bridge_path,
@@ -431,6 +438,7 @@ class ExitFyPlugin(BasePlugin):
                 self.log("exitFy schema marker persistence failed: " + str(exc))
             self._register_menu()
             self._import_legacy_sources()
+            self._maybe_show_tutorial()
             if self._legacy_plugin_enabled():
                 _ui_info(_t("legacy_still_enabled"))
         except Exception as exc:
@@ -459,8 +467,41 @@ class ExitFyPlugin(BasePlugin):
         try:
             _DEX_RUNTIME.call("onAppResume")
             self._install_call_hooks()
+            self._maybe_show_tutorial()
         except Exception as exc:
             self.log("exitFy resume failed: " + str(exc))
+
+    def _maybe_show_tutorial(self):
+        if getattr(self, "_tutorial_offered", False) or not self._runtime_ready:
+            return
+        try:
+            state = json.loads(str(_DEX_RUNTIME.call("getUiState")))
+            if state.get("tutorialComplete", False):
+                self._tutorial_offered = True
+                return
+        except Exception:
+            return
+
+        def open_on_ui():
+            try:
+                if self._tutorial_offered or not self._runtime_ready:
+                    return
+                fragment = get_last_fragment()
+                if fragment is None:
+                    return
+                account = fragment.getCurrentAccount()
+                UserConfig = jclass("org.telegram.messenger.UserConfig")
+                if not UserConfig.getInstance(account).isClientActivated():
+                    return
+                dashboard = _DEX_RUNTIME.call("createDashboardFragment")
+                if dashboard is None:
+                    return
+                dashboard.setCurrentAccount(account)
+                if fragment.presentFragment(dashboard):
+                    self._tutorial_offered = True
+            except Exception:
+                pass
+        run_on_ui_thread(open_on_ui)
 
     @staticmethod
     def _as_bool(value):
@@ -501,6 +542,9 @@ class ExitFyPlugin(BasePlugin):
             "schema_version": SETTINGS_SCHEMA,
             "failover": self._as_bool(self.get_setting("failover", False)),
             "dual_core": self._as_bool(self.get_setting("dual_core", True)),
+            "balance_mode": str(self.get_setting("balance_mode", "off")),
+            "sort_by_ping": self._as_bool(self.get_setting("sort_by_ping", False)),
+            "tutorial_step": self._bounded_index(self.get_setting("tutorial_step", 0), 16),
             "refresh_on_open": self._as_bool(
                 self.get_setting("refresh_on_open", False)
             ),

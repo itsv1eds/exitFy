@@ -40,7 +40,7 @@ final class ExitFyServersFragment
 
     private static final String[] PROTOCOL_VALUES = {
             "all", "vless", "vmess", "trojan", "shadowsocks",
-            "hysteria", "hysteria2", "tuic",
+            "hysteria", "hysteria2", "tuic", "amneziawg",
     };
     private final ArrayList<SettingRow> nodeRows = new ArrayList<>();
     private final ArrayList<SettingRow> customSourceRows = new ArrayList<>();
@@ -60,11 +60,14 @@ final class ExitFyServersFragment
     private SettingRow providerRow;
     private SettingRow searchRow;
     private SettingRow protocolRow;
+    private SettingRow sortRow;
     private SettingRow refreshRow;
     private SettingRow pingRow;
     private SettingRow referralRow;
     private SettingRow addNodeRow;
     private SettingRow addSubscriptionRow;
+    private SettingRow awgRow;
+    private static final int AWG_FILE_REQUEST = 4831;
     private SettingRow clearNodesRow;
     private SettingRow pageStatusRow;
     private SettingRow previousPageRow;
@@ -118,6 +121,18 @@ final class ExitFyServersFragment
                         "Show only the selected protocol"));
         setSafeClick(protocolRow.view, this::showProtocolDialog);
         content.addView(protocolRow.view, sectionParams());
+        sortRow = settingRow(context, R.drawable.msg_speed,
+                I18n.t("Сортировка", "Sort servers"), "");
+        setSafeClick(sortRow.view, () -> showChoiceDialog(
+                I18n.t("Сортировка серверов", "Server order"),
+                new CharSequence[]{I18n.t("Как в подписке", "Subscription order"),
+                        I18n.t("По пингу: быстрые первыми", "By ping: fastest first")},
+                state.sortByPing ? 1 : 0, index -> {
+                    offset = 0;
+                    setSetting("sort_by_ping", index == 1);
+                    markPageDirty();
+                }));
+        content.addView(sortRow.view, sectionParams());
 
         content.addView(sectionLabel(context,
                 I18n.t("ДЕЙСТВИЯ", "ACTIONS")), matchWrap());
@@ -156,6 +171,12 @@ final class ExitFyServersFragment
                         "HTTP or HTTPS URL; provider switches to Custom"));
         setSafeClick(addSubscriptionRow.view, this::showAddSubscriptionDialog);
         content.addView(addSubscriptionRow.view, sectionParams());
+
+        awgRow = settingRow(context, R.drawable.msg_download,
+                I18n.t("Добавить AmneziaWG", "Add AmneziaWG"),
+                I18n.t("Импорт .conf или вставка полного конфига", "Import a .conf or paste a complete configuration"));
+        setSafeClick(awgRow.view, this::showAwgImport);
+        content.addView(awgRow.view, sectionParams());
 
         clearNodesRow = settingRow(context, R.drawable.msg_retry,
                 I18n.t("Очистить серверы", "Clear servers"),
@@ -246,6 +267,7 @@ final class ExitFyServersFragment
     protected void renderUiState(ExitFyDashboardState next) {
         if (next == null) return;
         int previousProvider = state.providerId;
+        if (state.sortByPing != next.sortByPing) { offset = 0; pageDirty = true; }
         state = next;
         if (providerRow == null) return;
 
@@ -269,6 +291,8 @@ final class ExitFyServersFragment
         searchRow.setValue(query.isEmpty()
                 ? I18n.t("Без фильтра", "No filter") : query);
         protocolRow.setValue(protocolLabel(protocol));
+        sortRow.setValue(next.sortByPing ? I18n.t("По пингу", "By ping")
+                : I18n.t("Как в подписке", "Subscription order"));
         refreshRow.setValue(next.refreshRunning
                 ? I18n.t("Обновление…", "Refreshing…")
                 : !next.subscriptionIssue.isEmpty() ? next.subscriptionIssue
@@ -323,6 +347,7 @@ final class ExitFyServersFragment
         referralRow.setEnabled(ready
                 && state.providerId != SettingsModel.CUSTOM_PROVIDER_ID);
         addNodeRow.setEnabled(ready);
+        awgRow.setEnabled(ready && !state.importRunning);
         addSubscriptionRow.setEnabled(ready);
         clearNodesRow.setEnabled(ready);
         pageStatusRow.setEnabled(ready && !pageRequestInFlight);
@@ -396,6 +421,7 @@ final class ExitFyServersFragment
                 "Hysteria",
                 "Hysteria 2",
                 "TUIC",
+                "AmneziaWG",
         };
         showChoiceDialog(I18n.t("Протокол", "Protocol"), labels,
                 indexOf(PROTOCOL_VALUES, protocol), index -> {
@@ -463,7 +489,8 @@ final class ExitFyServersFragment
                             state.providerId == requestedProvider
                                     && offset == requestedOffset
                                     && requestedQuery.equals(query)
-                                    && requestedProtocol.equals(protocol);
+                                    && requestedProtocol.equals(protocol)
+                                    && requestedFingerprint.equals(observedFingerprint);
                     if (parsed.valid && !localRequestStillCurrent) {
                         // A still-open filter dialog can change local state
                         // while the previous read-only query finishes.
@@ -754,6 +781,59 @@ final class ExitFyServersFragment
                         .put("command", "add_node")
                         .put("uri", uri)),
                 null);
+    }
+
+    private void showAwgImport() {
+        showActionDialog("AmneziaWG", new CharSequence[]{
+                I18n.t("Выбрать .conf", "Choose a .conf"),
+                I18n.t("Вставить конфиг", "Paste configuration")}, index -> {
+            if (index == 0) {
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*")
+                        .addCategory(Intent.CATEGORY_OPENABLE);
+                try { startActivityForResult(intent, AWG_FILE_REQUEST); }
+                catch (Exception error) { showToast(I18n.t("Не удалось открыть файлы", "Could not open files"), false); }
+            } else if (index == 1) {
+                showTextInputDialog("AmneziaWG",
+                        I18n.t("Вставьте весь .conf: Interface и Peer. Ключи сохраняются только на устройстве.",
+                                "Paste the entire .conf: Interface and Peer. Keys stay on your device."),
+                        "[Interface]\nPrivateKey = …\nAddress = …\n[Peer]\n…", I18n.t("Добавить", "Add"), null,
+                        AwgConfigParser.MAX_CONFIG_CHARS, true, text -> importAwgText(text), null);
+            }
+        });
+    }
+
+    private void importAwgText(String text) {
+        runMutation(() -> {
+            AwgConfigParser.parse(text);
+            return new JSONObject().put("command", "import_text").put("text", text);
+        });
+    }
+
+    @Override
+    public void onActivityResultFragment(int requestCode, int resultCode, Intent data) {
+        if (requestCode != AWG_FILE_REQUEST) { super.onActivityResultFragment(requestCode, resultCode, data); return; }
+        if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null) return;
+        Context context = getParentActivity();
+        if (context == null) return;
+        Uri selected = data.getData();
+        runMutation(() -> {
+            byte[] bytes;
+            try (java.io.InputStream stream = context.getContentResolver().openInputStream(selected)) {
+                if (stream == null) throw new java.io.IOException(I18n.t("Файл недоступен", "File unavailable"));
+                java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+                byte[] buffer = new byte[4096]; int read;
+                while ((read = stream.read(buffer)) >= 0) {
+                    if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException();
+                    if (output.size() + read > AwgConfigParser.MAX_CONFIG_CHARS) throw new IllegalArgumentException(
+                            I18n.t("Конфиг AWG превышает 64 КиБ", "AWG configuration exceeds 64 KiB"));
+                    output.write(buffer, 0, read);
+                }
+                bytes = output.toByteArray();
+            }
+            String text = SubscriptionParser.decodeStrictUtf8(bytes);
+            AwgConfigParser.parse(text);
+            return new JSONObject().put("command", "import_text").put("text", text);
+        });
     }
 
     private void showAddSubscriptionDialog() {
@@ -1068,7 +1148,7 @@ final class ExitFyServersFragment
         return value.runtimeAvailable + "|" + value.providerId + "|"
                 + value.serverCount + "|" + value.customUrlCount + "|"
                 + value.activeKey + "|" + value.refreshRunning + "|"
-                + value.importRunning + "|" + value.pingRunning;
+                + value.importRunning + "|" + value.pingRunning + "|" + value.sortByPing;
     }
 
     private static int indexOf(String[] values, String expected) {

@@ -16,7 +16,7 @@ final class ErrorSanitizer {
             "password|passwd|pass|token|secret|uuid|proxy-authorization|authorization|"
                     + "auth_str|auth-str|auth|obfs-password|obfs_password|obfs|"
                     + "encryption|legacy_seed|legacy-seed|seed|path|headers|cookie|"
-                    + "private_key|private-key|privatekey|pre_shared_key|pre-shared-key|"
+                    + "awg|i[1-5]|header_protection_key|preshared_key|private_key|private-key|privatekey|pre_shared_key|pre-shared-key|"
                     + "presharedkey|psk|access_token|refresh_token|client_secret|"
                     + "x-api-key|x_api_key|api-key|api_key|x-hwid|hwid|username|user|id";
     private static final Pattern SECRET_FIELD = Pattern.compile(
@@ -231,6 +231,10 @@ final class ErrorSanitizer {
             case "obfs_password":
             case "obfs":
             case "encryption":
+            case "awg":
+            case "header_protection_key":
+            case "preshared_key":
+            case "i1": case "i2": case "i3": case "i4": case "i5":
             case "private_key":
             case "private-key":
             case "privatekey":

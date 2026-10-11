@@ -129,10 +129,10 @@ public class SubscriptionManagerTest {
     }
 
     @Test
-    public void defaultAgentsRecoverARefusedHappRequestAndCustomAgentsDoNotFallback()
+    public void aSingleHappIdentityIsUsedAndCustomAgentsDoNotFallback()
             throws Exception {
         MiniServer server = new MiniServer(new AtomicReference<>(A1), new AtomicInteger(200));
-        server.requiredAgent = SettingsModel.LEGACY_SUBSCRIPTION_USER_AGENT;
+        server.requiredAgent = SettingsModel.DEFAULT_SUBSCRIPTION_USER_AGENT;
         File root = Files.createTempDirectory("exitfy-legacy-agent").toFile();
         LimitedHttpClient http = new LimitedHttpClient();
         SubscriptionManager manager = new SubscriptionManager(new AtomicStore(root), http);
@@ -140,8 +140,8 @@ public class SubscriptionManagerTest {
             manager.addCustomUrl("http://127.0.0.1:" + server.port() + "/first");
             assertEquals(1, manager.refresh(SettingsModel.CUSTOM_PROVIDER_ID,
                     SettingsModel.defaults()).size());
-            assertEquals(2, server.requests());
-            assertTrue(server.lastRequest().contains("User-Agent: v2rayN/6.23"));
+            assertEquals(1, server.requests());
+            assertTrue(server.lastRequest().contains("User-Agent: Happ/5.2.0"));
             try {
                 manager.refresh(SettingsModel.CUSTOM_PROVIDER_ID, SettingsModel.defaults()
                         .withSetting("subscription_user_agent", "Custom/1.0"));
@@ -149,7 +149,7 @@ public class SubscriptionManagerTest {
             } catch (IllegalStateException refused) {
                 assertEquals("HTTP 403", refused.getMessage());
             }
-            assertEquals(3, server.requests());
+            assertEquals(2, server.requests());
             assertEquals(1, manager.nodes(SettingsModel.CUSTOM_PROVIDER_ID).size());
         } finally {
             manager.close();

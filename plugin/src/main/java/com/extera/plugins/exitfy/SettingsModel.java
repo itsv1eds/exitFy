@@ -11,10 +11,7 @@ final class SettingsModel {
     private static final int MAX_HWID_UTF8_BYTES = 1_024;
     static final String PING_PROXY_GET = "proxy_get";
     static final String PING_TCP = "tcp";
-    // Retain the Legacy identity for panels that do not serve Happ configs.
     static final String DEFAULT_SUBSCRIPTION_USER_AGENT = "Happ/5.2.0";
-    static final String LEGACY_SUBSCRIPTION_USER_AGENT = "v2rayN/6.23";
-    static final String FALLBACK_SUBSCRIPTION_USER_AGENT = "clash-verge/1.0";
 
     final boolean enabled;
     final int providerId;
@@ -27,8 +24,11 @@ final class SettingsModel {
     /** Minutes between automatic latency checks; 0 keeps them off. */
     final int autoCheckMinutes;
     final boolean callsViaProxy;
-    /** Empty keeps the default agent list; a value replaces that list. */
+    /** Empty uses Happ; a custom value replaces that single identity. */
     final String subscriptionUserAgent;
+    final String balanceMode;
+    final boolean sortByPing;
+    final int tutorialStep;
 
     SettingsModel(boolean enabled, int providerId, String customHwid,
                   int schemaVersion, String pingType) {
@@ -61,6 +61,16 @@ final class SettingsModel {
                   int schemaVersion, String pingType, boolean dualCore,
                   boolean failover, boolean refreshOnOpen, int autoCheckMinutes,
                   boolean callsViaProxy, String subscriptionUserAgent) {
+        this(enabled, providerId, customHwid, schemaVersion, pingType, dualCore,
+                failover, refreshOnOpen, autoCheckMinutes, callsViaProxy,
+                subscriptionUserAgent, "off", false, 0);
+    }
+
+    SettingsModel(boolean enabled, int providerId, String customHwid,
+                  int schemaVersion, String pingType, boolean dualCore,
+                  boolean failover, boolean refreshOnOpen, int autoCheckMinutes,
+                  boolean callsViaProxy, String subscriptionUserAgent,
+                  String balanceMode, boolean sortByPing, int tutorialStep) {
         this.enabled = enabled;
         this.providerId = Math.max(0, Math.min(providerId, CUSTOM_PROVIDER_ID));
         this.customHwid = normalizeHeaderValue(customHwid);
@@ -72,6 +82,9 @@ final class SettingsModel {
         this.autoCheckMinutes = normalizeAutoCheckMinutes(autoCheckMinutes);
         this.callsViaProxy = callsViaProxy;
         this.subscriptionUserAgent = normalizeHeaderValue(subscriptionUserAgent);
+        this.balanceMode = validBalanceMode(balanceMode) ? balanceMode : "off";
+        this.sortByPing = sortByPing;
+        this.tutorialStep = Math.max(0, Math.min(16, tutorialStep));
     }
 
     static SettingsModel defaults() {
@@ -92,7 +105,10 @@ final class SettingsModel {
                     object.optBoolean("refresh_on_open", false),
                     object.optInt("auto_check_minutes", 0),
                     object.optBoolean("calls_via_proxy", false),
-                    object.optString("subscription_user_agent", "")
+                    object.optString("subscription_user_agent", ""),
+                    object.optString("balance_mode", "off"),
+                    object.optBoolean("sort_by_ping", false),
+                    object.optInt("tutorial_step", 0)
             );
         } catch (Exception ignored) {
             return defaults();
@@ -113,6 +129,9 @@ final class SettingsModel {
             object.put("auto_check_minutes", autoCheckMinutes);
             object.put("calls_via_proxy", callsViaProxy);
             object.put("subscription_user_agent", subscriptionUserAgent);
+            object.put("balance_mode", balanceMode);
+            object.put("sort_by_ping", sortByPing);
+            object.put("tutorial_step", tutorialStep);
         } catch (Exception ignored) {
         }
         return object;
@@ -210,6 +229,23 @@ final class SettingsModel {
                 return copy(enabled, providerId, customHwid, pingType, dualCore,
                         failover, refreshOnOpen, autoCheckMinutes, callsViaProxy,
                         (String) value);
+            case "balance_mode":
+                if (!(value instanceof String) || !validBalanceMode((String) value)) {
+                    throw new IllegalArgumentException("invalid balance_mode");
+                }
+                return copyPreferences((String) value, sortByPing, tutorialStep);
+            case "sort_by_ping":
+                if (!(value instanceof Boolean)) {
+                    throw new IllegalArgumentException("sort_by_ping must be boolean");
+                }
+                return copyPreferences(balanceMode, (Boolean) value, tutorialStep);
+            case "tutorial_step":
+                if (!(value instanceof Number)) throw new IllegalArgumentException("invalid tutorial_step");
+                double step = ((Number) value).doubleValue();
+                if (!Double.isFinite(step) || step != Math.rint(step) || step < 0 || step > 16) {
+                    throw new IllegalArgumentException("invalid tutorial_step");
+                }
+                return copyPreferences(balanceMode, sortByPing, (int) step);
             default:
                 throw new IllegalArgumentException("unsupported setting key");
         }
@@ -237,6 +273,9 @@ final class SettingsModel {
                 return callsViaProxy;
             case "subscription_user_agent":
                 return subscriptionUserAgent;
+            case "balance_mode": return balanceMode;
+            case "sort_by_ping": return sortByPing;
+            case "tutorial_step": return tutorialStep;
             default:
                 throw new IllegalArgumentException("unsupported setting key");
         }
@@ -248,7 +287,17 @@ final class SettingsModel {
                                boolean callsViaProxy, String subscriptionUserAgent) {
         return new SettingsModel(enabled, providerId, customHwid, schemaVersion,
                 pingType, dualCore, failover, refreshOnOpen, autoCheckMinutes,
-                callsViaProxy, subscriptionUserAgent);
+                callsViaProxy, subscriptionUserAgent, balanceMode, sortByPing, tutorialStep);
+    }
+
+    private SettingsModel copyPreferences(String mode, boolean sort, int step) {
+        return new SettingsModel(enabled, providerId, customHwid, schemaVersion,
+                pingType, dualCore, failover, refreshOnOpen, autoCheckMinutes,
+                callsViaProxy, subscriptionUserAgent, mode, sort, step);
+    }
+
+    static boolean validBalanceMode(String value) {
+        return "off".equals(value) || "round_robin".equals(value) || "sticky".equals(value);
     }
 
     private static int boundedInt(JSONObject object, String key, int minimum, int maximum) {
@@ -268,20 +317,14 @@ final class SettingsModel {
 
     static String[] subscriptionUserAgents(String custom) {
         if (custom == null || custom.isEmpty()) {
-            return new String[]{
-                    DEFAULT_SUBSCRIPTION_USER_AGENT,
-                    LEGACY_SUBSCRIPTION_USER_AGENT,
-                    FALLBACK_SUBSCRIPTION_USER_AGENT,
-            };
+            return new String[]{DEFAULT_SUBSCRIPTION_USER_AGENT};
         }
         return new String[]{custom};
     }
 
     static String subscriptionUserAgentLabel(String custom) {
         if (custom == null || custom.isEmpty()) {
-            return DEFAULT_SUBSCRIPTION_USER_AGENT
-                    + " \u00b7 " + LEGACY_SUBSCRIPTION_USER_AGENT
-                    + " \u00b7 " + FALLBACK_SUBSCRIPTION_USER_AGENT;
+            return DEFAULT_SUBSCRIPTION_USER_AGENT;
         }
         return custom;
     }
@@ -352,14 +395,16 @@ final class SettingsModel {
                 && refreshOnOpen == value.refreshOnOpen
                 && autoCheckMinutes == value.autoCheckMinutes
                 && callsViaProxy == value.callsViaProxy
-                && Objects.equals(subscriptionUserAgent, value.subscriptionUserAgent);
+                && Objects.equals(subscriptionUserAgent, value.subscriptionUserAgent)
+                && balanceMode.equals(value.balanceMode) && sortByPing == value.sortByPing
+                && tutorialStep == value.tutorialStep;
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(enabled, providerId, customHwid, schemaVersion,
                 pingType, dualCore, failover, refreshOnOpen, autoCheckMinutes,
-                callsViaProxy, subscriptionUserAgent);
+                callsViaProxy, subscriptionUserAgent, balanceMode, sortByPing, tutorialStep);
     }
 
     static final int[] AUTO_CHECK_CHOICES = {0, 15, 60, 360};
