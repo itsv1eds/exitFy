@@ -158,7 +158,6 @@ final class ExitFyPreferencesFragment
         if (next.runtimeAvailable) {
             balanceRow.setValue("off".equals(next.balanceMode) ? I18n.t("Выключено", "Off")
                     : "round_robin".equals(next.balanceMode) ? "Round Robin" : "Sticky Session");
-            balanceRow.setEnabled(next.serverCount > 1);
             pingTypeRow.setValue(pingTypeLabel(next.pingType));
             customHwidRow.setValue(next.customHwidSet
                     ? I18n.t("Настроен", "Configured")
@@ -185,7 +184,6 @@ final class ExitFyPreferencesFragment
             String unavailable = I18n.t("Runtime недоступен", "Runtime unavailable");
             balanceRow.setValue("off".equals(next.balanceMode) ? I18n.t("Выключено", "Off")
                     : "round_robin".equals(next.balanceMode) ? "Round Robin" : "Sticky Session");
-            balanceRow.setEnabled(next.serverCount > 1);
             pingTypeRow.setValue(unavailable);
             customHwidRow.setValue(unavailable);
             subscriptionUserAgentRow.setValue(unavailable);
@@ -208,6 +206,8 @@ final class ExitFyPreferencesFragment
 
     private void updateRowsEnabled() {
         boolean enabled = state.runtimeAvailable && !commandBusy;
+        if (balanceRow != null) balanceRow.setEnabled(enabled
+                && (state.serverCount > 1 || !"off".equals(state.balanceMode)));
         if (pingTypeRow != null) pingTypeRow.setEnabled(enabled);
         if (customHwidRow != null) customHwidRow.setEnabled(enabled);
         if (subscriptionUserAgentRow != null) subscriptionUserAgentRow.setEnabled(enabled);
