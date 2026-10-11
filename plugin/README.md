@@ -1,4 +1,6 @@
-# exitFy 4.2.1
+# exitFy 4.5
+
+Release notes: [CHANGELOG.md](CHANGELOG.md).
 
 `ExitFy.template.plugin` is the thin Python loader and lifecycle layer. Drawer
 and chat-action entries open a compact Telegram-native dashboard implemented as
@@ -141,9 +143,10 @@ Advanced. The dashboard still never names an engine.
 The `dual_core` setting, on by default and offered as an experiment under
 Advanced, lifts that restriction: the JNI bridge holds one slot per family and
 maps the second on demand, so a server the mapped family cannot run no longer
-waits for a restart. Only one core ever runs — the running one is stopped
-before the other starts — and `g_lock` still serializes every StartCore and
-StopCore across both slots. The cost is that two Go runtimes then share the
+waits for a restart. Without a mixed balancer, the running core is stopped
+before the other starts. A mixed balancer may run one instance of each family;
+`g_lock` still serializes every StartCore and StopCore across both slots.
+The cost is that two Go runtimes then share the
 process, each with its own signal handlers, and neither can be unmapped, so
 turning the setting back off only takes effect in the next process.
 
@@ -156,7 +159,7 @@ loading a different embedded DEX version fails closed until exteraGram is
 restarted.
 
 The plugin ID remains `exitFy_v2` and the settings schema is 6. Upgrading to
-4.2.1 does not clear settings, custom subscriptions or custom nodes.
+4.5 does not clear settings, custom subscriptions or custom nodes.
 
 The 3.x plugin used the separate id `exitfy`, so the host installs this one
 beside it instead of replacing it. On first load exitFy reads that plugin's
@@ -325,5 +328,5 @@ as exitFy's.
 First use offers a tutorial with the actual step count and persisted progress.
 Advanced can replay it. Opening the tutorial never starts a connection,
 refresh or download. Each generated artifact also carries a DEX/native build
-identity, so replacing 4.2.1 with a different 4.2.1 build asks for a complete
+identity, so replacing 4.5 with a different 4.5 build asks for a complete
 client restart in the user's language instead of reusing stale Java code.
