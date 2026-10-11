@@ -114,7 +114,7 @@ Device/HWID headers are sent only to the URL the user/provider configured, never
 
 Selection is adaptive and automatic. The dashboard never names an engine. One Go family may be mapped per process unless the `dual_core` experiment is on (the default) (mapping the second family is process-lifetime; turning it off needs an exteraGram restart). `calls_via_proxy` also needs a restart.
 
-AmneziaWG imports `.conf` into a private neutral outbound and runs inside exitFy SB using the official userspace implementation. Its signed manifest must declare `amneziawg`; old mapped SB builds require a restart after installing a capable build. No extra Go family or native ABI is added. Balancers use Xray round-robin/least-ping routing and the synchronized burst observer; SB-only members are authenticated loopback hops through one side SB instance. Stop both instances before full-path probes and on unload.
+AmneziaWG imports `.conf` into a private neutral outbound and runs inside exitFy SB using the official userspace implementation. Its signed release uses the reserved wrapper revision range from `w1000000`, keeping the exact schema 3 fields accepted by older clients. Old mapped SB builds require a restart after installing a capable build. No extra Go family or native ABI is added. Balancers use Xray round-robin/least-ping routing and the synchronized burst observer; SB-only members are authenticated loopback hops through one side SB instance. Stop both instances before full-path probes and on unload.
 
 Local port preferences are stored privately. Never infer ownership from a loopback address or port; only exact session markers and credentials establish ownership. Exclude foreign stored/current proxy ports and always reserve 12334 and 10808.
 
