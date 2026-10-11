@@ -14,8 +14,8 @@ Device testing is performed by the beta tester after receiving
   caches: refresh Shrimp, Elix, Sworkle and a custom subscription returning an
   array of full Xray profiles. Servers and profile names must appear without
   manually changing the User-Agent. Compare an upgraded exteraGram install.
-- A refused Happ request must retry as Legacy `v2rayN/6.23`; a configured custom
-  User-Agent must not fall back. If every attempt fails, show the reason in the
+- Every request must use the single `Happ/5.2.0` identity; a configured custom
+  User-Agent replaces it without fallback. If the request fails, show the reason in the
   source screen and retain any previously saved servers.
 - Open the source card and confirm it presents the native server browser.
   Provider selection must respect disabled built-in slots. An old removed
@@ -134,10 +134,12 @@ Device testing is performed by the beta tester after receiving
   components; plugin unload must cancel timers and late callbacks. Changing
   the selected server must not discard the generic two-component install; only
   stale selected-family preparation/reconnect may be suppressed.
-- Map sing-box, then select an Xray-only server; repeat in the opposite
-  direction. The required family may be prepared in the background, but the
-  existing restart-required block remains and a second Go library must never be
-  loaded in the same process.
+- With Both cores off, map sing-box, then select an Xray-only server; repeat
+  in the opposite direction. The required family may be prepared in the
+  background, but the restart-required block must prevent the second mapping.
+  With Both cores on (the default), repeat both directions and confirm the
+  second family loads without a restart. A mixed balancer may run one instance
+  of each family at the same time; full-path probes must stop and restore both.
 - Confirm static `strings`/JADX inspection does not expose either built-in
   subscription endpoint, domain or credential token. After upgrading an old
   installation, confirm `subscriptions.json` stores only opaque built-in source
@@ -147,9 +149,10 @@ Device testing is performed by the beta tester after receiving
   HWID are imported once, that a second load issues no import commands, and
   that unloading mid-import leaves the import pending instead of losing the
   remaining sources.
-- Disable/enable and reload the same beta.24 plugin without killing the process;
-  confirm its DEX keeper is reused. Installing another embedded DEX version in
-  that process must fail closed until restart.
+- Disable/enable and reload the exact same 4.2.1 build without killing the
+  process; confirm its DEX keeper is reused. Installing a different embedded
+  DEX/JNI build, including another 4.2.1 build, must show a localized restart
+  notice and fail closed until the process restarts.
 
 ## Protocols and checks
 
