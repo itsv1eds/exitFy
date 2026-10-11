@@ -1,0 +1,86 @@
+{
+  "routing": {
+    "balancers": [
+      {
+        "fallbackTag": "balance-0",
+        "selector": [
+          "balance-"
+        ],
+        "tag": "exitfy-balance",
+        "strategy": {
+          "type": "leastPing"
+        }
+      }
+    ],
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "inboundTag": [
+          "socks-in"
+        ],
+        "balancerTag": "exitfy-balance",
+        "type": "field"
+      }
+    ]
+  },
+  "log": {
+    "loglevel": "none"
+  },
+  "outbounds": [
+    {
+      "settings": {
+        "servers": [
+          {
+            "address": "127.0.0.1",
+            "port": 30010
+          }
+        ]
+      },
+      "protocol": "socks",
+      "tag": "balance-0"
+    },
+    {
+      "settings": {
+        "servers": [
+          {
+            "address": "127.0.0.1",
+            "port": 30011
+          }
+        ]
+      },
+      "protocol": "socks",
+      "tag": "balance-1"
+    }
+  ],
+  "inbounds": [
+    {
+      "settings": {
+        "udp": true,
+        "auth": "password",
+        "accounts": [
+          {
+            "pass": "test-pass",
+            "user": "test-user"
+          }
+        ]
+      },
+      "protocol": "socks",
+      "port": 30001,
+      "tag": "socks-in",
+      "listen": "127.0.0.1"
+    }
+  ],
+  "burstObservatory": {
+    "subjectSelector": [
+      "balance-"
+    ],
+    "pingConfig": {
+      "destination": "https://www.gstatic.com/generate_204",
+      "connectivity": "",
+      "interval": "1m",
+      "sampling": 1,
+      "timeout": "5s",
+      "httpMethod": "GET"
+    }
+  }
+}

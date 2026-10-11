@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"encoding/json"
+	libxray "github.com/xtls/libxray"
 	"net"
 	"os"
 	"strings"
@@ -242,12 +243,23 @@ func TestFailedStartResponseRequiresSerializedStopBeforeRetry(t *testing.T) {
 		if err := json.Unmarshal([]byte(request), &envelope); err != nil {
 			t.Fatalf("invalid invoke envelope: %v", err)
 		}
-		if envelope.APIVersion != 1 {
+		if envelope.APIVersion != libxray.LibXrayAPIVersion {
 			t.Fatalf("unexpected libXray API version: %d", envelope.APIVersion)
 		}
 		if strings.Contains(request, `"method":"stopXray"`) {
 			stopCalls++
 			return `{"success":true,"error":""}`
+		}
+		if envelope.Method != string(libxray.LibXrayMethodRunXray) {
+			t.Fatal("start used an obsolete upstream method")
+		}
+		var startEnvelope struct {
+			Payload struct {
+				XrayJSON string `json:"xrayJson"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal([]byte(request), &startEnvelope); err != nil || startEnvelope.Payload.XrayJSON == "" {
+			t.Fatal("start omitted the upstream xrayJson payload")
 		}
 		return `{"success":false,"error":"uncertain start"}`
 	}

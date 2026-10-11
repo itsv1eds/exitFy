@@ -82,13 +82,13 @@ func Start(configJSON string) (err error) {
 		return errors.New("invalid Xray configuration: root must be an object")
 	}
 
-	payload, err := json.Marshal(map[string]string{"configJSON": configJSON})
+	payload, err := json.Marshal(map[string]string{"xrayJson": configJSON})
 	if err != nil {
 		return fmt.Errorf("encode Xray request: %w", err)
 	}
 	request, err := json.Marshal(invokeRequest{
-		APIVersion: 1,
-		Method:     "runXrayFromJson",
+		APIVersion: libxray.LibXrayAPIVersion,
+		Method:     string(libxray.LibXrayMethodRunXray),
 		Payload:    payload,
 	})
 	if err != nil {
@@ -123,7 +123,8 @@ func Stop() (err error) {
 	// A panic or malformed libXray response cannot prove that the global
 	// runtime stopped. Keep retry mandatory until a confirmed success.
 	lifecycle.stopRequired = true
-	request, err := json.Marshal(invokeRequest{APIVersion: 1, Method: "stopXray"})
+	request, err := json.Marshal(invokeRequest{APIVersion: libxray.LibXrayAPIVersion,
+		Method: string(libxray.LibXrayMethodStopXray)})
 	if err != nil {
 		return fmt.Errorf("encode Xray stop request: %w", err)
 	}
