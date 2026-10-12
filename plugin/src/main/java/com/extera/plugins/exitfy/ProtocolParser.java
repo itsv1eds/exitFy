@@ -61,7 +61,7 @@ final class ProtocolParser {
     static final String[] SCHEMES = {
             "vless://", "vmess://", "trojan://", "ss://", "hy2://",
             "hysteria2://", "hysteria://", "tuic://", "amneziawg://", "awg://",
-            "socks://", "socks5://", "wireguard://", "wg://", "http://", "https://"
+            "socks://", "socks5://", "wireguard://", "wg://", "http://", "https://", "anytls://"
     };
     private static final String[] STREAM_PARAMS = {
             "security", "sni", "peer", "insecure", "allowInsecure", "allow_insecure",
@@ -127,6 +127,13 @@ final class ProtocolParser {
         } else if (lower.startsWith("hysteria://")) {
             Parsed parsed = parseStandard(uri);
             outbound = parseHysteria(parsed);
+            name = parsed.name;
+        } else if (lower.startsWith("anytls://")) {
+            Parsed parsed = parseHysteria2Standard(uri);
+            if (!parsed.serverPorts.isEmpty()) throw new IllegalArgumentException("AnyTLS requires a single port");
+            rejectUnknownParams(parsed.params, "AnyTLS", "sni", "peer", "insecure", "allowInsecure", "allow_insecure", "alpn", "fp");
+            outbound = endpoint("anytls", parsed).put("password", parsed.user)
+                    .put("tls", tls(parsed.params, parsed.host, true, ""));
             name = parsed.name;
         } else if (lower.startsWith("tuic://")) {
             Parsed parsed = parseStandard(uri);
@@ -2084,7 +2091,7 @@ final class ProtocolParser {
             case "vless":
                 requireOnlyNeutralKeys(outbound, "VLESS outbound", "type", "server",
                         "server_port", "uuid", "encryption", "packet_encoding", "flow",
-                        "tls", "transport");
+                        "tls", "transport", "multiplex");
                 validateUserId(neutralOpaqueString(
                                 outbound, "uuid", true, false, MAX_URI_BYTES),
                         "VLESS user ID");
@@ -2114,7 +2121,7 @@ final class ProtocolParser {
                 break;
             case "vmess":
                 requireOnlyNeutralKeys(outbound, "VMess outbound", "type", "server",
-                        "server_port", "uuid", "alter_id", "security", "tls", "transport");
+                        "server_port", "uuid", "alter_id", "security", "tls", "transport", "multiplex");
                 validateUserId(neutralOpaqueString(
                                 outbound, "uuid", true, false, MAX_URI_BYTES),
                         "VMess user ID");
@@ -2130,14 +2137,14 @@ final class ProtocolParser {
                 break;
             case "trojan":
                 requireOnlyNeutralKeys(outbound, "Trojan outbound", "type", "server",
-                        "server_port", "password", "tls", "transport");
+                        "server_port", "password", "tls", "transport", "multiplex");
                 neutralOpaqueString(outbound, "password", true, false, MAX_URI_BYTES);
                 validateOptionalTls(outbound);
                 validateOptionalTransport(outbound);
                 break;
             case "shadowsocks":
                 requireOnlyNeutralKeys(outbound, "Shadowsocks outbound", "type", "server",
-                        "server_port", "method", "password");
+                        "server_port", "method", "password", "multiplex");
                 String method = neutralString(outbound, "method", true, false, 128)
                         .toLowerCase(Locale.US);
                 if (!singBoxShadowsocksMethod(method) && !xrayShadowsocksMethod(method)) {
@@ -2153,9 +2160,11 @@ final class ProtocolParser {
                 break;
             case "hysteria":
                 requireOnlyNeutralKeys(outbound, "Hysteria outbound", "type", "server",
-                        "server_port", "tls", "auth_str", "up_mbps", "down_mbps", "obfs");
+                        "server_port", "tls", "auth_str", "up_mbps", "down_mbps", "obfs", "network",
+                        "server_ports", "hop_interval");
                 validateRequiredTls(outbound);
                 rejectQuicUtls(outbound);
+                validateHysteria2Ports(outbound);
                 if (outbound.has("auth_str")) {
                     neutralOpaqueString(
                             outbound, "auth_str", true, false, MAX_URI_BYTES);
@@ -2173,7 +2182,7 @@ final class ProtocolParser {
             case "hysteria2":
                 requireOnlyNeutralKeys(outbound, "Hysteria2 outbound", "type", "server",
                         "server_port", "password", "tls", "server_ports", "hop_interval",
-                        "up_mbps", "down_mbps", "obfs");
+                        "up_mbps", "down_mbps", "obfs", "network");
                 neutralOpaqueString(outbound, "password", true, false, MAX_URI_BYTES);
                 validateRequiredTls(outbound);
                 rejectQuicUtls(outbound);
@@ -2189,7 +2198,7 @@ final class ProtocolParser {
             case "tuic":
                 requireOnlyNeutralKeys(outbound, "TUIC outbound", "type", "server",
                         "server_port", "uuid", "password", "congestion_control",
-                        "udp_relay_mode", "tls");
+                        "udp_relay_mode", "tls", "network", "udp_over_stream", "zero_rtt_handshake", "heartbeat");
                 validateCanonicalUuid(neutralString(
                                 outbound, "uuid", true, false, MAX_URI_BYTES),
                         "TUIC UUID");
@@ -2201,15 +2210,76 @@ final class ProtocolParser {
                     throw new IllegalArgumentException("unsupported TUIC congestion control");
                 }
                 String relay = neutralString(outbound, "udp_relay_mode",
-                        true, false, 128).toLowerCase(Locale.US);
+                        true, true, 128).toLowerCase(Locale.US);
+                boolean overStream = outbound.has("udp_over_stream")
+                        && neutralBoolean(outbound, "udp_over_stream", true);
+                if (overStream && !relay.isEmpty()) throw new IllegalArgumentException("conflicting TUIC UDP relay settings");
+                if (relay.isEmpty()) relay = "native";
                 if (!relay.equals("native") && !relay.equals("quic")) {
                     throw new IllegalArgumentException("unsupported TUIC UDP relay mode");
                 }
                 validateRequiredTls(outbound);
                 rejectQuicUtls(outbound);
+                if (outbound.has("zero_rtt_handshake")) neutralBoolean(outbound, "zero_rtt_handshake", true);
+                if (outbound.has("heartbeat")) validatePositiveGoDuration(neutralString(outbound, "heartbeat", true, false, 64));
+                break;
+            case "anytls":
+                requireOnlyNeutralKeys(outbound, "AnyTLS outbound", "type", "server", "server_port", "password", "tls",
+                        "idle_session_check_interval", "idle_session_timeout", "min_idle_session", "client_metadata");
+                neutralOpaqueString(outbound, "password", true, true, MAX_URI_BYTES);
+                validateRequiredTls(outbound);
+                for (String key : new String[]{"idle_session_check_interval", "idle_session_timeout"}) if (outbound.has(key)) validatePositiveGoDuration(neutralString(outbound, key, true, false, 64));
+                if (outbound.has("min_idle_session")) neutralInteger(outbound, "min_idle_session", true, 0, Integer.MAX_VALUE);
+                neutralOpaqueString(outbound, "client_metadata", false, true, MAX_URI_BYTES);
+                break;
+            case "socks":
+                requireOnlyNeutralKeys(outbound, "SOCKS outbound", "type", "server", "server_port",
+                        "username", "password", "version", "network", "udp_over_tcp");
+                neutralOpaqueString(outbound, "username", false, true, MAX_URI_BYTES);
+                neutralOpaqueString(outbound, "password", false, true, MAX_URI_BYTES);
+                String version = neutralString(outbound, "version", false, true, 2);
+                if (!version.isEmpty() && !version.equals("4") && !version.equals("4a") && !version.equals("5")) throw new IllegalArgumentException("unsupported SOCKS version");
+                if (outbound.has("udp_over_tcp")) {
+                    Object uot = outbound.opt("udp_over_tcp");
+                    if (!(uot instanceof Boolean)) {
+                        JSONObject options = neutralObject(outbound, "udp_over_tcp", true);
+                        requireOnlyNeutralKeys(options, "UDP over TCP", "enabled", "version");
+                        if (options.has("enabled")) neutralBoolean(options, "enabled", true);
+                        if (options.has("version")) neutralInteger(options, "version", true, 0, 2);
+                    }
+                }
+                break;
+            case "http":
+                requireOnlyNeutralKeys(outbound, "HTTP outbound", "type", "server", "server_port",
+                        "username", "password", "tls", "path", "headers");
+                neutralOpaqueString(outbound, "username", false, true, MAX_URI_BYTES);
+                neutralOpaqueString(outbound, "password", false, true, MAX_URI_BYTES);
+                String httpPath = neutralOpaqueString(outbound, "path", false, true, MAX_URI_BYTES);
+                if (containsControl(httpPath)) throw new IllegalArgumentException("invalid HTTP proxy path");
+                validateOptionalTls(outbound);
+                if (outbound.has("headers")) validateNeutralHeaders(outbound, "headers");
                 break;
             default:
                 throw new IllegalArgumentException("unsupported neutral proxy protocol");
+        }
+        if (outbound.has("network")) {
+            String network = neutralString(outbound, "network", true, false, 8);
+            if (!network.equals("tcp") && !network.equals("udp")) throw new IllegalArgumentException("unsupported proxy network");
+        }
+        if (outbound.has("multiplex")) validateMultiplex(neutralObject(outbound, "multiplex", true));
+    }
+
+    private static void validateMultiplex(JSONObject mux) {
+        requireOnlyNeutralKeys(mux, "multiplex", "enabled", "protocol", "max_connections", "min_streams", "max_streams", "padding", "brutal");
+        for (String key : new String[]{"enabled", "padding"}) if (mux.has(key)) neutralBoolean(mux, key, true);
+        String protocol = neutralString(mux, "protocol", false, true, 16);
+        if (!protocol.isEmpty() && !protocol.equals("smux") && !protocol.equals("yamux") && !protocol.equals("h2mux")) throw new IllegalArgumentException("unsupported multiplex protocol");
+        for (String key : new String[]{"max_connections", "min_streams", "max_streams"}) if (mux.has(key)) neutralInteger(mux, key, true, 0, Integer.MAX_VALUE);
+        if (mux.has("brutal")) {
+            JSONObject brutal = neutralObject(mux, "brutal", true);
+            requireOnlyNeutralKeys(brutal, "brutal", "enabled", "up_mbps", "down_mbps");
+            if (brutal.has("enabled")) neutralBoolean(brutal, "enabled", true);
+            for (String key : new String[]{"up_mbps", "down_mbps"}) if (brutal.has(key)) neutralInteger(brutal, key, true, 0, MAX_HYSTERIA2_MBPS);
         }
     }
 
@@ -3414,6 +3484,7 @@ final class ProtocolParser {
                     && !protocol.equals("trojan") && !protocol.equals("shadowsocks")) {
                 return false;
             }
+            if (outbound.has("multiplex")) return false;
             if (protocol.equals("shadowsocks") && !xrayShadowsocksMethod(
                     outbound.optString("method", ""))) return false;
             if (network.equals("http")) return false;

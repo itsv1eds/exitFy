@@ -36,7 +36,7 @@ final class SubscriptionParser {
     // second multi-megabyte allocation inside the CBOR object graph.
     private static final int MAX_CBOR_BLOB_BYTES = MAX_HIT_CONFIG_BYTES;
     private static final Pattern PROXY_LINK = Pattern.compile(
-            "(?i)(?:(?:vless|vmess|trojan|ss|hy2|hysteria2|hysteria|tuic|amneziawg|awg|wireguard|wg|socks|socks5)://[^\\s\\\"'<>]+"
+            "(?i)(?:(?:vless|vmess|trojan|ss|hy2|hysteria2|hysteria|tuic|anytls|amneziawg|awg|wireguard|wg|socks|socks5)://[^\\s\\\"'<>]+"
                     + "|https?://[^\\s\\\"'<>/@]+@[^\\s\\\"'<>]+)"
     );
     private static final Pattern HIT_LINK = Pattern.compile(
@@ -129,7 +129,7 @@ final class SubscriptionParser {
                 // Once an explicit Clash proxy section is recognized, it is the
                 // sole trust boundary. URI-looking text in comments, names or
                 // unrelated YAML fields must never become a runnable node.
-                collectSimpleClashYaml(text, links, rejections, budget);
+                collectSimpleClashYaml(text, structuredNodes, rejections, budget);
             } else {
                 String servers = withoutServiceLines(text);
                 collectRegex(servers, PROXY_LINK, links, budget);
@@ -380,7 +380,7 @@ final class SubscriptionParser {
                 JSONObject object = (JSONObject) root;
                 if (isAwgContainer(object)) {
                     collectAwgContainer(object, nodes, rejections, budget);
-                } else if (object.has("outbounds")) {
+                } else if (object.has("outbounds") || object.has("endpoints")) {
                     collectProfileOutbounds(object, nodes, rejections, budget);
                 } else if (isProxyOutbound(object)) {
                     collectExplicitOutbound(object, nodes, rejections, budget);
@@ -402,7 +402,7 @@ final class SubscriptionParser {
                     JSONObject object = values.optJSONObject(i);
                     if (object != null && isAwgContainer(object)) {
                         collectAwgContainer(object, nodes, rejections, budget);
-                    } else if (object != null && object.has("outbounds")) {
+                    } else if (object != null && (object.has("outbounds") || object.has("endpoints"))) {
                         if (proxyOutboundCount(object.optJSONArray("outbounds")) > 1) {
                             pools.add(object);
                         } else {
@@ -469,10 +469,10 @@ final class SubscriptionParser {
                                                 List<ProtocolParser.Node> nodes,
                                                 RejectionTracker rejections,
                                                 CandidateBudget budget) {
-        Object rawOutbounds = profile.opt("outbounds");
+        Object rawOutbounds = profile.has("outbounds") ? profile.opt("outbounds") : new JSONArray();
         if (!(rawOutbounds instanceof JSONArray)) {
             rejections.reject("invalid_json");
-            return;
+            rawOutbounds = new JSONArray();
         }
         // A profile can contain listeners, routing and metadata. Only its
         // explicit proxy outbounds become servers; none of that surrounding
@@ -480,6 +480,14 @@ final class SubscriptionParser {
         collectExplicitOutbounds((JSONArray) rawOutbounds,
                 proxyOutboundCount((JSONArray) rawOutbounds) == 1
                         ? xrayDisplayName(profile) : "", nodes, rejections, budget);
+        if (profile.has("endpoints")) {
+            Object rawEndpoints = profile.opt("endpoints");
+            if (!(rawEndpoints instanceof JSONArray)) rejections.reject("invalid_json");
+            else collectExplicitOutbounds((JSONArray) rawEndpoints,
+                    proxyOutboundCount((JSONArray) rawOutbounds) == 0
+                            && proxyOutboundCount((JSONArray) rawEndpoints) == 1
+                            ? xrayDisplayName(profile) : "", nodes, rejections, budget);
+        }
     }
 
     private static void collectWrappedProfiles(JSONObject wrapper, List<String> links,
@@ -498,7 +506,7 @@ final class SubscriptionParser {
                 if (profile == null) continue;
                 if (isAwgContainer(profile)) {
                     collectAwgContainer(profile, nodes, rejections, budget);
-                } else if (profile.has("outbounds")) {
+                } else if (profile.has("outbounds") || profile.has("endpoints")) {
                     if (proxyOutboundCount(profile.optJSONArray("outbounds")) > 1) pools.add(profile);
                     else collectProfileOutbounds(profile, nodes, rejections, budget);
                 } else if (isProxyOutbound(profile)) collectExplicitOutbound(profile, nodes, rejections, budget);
@@ -558,6 +566,10 @@ final class SubscriptionParser {
                                                  CandidateBudget budget) {
         if (!budget.reserve()) return;
         try {
+            if (!isXrayOutboundShape(object) && StructuredProxyImport.matches(object)) {
+                nodes.add(StructuredProxyImport.parse(object, displayName));
+                return;
+            }
             validateOutboundShape(object);
             if (isXrayOutboundShape(object)) {
                 nodes.add(ProtocolParser.fromXrayOutbound("",
@@ -632,6 +644,9 @@ final class SubscriptionParser {
             Object raw = object.opt(key);
             if (raw instanceof String && isSupportedOutboundType((String) raw)) return true;
         }
+        // An unknown explicit server is a rejected entry, never an invisible
+        // success. Local routing helpers have no server and remain excluded.
+        if (object.has("type") && object.has("server")) return true;
         return false;
     }
 
@@ -1636,7 +1651,7 @@ final class SubscriptionParser {
     }
 
     private static void validateOutboundShape(JSONObject object) {
-        for (String forbidden : new String[]{"detour", "proxySettings", "sendThrough", "mux",
+        for (String forbidden : new String[]{"detour", "proxySettings", "sendThrough",
                 "bind_interface", "bind_address", "inet4_bind_address", "inet6_bind_address",
                 "routing_mark", "domain_strategy", "domainStrategy", "strategy", "dns"}) {
             if (object.has(forbidden)) {
@@ -1660,6 +1675,7 @@ final class SubscriptionParser {
             }
             return;
         }
+        if (object.has("mux")) throw new IllegalArgumentException("unsupported outbound field: mux");
         String type = outboundType(object);
         boolean valid;
         if (type.equals("vless")) {
@@ -1754,7 +1770,9 @@ final class SubscriptionParser {
         String type = value == null ? "" : value.trim().toLowerCase(Locale.US);
         if (type.equals("ss")) return "shadowsocks";
         return type.equals("vless") || type.equals("vmess") || type.equals("trojan")
-                || type.equals("shadowsocks") ? type : "";
+                || type.equals("shadowsocks") || type.equals("hysteria") || type.equals("hysteria2")
+                || type.equals("tuic") || type.equals("socks") || type.equals("http")
+                || type.equals("wireguard") || type.equals("anytls") ? type : "";
     }
 
     static final String UNREACHABLE_ONLY = "unreachable_placeholders";
@@ -1967,14 +1985,14 @@ final class SubscriptionParser {
         return join(output, ",");
     }
 
-    private static void collectSimpleClashYaml(String text, List<String> output,
+    private static void collectSimpleClashYaml(String text, List<ProtocolParser.Node> nodes,
                                                RejectionTracker rejections,
                                                CandidateBudget budget) {
         if (countRootClashProxySections(text) != 1) {
             rejections.reject("clash_root_invalid");
             return;
         }
-        int outputStart = output.size();
+        int nodesStart = nodes.size();
         Map<String, String> current = null;
         int currentIndent = -1;
         int proxyItemIndent = -1;
@@ -1991,7 +2009,7 @@ final class SubscriptionParser {
             if (contentEnd - start > MAX_CLASH_LINE_CHARS) {
                 rejections.reject("clash_line_too_large");
                 if (inProxies) {
-                    output.subList(outputStart, output.size()).clear();
+                    nodes.subList(nodesStart, nodes.size()).clear();
                     return;
                 }
                 if (end == text.length()) break;
@@ -2034,7 +2052,7 @@ final class SubscriptionParser {
             }
             boolean listItem = line.startsWith("- ");
             if (indent < proxiesIndent || indent == proxiesIndent && !listItem) {
-                if (current != null) addClashEntry(current, output, rejections, budget);
+                if (current != null) addClashEntry(current, nodes, rejections, budget);
                 current = null;
                 break;
             }
@@ -2047,7 +2065,7 @@ final class SubscriptionParser {
                         rejections.reject("clash_item_indent_invalid");
                     }
                 } else {
-                    if (current != null) addClashEntry(current, output, rejections, budget);
+                    if (current != null) addClashEntry(current, nodes, rejections, budget);
                     current = new LinkedHashMap<>();
                     currentIndent = indent;
                     sectionNames.clear();
@@ -2092,7 +2110,7 @@ final class SubscriptionParser {
                 throw new ImportInterruptedException();
             }
         }
-        if (current != null) addClashEntry(current, output, rejections, budget);
+        if (current != null) addClashEntry(current, nodes, rejections, budget);
     }
 
     private static int countRootClashProxySections(String text) {
@@ -2318,12 +2336,13 @@ final class SubscriptionParser {
         return path.toString();
     }
 
-    private static void addClashEntry(Map<String, String> source, List<String> output,
+    private static void addClashEntry(Map<String, String> source, List<ProtocolParser.Node> nodes,
                                       RejectionTracker rejections, CandidateBudget budget) {
         if (!budget.reserve()) return;
         String type = value(source, "type").toLowerCase(Locale.US);
         String server = value(source, "server");
         String name = rawValue(source, "name");
+        List<String> output = new ArrayList<>();
         try {
             if (source.containsKey("__duplicate_field__")) {
                 throw new IllegalArgumentException("duplicate Clash field");
@@ -2346,7 +2365,24 @@ final class SubscriptionParser {
             if (server.isEmpty()) {
                 throw new IllegalArgumentException("invalid Clash endpoint");
             }
-            if (type.equals("vless") || type.equals("trojan")) {
+            if (type.equals("socks5") || type.equals("http")) {
+                JSONObject outbound = new JSONObject().put("type", type.equals("socks5") ? "socks" : "http")
+                        .put("server", server).put("server_port", port);
+                for (String key : new String[]{"username", "password"}) if (source.containsKey(key)) outbound.put(key, rawValue(source, key));
+                boolean secure = source.containsKey("tls") && strictBoolean(value(source, "tls"), "tls");
+                if (secure) {
+                    if (type.equals("socks5")) throw new IllegalArgumentException("unsupported Clash SOCKS TLS");
+                    JSONObject tls = new JSONObject().put("enabled", true).put("server_name", server);
+                    String sni = value(source, "sni").isEmpty() ? value(source, "servername") : value(source, "sni");
+                    if (!sni.isEmpty()) tls.put("server_name", sni);
+                    if (source.containsKey("skip-cert-verify")) tls.put("insecure", strictBoolean(value(source, "skip-cert-verify"), "skip-cert-verify"));
+                    outbound.put("tls", tls);
+                } else if (source.containsKey("sni") || source.containsKey("servername")
+                        || source.containsKey("skip-cert-verify") && strictBoolean(value(source, "skip-cert-verify"), "skip-cert-verify")) {
+                    throw new IllegalArgumentException("unsupported Clash TLS fields without TLS");
+                }
+                nodes.add(StructuredProxyImport.parse(outbound, name));
+            } else if (type.equals("vless") || type.equals("trojan")) {
                 String credential = type.equals("vless")
                         ? rawValue(source, "uuid") : rawValue(source, "password");
                 if (credential.isEmpty()) throw new IllegalArgumentException("missing Clash credential");
@@ -2491,6 +2527,7 @@ final class SubscriptionParser {
             } else {
                 throw new IllegalArgumentException("unsupported Clash proxy type");
             }
+            for (String link : output) nodes.add(ProtocolParser.parse(link));
         } catch (Exception error) {
             rejections.reject(reasonCode(error));
         }
@@ -2523,6 +2560,8 @@ final class SubscriptionParser {
             rejectClashAliasPair(source, "udp-relay-mode", "udp_relay_mode");
             java.util.Collections.addAll(allowed, "uuid", "password", "congestion-controller",
                     "congestion_control", "udp-relay-mode", "udp_relay_mode");
+        } else if (type.equals("socks5") || type.equals("http")) {
+            java.util.Collections.addAll(allowed, "username", "password", "tls", "sni", "servername", "skip-cert-verify");
         }
         if (stream) {
             java.util.Collections.addAll(allowed, "network", "tls", "servername", "sni",

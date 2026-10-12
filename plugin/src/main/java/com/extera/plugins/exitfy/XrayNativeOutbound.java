@@ -11,7 +11,7 @@ import java.util.Locale;
  */
 final class XrayNativeOutbound {
     private static final String[] FORBIDDEN_KEYS = {
-            "detour", "proxySettings", "sendThrough", "mux",
+            "detour", "proxySettings", "sendThrough",
             "bind_interface", "bind_address", "inet4_bind_address", "inet6_bind_address",
             "routing_mark", "domain_strategy", "domainStrategy", "strategy", "dns"
     };
@@ -54,6 +54,7 @@ final class XrayNativeOutbound {
         }
         JSONObject copy = new JSONObject(source.toString());
         AtomicStore.jsonUtf8Size(copy, AtomicStore.MAX_JSON_BYTES);
+        if (copy.has("mux")) validateMux(copy.opt("mux"));
         stripChainedSockopt(copy.optJSONObject("streamSettings"));
         HostPort endpoint = extractEndpoint(copy);
         if (ProtocolParser.isUnreachableServer(endpoint.host)) {
@@ -63,6 +64,34 @@ final class XrayNativeOutbound {
             throw new IllegalArgumentException("invalid proxy port");
         }
         return copy;
+    }
+
+    private static void validateMux(Object raw) {
+        if (!(raw instanceof JSONObject)) throw new IllegalArgumentException("invalid Xray mux");
+        JSONObject mux = (JSONObject) raw;
+        java.util.Iterator<String> keys = mux.keys();
+        while (keys.hasNext()) {
+            String key = keys.next();
+            Object value = mux.opt(key);
+            if (key.equals("enabled")) {
+                if (!(value instanceof Boolean)) throw new IllegalArgumentException("invalid Xray mux enabled");
+            } else if (key.equals("concurrency") || key.equals("xudpConcurrency")) {
+                if (!(value instanceof Number) || !String.valueOf(value).matches("-?[0-9]+")) {
+                    throw new IllegalArgumentException("invalid Xray mux concurrency");
+                }
+                long parsed;
+                try { parsed = Long.parseLong(String.valueOf(value)); }
+                catch (NumberFormatException overflow) { throw new IllegalArgumentException("invalid Xray mux concurrency"); }
+                if (parsed < Short.MIN_VALUE || parsed > Short.MAX_VALUE) throw new IllegalArgumentException("invalid Xray mux concurrency");
+            } else if (key.equals("xudpProxyUDP443")) {
+                if (!(value instanceof String) || !(value.equals("") || value.equals("reject")
+                        || value.equals("allow") || value.equals("skip"))) {
+                    throw new IllegalArgumentException("invalid Xray mux UDP policy");
+                }
+            } else {
+                throw new IllegalArgumentException("unsupported Xray mux field");
+            }
+        }
     }
 
     static JSONObject summary(JSONObject sanitized) throws Exception {

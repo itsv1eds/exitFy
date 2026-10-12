@@ -96,12 +96,73 @@ public class XrayNativeOutboundTest {
                 .put("settings", new JSONObject().put("address", "1.1.1.1").put("port", 53)));
         assertRejected(vnext("vless", "mux.example",
                 "11111111-1111-1111-1111-111111111111")
-                .put("mux", new JSONObject().put("enabled", true)));
+                .put("mux", new JSONObject().put("enabled", "true")));
         assertRejected(vnext("vless", "0.0.0.0",
                 "11111111-1111-1111-1111-111111111111"));
         assertRejected(vnext("vless", "chain.example",
                 "11111111-1111-1111-1111-111111111111")
                 .put("proxySettings", new JSONObject().put("tag", "other")));
+    }
+
+    @Test
+    public void muxProfilesKeepEveryOptionThroughImportStorageAndRendering() throws Exception {
+        JSONObject mux = new JSONObject().put("enabled", true).put("concurrency", 6)
+                .put("xudpConcurrency", 4).put("xudpProxyUDP443", "reject");
+        JSONObject outbound = vnext("vless", "mux.example", "11111111-1111-1111-1111-111111111111")
+                .put("mux", mux);
+        JSONObject profile = new JSONObject().put("remarks", "Named server")
+                .put("outbounds", new JSONArray().put(outbound));
+        SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(profile.toString());
+        assertEquals(0, parsed.rejected);
+        assertEquals(1, parsed.nodes.size());
+        ProtocolParser.Node node = ProtocolParser.fromStoredJson(parsed.nodes.get(0).toStoredJson());
+        assertEquals("Named server", node.name);
+        assertEquals(parsed.nodes.get(0).normalizedKey, node.normalizedKey);
+        JSONObject rendered = XrayConfigRenderer.renderOutbound(node).getJSONObject("mux");
+        assertTrue(rendered.getBoolean("enabled"));
+        assertEquals(6, rendered.getInt("concurrency"));
+        assertEquals(4, rendered.getInt("xudpConcurrency"));
+        assertEquals("reject", rendered.getString("xudpProxyUDP443"));
+    }
+
+    @Test
+    public void muxAndNonMuxAtSameEndpointStayDistinctWhileExactMembersDeduplicate() throws Exception {
+        JSONObject normal = vnext("vless", "same.example", "11111111-1111-1111-1111-111111111111");
+        JSONObject mux = new JSONObject(normal.toString()).put("tag", "mux")
+                .put("mux", new JSONObject().put("enabled", true).put("concurrency", 6));
+        JSONArray profiles = new JSONArray()
+                .put(new JSONObject().put("remarks", "Normal").put("outbounds", new JSONArray().put(normal)))
+                .put(new JSONObject().put("remarks", "Mux").put("outbounds", new JSONArray().put(mux)))
+                .put(new JSONObject().put("outbounds", new JSONArray().put(mux).put(normal)));
+        SubscriptionParser.ParseResult result = SubscriptionParser.parseDetailed(profiles.toString());
+        assertEquals(2, result.nodes.size());
+        assertEquals(0, result.rejected);
+        assertFalse(result.nodes.get(0).normalizedKey.equals(result.nodes.get(1).normalizedKey));
+    }
+
+    @Test
+    public void invalidMuxFailsOnlyItsOwnEntryAndSignedShortDefaultsRemainValid() throws Exception {
+        Object[] invalid = {true, new JSONArray(), new JSONObject().put("enabled", 1),
+                new JSONObject().put("concurrency", "6"), new JSONObject().put("concurrency", 1.5),
+                new JSONObject().put("concurrency", 32768), new JSONObject().put("xudpConcurrency", -32769),
+                new JSONObject().put("xudpProxyUDP443", "unknown"),
+                new JSONObject().put("proxySettings", new JSONObject())};
+        for (Object value : invalid) {
+            JSONObject normal = vnext("vless", "valid.example", "11111111-1111-1111-1111-111111111111");
+            JSONObject bad = new JSONObject(normal.toString()).put("mux", value);
+            SubscriptionParser.ParseResult result = SubscriptionParser.parseDetailed(
+                    new JSONObject().put("outbounds", new JSONArray().put(bad).put(normal)).toString());
+            assertEquals(1, result.nodes.size());
+            assertEquals(1, result.rejected);
+        }
+        for (JSONObject mux : new JSONObject[]{new JSONObject(),
+                new JSONObject().put("enabled", false).put("concurrency", -1).put("xudpConcurrency", 0),
+                new JSONObject().put("concurrency", Short.MIN_VALUE).put("xudpConcurrency", Short.MAX_VALUE)
+                        .put("xudpProxyUDP443", "skip")}) {
+            ProtocolParser.Node node = ProtocolParser.fromXrayOutbound("", "Mux",
+                    vnext("vless", "valid.example", "11111111-1111-1111-1111-111111111111").put("mux", mux));
+            assertTrue(XrayConfigRenderer.renderOutbound(node).has("mux"));
+        }
     }
 
     @Test
