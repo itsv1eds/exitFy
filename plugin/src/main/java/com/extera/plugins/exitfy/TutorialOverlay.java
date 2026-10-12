@@ -45,6 +45,7 @@ final class TutorialOverlay implements AutoCloseable {
     private final boolean motion = ValueAnimator.areAnimatorsEnabled();
     private ValueAnimator travel;
     private AnimatorSet tapLoop;
+    private final Runnable repeatTap = this::startTapLoop;
     private View target;
     private Runnable action, end;
     private String shownTitle = "", shownBody = "", shownCounter = "", shownButton = "";
@@ -302,7 +303,7 @@ final class TutorialOverlay implements AutoCloseable {
     }
 
     private void startTapLoop() {
-        if (closed || leaving || !motion) { wave.setAlpha(0f); return; }
+        if (closed || leaving || !motion || !ValueAnimator.areAnimatorsEnabled()) { wave.setAlpha(0f); return; }
         tapLoop = new AnimatorSet();
         ObjectAnimator x = ObjectAnimator.ofFloat(cursor, "translationX", dp(28), 0f);
         ObjectAnimator y = ObjectAnimator.ofFloat(cursor, "translationY", -dp(22), 0f);
@@ -322,13 +323,14 @@ final class TutorialOverlay implements AutoCloseable {
         tapLoop.playTogether(x, y, sx, sy, wx, wy, wa, pause);
         tapLoop.addListener(new AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(Animator animation) {
-                if (!closed && !leaving) startTapLoop();
+                if (!closed && !leaving && ValueAnimator.areAnimatorsEnabled()) layer.postDelayed(repeatTap, 100L);
             }
         });
         tapLoop.start();
     }
 
     private void cancelMotion() {
+        layer.removeCallbacks(repeatTap);
         card.animate().cancel();
         if (travel != null) travel.cancel();
         if (tapLoop != null) tapLoop.cancel();
