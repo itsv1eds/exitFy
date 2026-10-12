@@ -326,14 +326,22 @@ session credentials/markers; an address or port alone never identifies a proxy
 as exitFy's.
 
 Fresh installation offers a welcome dialog once. Only accepting it opens the
-eight-step tutorial. Native View hints frame the actual controls, display an
-animated pointer and forward the user's tap to the original click handler.
+eight-step tutorial. Native View hints frame the actual controls with rounded
+corners and display a moving tap indicator and ripple. Compact hint cards fade
+and scale between steps; the spotlight moves to the next target. Native
+GradientDrawables form the rounded cutout without custom Canvas drawing.
+Animations respect the system animator setting. Only the user's tap is
+forwarded to the original click handler.
 Component installation must finish before the source-selection steps begin.
 Cancelled dialogs and failed commands do not acknowledge their action. Progress
 is persisted for completion status; it never opens a page on load or app resume.
 Advanced groups settings under Connection, Subscriptions, Latency checks,
-Calls, Components and Help, with themed dividers. Help replays the tutorial from
-step two (Source), skipping installation. Opening a tutorial never starts a
+Calls, Components and Help, with headings and spacing instead of extra lines.
+Help replays the tutorial from step two (Source), skipping installation and
+reusing the dashboard already in the same account's navigation stack. Completing
+or ending the tutorial returns there and removes intermediate plugin screens;
+it never removes another client screen. The final hint targets the replay row
+in Help. Opening a tutorial never starts a
 connection, refresh or download. Each generated artifact carries a DEX/native build
 identity, so replacing 4.5 with a different 4.5 build asks for a complete
 client restart in the user's language instead of reusing stale Java code.

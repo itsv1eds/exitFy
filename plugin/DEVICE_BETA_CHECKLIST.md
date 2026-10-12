@@ -259,8 +259,13 @@ gates; mixed balancers must also be checked with both families running.
 - Replay from Advanced > Help: begin at Source (step two), skip installation.
   No network/connection action occurs until the user taps its actual control.
   Keep an existing connection when continuing the Connect step on replay.
-- Check dividers, themed hints, large font and landscape; hints must scroll their
-  target into view. Pause, navigate back, finish and destroy the guide: no orphan
+- Repeat the guide five times: completion must return to the same dashboard;
+  Back exits its settings without walking through previous tutorial screens.
+  The last hint must target the replay row in Help, not a section heading.
+- Check group headings without extra lines, rounded cutout corners, moving tap
+  cursor/ripple and card/spotlight transitions. Enable/disable system animations.
+  Check themed hints, large font and landscape; hints must scroll their
+  target into view and stay clear of it. Pause, navigate back, finish and destroy the guide: no orphan
   overlay, timer or animated pointer should remain over the client.
 - Import `.conf` from a document provider and clipboard text, including IPv6,
   multiple peers, preshared keys, signature packets and keepalive ranges. Test

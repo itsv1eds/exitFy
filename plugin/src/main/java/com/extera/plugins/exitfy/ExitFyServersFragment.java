@@ -71,6 +71,11 @@ final class ExitFyServersFragment
         super.onPause();
     }
 
+    @Override public void onBeginSlide() {
+        if (tutorial != null) tutorial.close();
+        super.onBeginSlide();
+    }
+
     @Override public void onFragmentDestroy() {
         if (tutorial != null) tutorial.detach(this);
         super.onFragmentDestroy();

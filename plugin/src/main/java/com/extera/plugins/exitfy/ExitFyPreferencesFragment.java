@@ -3,7 +3,6 @@ package com.extera.plugins.exitfy;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
-import android.view.View;
 import android.widget.LinearLayout;
 
 import org.json.JSONObject;
@@ -35,19 +34,25 @@ final class ExitFyPreferencesFragment
     private SettingRow restartRow;
     private boolean commandBusy;
     private final ExitFyTutorial tutorial;
-    private View connectionSection;
+    private SettingRow tutorialRow;
 
     ExitFyPreferencesFragment() { this(null); }
     ExitFyPreferencesFragment(ExitFyTutorial tutorial) { this.tutorial = tutorial; }
 
     @Override public void onResume() {
         super.onResume();
-        if (tutorial != null) tutorial.attach(this, () -> tutorial.preferences(this, connectionSection));
+        if (tutorial != null) tutorial.attach(this, () -> tutorial.preferences(this,
+                tutorialRow == null ? null : tutorialRow.view));
     }
 
     @Override public void onPause() {
         if (tutorial != null) tutorial.detach(this);
         super.onPause();
+    }
+
+    @Override public void onBeginSlide() {
+        if (tutorial != null) tutorial.close();
+        super.onBeginSlide();
     }
 
     @Override public void onFragmentDestroy() {
@@ -67,7 +72,7 @@ final class ExitFyPreferencesFragment
 
     @Override
     protected void buildContent(Context context, LinearLayout content) {
-        connectionSection = sectionDivider(context, content, I18n.t("Подключение", "Connection"));
+        sectionHeading(context, content, I18n.t("Подключение", "Connection"));
 
         balanceRow = settingRow(context, R.drawable.msg_stats,
                 I18n.t("Балансировщик", "Balancer"),
@@ -84,7 +89,7 @@ final class ExitFyPreferencesFragment
         setSafeClick(failoverRow.view, this::showFailoverDialog);
         content.addView(failoverRow.view, sectionParams());
 
-        sectionDivider(context, content, I18n.t("Подписки", "Subscriptions"));
+        sectionHeading(context, content, I18n.t("Подписки", "Subscriptions"));
 
         refreshOnOpenRow = settingRow(context, R.drawable.msg_download,
                 I18n.t("Обновлять подписки при входе", "Refresh subscriptions on open"),
@@ -105,7 +110,7 @@ final class ExitFyPreferencesFragment
         setSafeClick(customHwidRow.view, this::showCustomHwidDialog);
         content.addView(customHwidRow.view, sectionParams());
 
-        sectionDivider(context, content, I18n.t("Проверка задержки", "Latency checks"));
+        sectionHeading(context, content, I18n.t("Проверка задержки", "Latency checks"));
 
         pingTypeRow = settingRow(context, R.drawable.msg_speed,
                 I18n.t("Тип пинга", "Ping type"), "");
@@ -119,7 +124,7 @@ final class ExitFyPreferencesFragment
         setSafeClick(autoCheckRow.view, this::showAutoCheckDialog);
         content.addView(autoCheckRow.view, sectionParams());
 
-        sectionDivider(context, content, I18n.t("Звонки", "Calls"));
+        sectionHeading(context, content, I18n.t("Звонки", "Calls"));
 
         callsRow = settingRow(context, R.drawable.msg_secret,
                 I18n.t("Звонки через exitFy (эксперимент)",
@@ -136,7 +141,7 @@ final class ExitFyPreferencesFragment
         setSafeClick(callStateRow.view, this::loadCallState);
         content.addView(callStateRow.view, sectionParams());
 
-        sectionDivider(context, content, I18n.t("Компоненты", "Components"));
+        sectionHeading(context, content, I18n.t("Компоненты", "Components"));
 
         dualCoreRow = settingRow(context, R.drawable.msg_permissions,
                 I18n.t("Два ядра сразу (эксперимент)", "Both cores at once (experimental)"), "");
@@ -154,8 +159,8 @@ final class ExitFyPreferencesFragment
         setSafeClick(restartRow.view, this::confirmRestart);
         content.addView(restartRow.view, sectionParams());
 
-        sectionDivider(context, content, I18n.t("Помощь", "Help"));
-        SettingRow tutorialRow = settingRow(context, R.drawable.msg_help,
+        sectionHeading(context, content, I18n.t("Помощь", "Help"));
+        tutorialRow = settingRow(context, R.drawable.msg_help,
                 I18n.t("Как пользоваться exitFy", "How to use exitFy"),
                 I18n.t("Показать подсказки, начиная с выбора источника", "Show hints starting with the server source"));
         setSafeClick(tutorialRow.view, () -> {

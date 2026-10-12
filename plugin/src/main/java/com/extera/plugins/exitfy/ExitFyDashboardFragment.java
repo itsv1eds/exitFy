@@ -97,12 +97,23 @@ final class ExitFyDashboardFragment extends BaseFragment {
     private View advancedCard;
     private View providerPageCard;
     private View restartCard;
-    private final ExitFyTutorial tutorial;
+    private ExitFyTutorial tutorial;
     private ImageView connectionIconView;
 
     public ExitFyDashboardFragment() { this(null); }
 
     ExitFyDashboardFragment(ExitFyTutorial tutorial) { this.tutorial = tutorial; }
+
+    void beginTutorial(ExitFyTutorial next) {
+        if (tutorial != null) tutorial.close();
+        tutorial = next;
+        if (fragmentView != null) next.attach(this, this::renderTutorial);
+    }
+
+    @Override public void onBeginSlide() {
+        if (tutorial != null) tutorial.close();
+        super.onBeginSlide();
+    }
 
     @Override
     public boolean onFragmentCreate() {

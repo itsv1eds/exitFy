@@ -6,6 +6,8 @@ import org.json.JSONObject;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -19,6 +21,7 @@ final class ExitFyTutorial {
         return thread;
     });
     private WeakReference<BaseFragment> visible = new WeakReference<>(null);
+    private WeakReference<ExitFyDashboardFragment> root = new WeakReference<>(null);
     private Runnable refresh;
     private View pollView;
     private TutorialOverlay overlay;
@@ -28,7 +31,10 @@ final class ExitFyTutorial {
     private final Runnable poll = new Runnable() {
         @Override public void run() {
             if (!active || pollView == null || refresh == null) return;
-            refresh.run();
+            BaseFragment owner = visible.get();
+            if (owner != null && owner.getParentLayout() != null
+                    && owner.isLastFragment()
+                    && !owner.getParentLayout().isTransitionAnimationInProgress()) refresh.run();
             if (pollView != null) pollView.postDelayed(this, 350L);
         }
     };
@@ -53,10 +59,44 @@ final class ExitFyTutorial {
     static void start(BaseFragment owner, boolean replay) {
         if (owner == null || owner.getParentActivity() == null) return;
         ExitFyTutorial tour = new ExitFyTutorial(replay);
+        if (replay && owner.getParentLayout() != null) {
+            List<BaseFragment> stack = new ArrayList<>(owner.getParentLayout().getFragmentStack());
+            int index = TutorialHistory.rootIndex(stack, owner,
+                    entry -> entry instanceof ExitFyDashboardFragment
+                            && entry.getCurrentAccount() == owner.getCurrentAccount(),
+                    entry -> pluginScreen(entry) && entry.getCurrentAccount() == owner.getCurrentAccount());
+            if (index >= 0) {
+                ExitFyDashboardFragment dashboard = (ExitFyDashboardFragment) stack.get(index);
+                tour.root = new WeakReference<>(dashboard);
+                dashboard.beginTutorial(tour);
+                tour.saveProgress();
+                returnToRoot(owner, dashboard);
+                return;
+            }
+        }
         ExitFyDashboardFragment dashboard = new ExitFyDashboardFragment(tour);
+        tour.root = new WeakReference<>(dashboard);
         dashboard.setCurrentAccount(owner.getCurrentAccount());
-        if (owner.presentFragment(dashboard)) tour.saveProgress();
+        if (owner.presentFragment(dashboard, replay && owner instanceof ExitFyPreferencesFragment)) tour.saveProgress();
         else tour.close();
+    }
+
+    private static boolean pluginScreen(BaseFragment owner) {
+        return owner instanceof ExitFyDashboardFragment || owner instanceof ExitFyPreferencesFragment
+                || owner instanceof ExitFyServersFragment;
+    }
+
+    private static void returnToRoot(BaseFragment owner, ExitFyDashboardFragment dashboard) {
+        if (owner == null || owner == dashboard || owner.getParentLayout() == null || !owner.isLastFragment()) return;
+        List<BaseFragment> stack = new ArrayList<>(owner.getParentLayout().getFragmentStack());
+        int index = TutorialHistory.rootIndex(stack, owner, entry -> entry == dashboard,
+                entry -> pluginScreen(entry) && entry.getCurrentAccount() == owner.getCurrentAccount());
+        if (index < 0) return;
+        for (BaseFragment extra : TutorialHistory.intermediateScreens(stack, dashboard, owner,
+                entry -> pluginScreen(entry) && entry.getCurrentAccount() == owner.getCurrentAccount())) {
+            extra.removeSelfFromStack(true);
+        }
+        owner.finishFragment();
     }
 
     void attach(BaseFragment owner, Runnable render) {
@@ -84,9 +124,11 @@ final class ExitFyTutorial {
     }
 
     private void finish() {
+        BaseFragment owner = visible.get();
         flow.finish();
         saveProgress();
         close();
+        returnToRoot(owner, root.get());
     }
 
     private void saveProgress() {
@@ -102,7 +144,7 @@ final class ExitFyTutorial {
     }
 
     private void advance(TutorialFlow.Step step) {
-        if (active && flow.advance(step, true)) { hide(); saveProgress(); }
+        if (active && flow.advance(step, true)) saveProgress();
     }
 
     void sourceOpened() { advance(TutorialFlow.Step.SOURCE); }
@@ -110,7 +152,6 @@ final class ExitFyTutorial {
         if (flow.step() != TutorialFlow.Step.PROVIDER) return;
         needsCustomSource = provider == SettingsModel.CUSTOM_PROVIDER_ID && !configured;
         if (!needsCustomSource) advance(TutorialFlow.Step.PROVIDER);
-        else hide();
     }
     void serverCommand(String command) {
         if (needsCustomSource && ("add_subscription".equals(command)
@@ -217,9 +258,9 @@ final class ExitFyTutorial {
     void preferences(BaseFragment owner, View target) {
         if (!active || flow.step() != TutorialFlow.Step.ADVANCED) return;
         pauseAction = false;
-        show(owner, target, I18n.t("Обучение завершено", "Tutorial complete"),
-                I18n.t("Настройки разделены по группам. Обучение можно снова запустить в «Помощь» — установка компонентов при повторе пропускается.",
-                        "Settings are grouped. Replay the tutorial from Help; component installation is skipped on replay."), this::finish);
+        show(owner, target, I18n.t("Повтор обучения", "Replay the tutorial"),
+                I18n.t("Здесь можно снова запустить подсказки, пропустив установку компонентов. Нажмите «Готово» — вернёмся на главный экран exitFy.",
+                        "Replay the hints here, skipping component installation. Tap Done to return to the exitFy dashboard."), this::finish);
     }
 
     private void show(BaseFragment owner, View target, String title, String body, Runnable action) {
@@ -228,7 +269,7 @@ final class ExitFyTutorial {
         if (overlay == null || overlay.isClosed()) overlay = new TutorialOverlay(owner);
         overlay.present(target, title, body,
                 I18n.format("Шаг %s из %s", "Step %s of %s", flow.position() + 1, count()),
-                action == null ? I18n.t("Нажать выделенную кнопку", "Tap the highlighted button")
+                action == null ? I18n.t("Нажать", "Tap")
                         : flow.step() == TutorialFlow.Step.ADVANCED ? I18n.t("Готово", "Done")
                         : I18n.t("Продолжить", "Continue"), action, this::finish, !pauseAction);
     }
