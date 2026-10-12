@@ -8,10 +8,11 @@
     public static void onAppResume();
 }
 
-# Python opens this factory by declared-method reflection. It remains
+# Python opens these UI entries by declared-method reflection. They remain
 # package-private so the seven-method public bridge ABI does not expand.
 -keepclassmembers class com.extera.plugins.exitfy.ExitFyBridge {
     static org.telegram.ui.ActionBar.BaseFragment createDashboardFragment();
+    static boolean offerTutorialWelcome(org.telegram.ui.ActionBar.BaseFragment);
 }
 
 -keepclassmembers class * extends de.robv.android.xposed.XC_MethodHook {

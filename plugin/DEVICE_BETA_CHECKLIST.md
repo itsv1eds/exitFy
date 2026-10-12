@@ -249,8 +249,19 @@ gates; mixed balancers must also be checked with both families running.
 
 - Refresh every built-in provider and a custom subscription with the single
   Happ identity; capture only counts and diagnostics, never credentials.
-- Verify first-use tutorial progress survives reopening/restarting; replay it
-  from Advanced and confirm no automatic network/connection action occurs.
+- On a fresh install, verify the welcome offers Start tutorial / Not now once.
+  Decline, restart and resume: no repeat welcome or automatic exitFy page.
+  Upgrade with incomplete saved tutorial progress: no automatic page or prompt.
+- Accept the welcome and check all eight highlighted steps on real screens.
+  Component installation must finish before Source; cancel/reopen provider and
+  server dialogs and fail/retry commands without skipping their action. Confirm
+  choosing the already active server also allows advancing the guide.
+- Replay from Advanced > Help: begin at Source (step two), skip installation.
+  No network/connection action occurs until the user taps its actual control.
+  Keep an existing connection when continuing the Connect step on replay.
+- Check dividers, themed hints, large font and landscape; hints must scroll their
+  target into view. Pause, navigate back, finish and destroy the guide: no orphan
+  overlay, timer or animated pointer should remain over the client.
 - Import `.conf` from a document provider and clipboard text, including IPv6,
   multiple peers, preshared keys, signature packets and keepalive ranges. Test
   actual Telegram traffic and calls against the user's own AWG server.

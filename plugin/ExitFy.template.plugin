@@ -410,6 +410,7 @@ class ExitFyPlugin(BasePlugin):
 
     def on_plugin_load(self):
         try:
+            self._initialize_tutorial_prompt()
             self._clear_legacy_transient_settings()
             self._migrate_provider_catalog()
             self._migrate_legacy_plugin()
@@ -472,14 +473,8 @@ class ExitFyPlugin(BasePlugin):
             self.log("exitFy resume failed: " + str(exc))
 
     def _maybe_show_tutorial(self):
-        if getattr(self, "_tutorial_offered", False) or not self._runtime_ready:
-            return
-        try:
-            state = json.loads(str(_DEX_RUNTIME.call("getUiState")))
-            if state.get("tutorialComplete", False):
-                self._tutorial_offered = True
-                return
-        except Exception:
+        if getattr(self, "_tutorial_offered", False) or not self._runtime_ready \
+                or self._as_bool(self.get_setting("tutorial_prompted", True)):
             return
 
         def open_on_ui():
@@ -493,15 +488,19 @@ class ExitFyPlugin(BasePlugin):
                 UserConfig = jclass("org.telegram.messenger.UserConfig")
                 if not UserConfig.getInstance(account).isClientActivated():
                     return
-                dashboard = _DEX_RUNTIME.call("createDashboardFragment")
-                if dashboard is None:
-                    return
-                dashboard.setCurrentAccount(account)
-                if fragment.presentFragment(dashboard):
+                shown = _DEX_RUNTIME.call("offerTutorialWelcome", fragment)
+                if str(shown).strip().lower() in ("true", "1"):
                     self._tutorial_offered = True
-            except Exception:
-                pass
+                    self.set_setting("tutorial_prompted", True, reload_settings=False)
+            except Exception as exc:
+                self.log("exitFy welcome prompt failed: " + str(exc))
         run_on_ui_thread(open_on_ui)
+
+    def _initialize_tutorial_prompt(self):
+        if self.get_setting("tutorial_prompted", None) is not None:
+            return
+        already_installed = bool(self.get_setting("schema_version", 0))
+        self.set_setting("tutorial_prompted", already_installed, reload_settings=False)
 
     @staticmethod
     def _as_bool(value):

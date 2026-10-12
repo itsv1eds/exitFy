@@ -645,6 +645,20 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
         return value;
     }
 
+    protected final View sectionDivider(Context context, LinearLayout content, CharSequence label) {
+        LinearLayout header = new LinearLayout(context);
+        header.setOrientation(LinearLayout.VERTICAL);
+        View line = new View(context);
+        bindBackground(line, BackgroundRole.DIVIDER, 0, 0);
+        header.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
+        header.addView(sectionLabel(context, label), matchWrap());
+        LinearLayout.LayoutParams params = matchWrap();
+        params.topMargin = content.getChildCount() == 0 ? 0 : dp(14);
+        params.bottomMargin = dp(4);
+        content.addView(header, params);
+        return header;
+    }
+
     protected final ImageView iconBadge(Context context, int resource,
                                         CharSequence description, int sizeDp) {
         ImageView image = icon(context, resource, description,
@@ -779,6 +793,9 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
                     getThemedColor(binding.iconColorKey), PorterDuff.Mode.SRC_IN);
         }
         switch (binding.backgroundRole) {
+            case DIVIDER:
+                view.setBackgroundColor(getThemedColor(Theme.key_divider));
+                break;
             case ROOT:
                 view.setBackgroundColor(
                         getThemedColor(Theme.key_windowBackgroundGray));
@@ -930,6 +947,7 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
 
     private enum BackgroundRole {
         NONE,
+        DIVIDER,
         ROOT,
         CARD_STATIC,
         CARD_CLICKABLE,

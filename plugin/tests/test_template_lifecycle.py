@@ -113,6 +113,7 @@ def load_plugin_class(overrides=None):
 
     namespace = {
         "BasePlugin": FakeBasePlugin,
+        "AppEvent": types.SimpleNamespace(RESUME="resume"),
         "_DEX_RUNTIME": runtime,
         "_extract_native_bridge": lambda: (
             "/private/exitfy", "/private/bridge.so", "arm64-v8a"
@@ -163,6 +164,64 @@ def load_plugin_class(overrides=None):
 
 
 SHRIMP, ELIX, SWORKLE, CUSTOM = 0, 1, 2, 3
+
+
+
+class TutorialStartupTests(unittest.TestCase):
+    @staticmethod
+    def fixture():
+        user_config = types.SimpleNamespace(getInstance=lambda account: types.SimpleNamespace(isClientActivated=lambda: True))
+        plugin_type, runtime, _errors, opened, _infos = load_plugin_class({
+            "jclass": lambda name: user_config if name == "org.telegram.messenger.UserConfig" else name,
+        })
+        original = runtime.call
+        runtime.welcome_result = True
+        def call(name, *args):
+            if name == "offerTutorialWelcome":
+                runtime.calls.append((name, args))
+                return runtime.welcome_result
+            if name == "getUiState":
+                return json.dumps({"runtimeAvailable": True, "tutorialComplete": False, "tutorialStep": 3})
+            return original(name, *args)
+        runtime.call = call
+        return plugin_type, runtime, opened
+
+    def test_upgrade_and_resume_never_open_dashboard_for_incomplete_tutorial(self):
+        plugin_type, runtime, opened = self.fixture()
+        plugin = plugin_type()
+        plugin.settings.update({"schema_version": 6, "tutorial_step": 3})
+        plugin.on_plugin_load()
+        plugin.on_app_event("resume")
+        plugin._maybe_show_tutorial()
+        self.assertEqual([], opened)
+        self.assertFalse(any(name in ("createDashboardFragment", "offerTutorialWelcome") for name, _ in runtime.calls))
+        self.assertTrue(plugin.settings["tutorial_prompted"])
+
+    def test_fresh_install_only_offers_welcome_once_without_navigation(self):
+        plugin_type, runtime, opened = self.fixture()
+        plugin = plugin_type()
+        plugin.on_plugin_load()
+        plugin._maybe_show_tutorial()
+        self.assertEqual([], opened)
+        self.assertEqual(1, sum(name == "offerTutorialWelcome" for name, _ in runtime.calls))
+        self.assertTrue(plugin.settings["tutorial_prompted"])
+        restored = plugin_type()
+        restored.settings.update(plugin.settings)
+        restored.on_plugin_load()
+        self.assertEqual(1, sum(name == "offerTutorialWelcome" for name, _ in runtime.calls))
+        self.assertEqual([], opened)
+
+    def test_busy_window_keeps_first_install_offer_pending_until_it_can_show(self):
+        plugin_type, runtime, opened = self.fixture()
+        plugin = plugin_type()
+        runtime.welcome_result = False
+        plugin.on_plugin_load()
+        self.assertFalse(plugin.settings["tutorial_prompted"])
+        self.assertFalse(plugin._tutorial_offered)
+        runtime.welcome_result = True
+        plugin._maybe_show_tutorial()
+        self.assertTrue(plugin.settings["tutorial_prompted"])
+        self.assertEqual([], opened)
 
 
 class TemplateLifecycleTest(unittest.TestCase):

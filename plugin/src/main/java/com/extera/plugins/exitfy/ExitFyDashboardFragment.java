@@ -97,8 +97,12 @@ final class ExitFyDashboardFragment extends BaseFragment {
     private View advancedCard;
     private View providerPageCard;
     private View restartCard;
-    private boolean tutorialPresented;
+    private final ExitFyTutorial tutorial;
     private ImageView connectionIconView;
+
+    public ExitFyDashboardFragment() { this(null); }
+
+    ExitFyDashboardFragment(ExitFyTutorial tutorial) { this.tutorial = tutorial; }
 
     @Override
     public boolean onFragmentCreate() {
@@ -153,10 +157,12 @@ final class ExitFyDashboardFragment extends BaseFragment {
         setListening(true);
         applyTheme();
         requestRefresh();
+        if (tutorial != null) tutorial.attach(this, this::renderTutorial);
     }
 
     @Override
     public void onPause() {
+        if (tutorial != null) tutorial.detach(this);
         dismissServerChoices();
         setListening(false);
         cancelCoreInstallUiCallbacks();
@@ -165,6 +171,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
 
     @Override
     public void onFragmentDestroy() {
+        if (tutorial != null) tutorial.close();
         alive = false;
         dismissServerChoices();
         renderGeneration.incrementAndGet();
@@ -521,17 +528,6 @@ final class ExitFyDashboardFragment extends BaseFragment {
     }
 
     private void applyState(ExitFyDashboardState state) {
-        if (!tutorialPresented && state.runtimeAvailable && state.tutorialStep < ExitFyTutorial.count()
-                && fragmentView != null) {
-            tutorialPresented = true;
-            fragmentView.postDelayed(() -> {
-                if (!alive || getParentActivity() == null) return;
-                ExitFyTutorial tutorial = new ExitFyTutorial();
-                tutorial.setCurrentAccount(currentAccount);
-                presentFragment(tutorial);
-            }, 350L);
-        }
-
         if (connectButton == null) return;
         connectionStatusView.setText(state.connectionTitle());
         connectionStatusView.setTextColor(connectionColor(state.runtimeState));
@@ -1054,7 +1050,9 @@ final class ExitFyDashboardFragment extends BaseFragment {
     private void selectServer(String key) {
         runCommand(() -> new JSONObject()
                 .put("command", "select_node")
-                .put("key", key), true);
+                .put("key", key), true, result -> {
+                    if (tutorial != null) tutorial.serverSelected();
+                });
     }
 
     private void runSourcePing(String expectedPingType) {
@@ -1067,7 +1065,9 @@ final class ExitFyDashboardFragment extends BaseFragment {
             for (ExitFyServerPage.Node node : page.nodes) keys.put(node.key);
             return new JSONObject().put("command", "ping_nodes").put("keys", keys)
                     .put("expected_ping_type", expectedPingType);
-        }, true);
+        }, true, result -> {
+            if (tutorial != null) tutorial.pingRequested();
+        });
     }
 
     private void runSimpleCommand(String command, boolean showSuccess) {
@@ -1151,12 +1151,12 @@ final class ExitFyDashboardFragment extends BaseFragment {
 
     private void openServers() {
         try {
-            ExitFyServersFragment servers = new ExitFyServersFragment();
+            ExitFyServersFragment servers = new ExitFyServersFragment(tutorial);
             servers.setCurrentAccount(getCurrentAccount());
             if (!presentFragment(servers)) {
                 showToast(I18n.t("Не удалось открыть серверы",
                         "Could not open servers"), false);
-            }
+            } else if (tutorial != null) tutorial.sourceOpened();
         } catch (Throwable error) {
             showToast(I18n.t("Не удалось открыть серверы",
                     "Could not open servers"), false);
@@ -1165,7 +1165,7 @@ final class ExitFyDashboardFragment extends BaseFragment {
 
     private void openPreferences() {
         try {
-            ExitFyPreferencesFragment preferences = new ExitFyPreferencesFragment();
+            ExitFyPreferencesFragment preferences = new ExitFyPreferencesFragment(tutorial);
             preferences.setCurrentAccount(getCurrentAccount());
             if (!presentFragment(preferences)) {
                 showToast(I18n.t("Не удалось открыть настройки",
@@ -1174,6 +1174,13 @@ final class ExitFyDashboardFragment extends BaseFragment {
         } catch (Throwable error) {
             showToast(I18n.t("Не удалось открыть настройки",
                     "Could not open settings"), false);
+        }
+    }
+
+    private void renderTutorial() {
+        if (tutorial != null && alive && connectButton != null) {
+            tutorial.dashboard(this, latestState, connectButton, sourceOpenArea,
+                    activeOpenArea, pingButton, advancedCard);
         }
     }
 

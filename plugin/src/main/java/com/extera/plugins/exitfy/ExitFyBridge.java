@@ -110,6 +110,10 @@ public final class ExitFyBridge {
         return new ExitFyDashboardFragment();
     }
 
+    static boolean offerTutorialWelcome(BaseFragment owner) {
+        return ExitFyTutorial.offerWelcome(owner);
+    }
+
     static void addUiListener(Runnable listener) {
         if (listener == null) return;
         removeUiListener(listener);

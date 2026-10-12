@@ -1149,8 +1149,8 @@ tasks.register("validateEmbeddedDexConfig") {
                 || !dashboardText.contains("ArrayList<ThemeDescription> getThemeDescriptions()")
                 || !dashboardText.contains("scheduleThemeRefresh()")
                 || !dashboardText.contains("fragmentView = scroll")
-                || !dashboardText.contains("new ExitFyServersFragment()")
-                || !dashboardText.contains("new ExitFyPreferencesFragment()")
+                || !dashboardText.contains("new ExitFyServersFragment(tutorial)")
+                || !dashboardText.contains("new ExitFyPreferencesFragment(tutorial)")
                 || !dashboardText.contains("sourceRefreshView.setOnClickListener")
                 || !dashboardText.contains("\"refresh_subscriptions\"")
                 || !dashboardText.contains(
@@ -1211,7 +1211,7 @@ tasks.register("validateEmbeddedDexConfig") {
                 throw new GradleException("Native sub-screen contract is missing: ${token}")
             }
         }
-        ["ping_type", "custom_hwid", "subscription_user_agent", "balance_mode", "tutorial_step", "setSetting(",
+        ["ping_type", "custom_hwid", "subscription_user_agent", "balance_mode", "ExitFyTutorial.start(this, true)", "sectionDivider(", "setSetting(",
          "Тип пинга", "Ping type", "\"Proxy GET\"", "\"TCP\"",
          "\"HWID\"", "\"User-Agent\"", "next.defaultHwid",
          "\"Сохранить\"", "\"Сбросить\""].each { token ->
@@ -1222,7 +1222,7 @@ tasks.register("validateEmbeddedDexConfig") {
         ["createIntroCard(", "Тонкая настройка", "Fine-tuning",
          "ПРОВЕРКА", "\"CHECK\"", "ИДЕНТИФИКАТОР", "\"IDENTIFIER\"",
          "Настройки применяются сразу", "Changes apply immediately",
-         "Проверка задержки", "Latency check",
+         "I18n.t(\"Проверка задержки\", \"Latency check\")",
          "Выберите проверку", "Choose a proxy request",
          "Пользовательский HWID", "Custom HWID",
          "Сохранённое значение скрыто", "saved value is hidden",
@@ -1692,6 +1692,10 @@ tasks.register("validateEmbeddedDexConfig") {
                 "static org.telegram.ui.ActionBar.BaseFragment createDashboardFragment();")) {
             throw new GradleException("Dashboard reflection keep rule is missing")
         }
+        if (!proguardText.contains(
+                "static boolean offerTutorialWelcome(org.telegram.ui.ActionBar.BaseFragment);")) {
+            throw new GradleException("Tutorial welcome reflection keep rule is missing")
+        }
     }
 }
 
@@ -2051,6 +2055,15 @@ tasks.register("verifyPluginArtifact") {
                 || dashboardFactoryFlags.contains("PUBLIC")) {
             throw new GradleException(
                     "Dashboard factory must remain package-private and outside public bridge ABI")
+        }
+        def welcomeMatcher = bridgeMethodsBlock =~ /(?ms)^\s+name\s+:\s+'offerTutorialWelcome'\s*$\s*^\s+type\s+:\s+'\(Lorg\/telegram\/ui\/ActionBar\/BaseFragment;\)Z'\s*$\s*^\s+access\s+:\s+0x[0-9a-f]+\s+\(([^)]*)\)\s*$/
+        if (!welcomeMatcher.find()) {
+            throw new GradleException("Tutorial welcome entry is absent from the packaged bridge")
+        }
+        String welcomeFlags = welcomeMatcher.group(1)
+        if (!welcomeFlags.contains("STATIC")
+                || ["PUBLIC", "PRIVATE", "PROTECTED"].any { welcomeFlags.contains(it) }) {
+            throw new GradleException("Tutorial welcome must remain package-private")
         }
         String proxyControllerDescriptor =
                 "Lcom/exteragram/messenger/proxy/ProxyController;"

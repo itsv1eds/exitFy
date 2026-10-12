@@ -3,6 +3,7 @@ package com.extera.plugins.exitfy;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.view.View;
 import android.widget.LinearLayout;
 
 import org.json.JSONObject;
@@ -33,6 +34,26 @@ final class ExitFyPreferencesFragment
     private SettingRow callStateRow;
     private SettingRow restartRow;
     private boolean commandBusy;
+    private final ExitFyTutorial tutorial;
+    private View connectionSection;
+
+    ExitFyPreferencesFragment() { this(null); }
+    ExitFyPreferencesFragment(ExitFyTutorial tutorial) { this.tutorial = tutorial; }
+
+    @Override public void onResume() {
+        super.onResume();
+        if (tutorial != null) tutorial.attach(this, () -> tutorial.preferences(this, connectionSection));
+    }
+
+    @Override public void onPause() {
+        if (tutorial != null) tutorial.detach(this);
+        super.onPause();
+    }
+
+    @Override public void onFragmentDestroy() {
+        if (tutorial != null) tutorial.detach(this);
+        super.onFragmentDestroy();
+    }
 
     @Override
     protected CharSequence screenTitle() {
@@ -46,18 +67,8 @@ final class ExitFyPreferencesFragment
 
     @Override
     protected void buildContent(Context context, LinearLayout content) {
-        SettingRow tutorial = settingRow(context, R.drawable.msg_help,
-                I18n.t("Как пользоваться exitFy", "How to use exitFy"),
-                I18n.t("Запустить обучение с первого шага", "Replay the tutorial from the first step"));
-        setSafeClick(tutorial.view, () -> executeCommand(() -> new JSONObject()
-                .put("command", "set_setting").put("key", "tutorial_step").put("value", 0), false,
-                result -> {
-                    if (!result.ok) return;
-                    ExitFyTutorial tour = new ExitFyTutorial();
-                    tour.setCurrentAccount(currentAccount);
-                    presentFragment(tour);
-                }));
-        content.addView(tutorial.view, sectionParams());
+        connectionSection = sectionDivider(context, content, I18n.t("Подключение", "Connection"));
+
         balanceRow = settingRow(context, R.drawable.msg_stats,
                 I18n.t("Балансировщик", "Balancer"),
                 I18n.t("Round Robin — распределять новые соединения; Sticky Session — самый быстрый сервер",
@@ -68,22 +79,12 @@ final class ExitFyPreferencesFragment
                 index -> setSetting("balance_mode", new String[]{"off", "round_robin", "sticky"}[index])));
         content.addView(balanceRow.view, sectionParams());
 
-        pingTypeRow = settingRow(context, R.drawable.msg_speed,
-                I18n.t("Тип пинга", "Ping type"), "");
-        setSafeClick(pingTypeRow.view, this::showPingTypeDialog);
-        content.addView(pingTypeRow.view, sectionParams());
+        failoverRow = settingRow(context, R.drawable.msg_retry,
+                I18n.t("Менять сервер при обрыве", "Switch server on failure"), "");
+        setSafeClick(failoverRow.view, this::showFailoverDialog);
+        content.addView(failoverRow.view, sectionParams());
 
-        customHwidRow = settingRow(context, R.drawable.msg_edit,
-                "HWID", "");
-        setSafeClick(customHwidRow.view, this::showCustomHwidDialog);
-        content.addView(customHwidRow.view, sectionParams());
-
-        subscriptionUserAgentRow = settingRow(context, R.drawable.msg_edit,
-                "User-Agent",
-                I18n.t("С каким клиентом запрашиваются подписки",
-                        "Which client identity is used to fetch subscriptions"));
-        setSafeClick(subscriptionUserAgentRow.view, this::showSubscriptionUserAgentDialog);
-        content.addView(subscriptionUserAgentRow.view, sectionParams());
+        sectionDivider(context, content, I18n.t("Подписки", "Subscriptions"));
 
         refreshOnOpenRow = settingRow(context, R.drawable.msg_download,
                 I18n.t("Обновлять подписки при входе", "Refresh subscriptions on open"),
@@ -92,6 +93,25 @@ final class ExitFyPreferencesFragment
         setSafeClick(refreshOnOpenRow.view, this::showRefreshOnOpenDialog);
         content.addView(refreshOnOpenRow.view, sectionParams());
 
+        subscriptionUserAgentRow = settingRow(context, R.drawable.msg_edit,
+                "User-Agent",
+                I18n.t("С каким клиентом запрашиваются подписки",
+                        "Which client identity is used to fetch subscriptions"));
+        setSafeClick(subscriptionUserAgentRow.view, this::showSubscriptionUserAgentDialog);
+        content.addView(subscriptionUserAgentRow.view, sectionParams());
+
+        customHwidRow = settingRow(context, R.drawable.msg_edit,
+                "HWID", "");
+        setSafeClick(customHwidRow.view, this::showCustomHwidDialog);
+        content.addView(customHwidRow.view, sectionParams());
+
+        sectionDivider(context, content, I18n.t("Проверка задержки", "Latency checks"));
+
+        pingTypeRow = settingRow(context, R.drawable.msg_speed,
+                I18n.t("Тип пинга", "Ping type"), "");
+        setSafeClick(pingTypeRow.view, this::showPingTypeDialog);
+        content.addView(pingTypeRow.view, sectionParams());
+
         autoCheckRow = settingRow(context, R.drawable.msg_stats,
                 I18n.t("Автопроверка задержки", "Automatic latency check"),
                 I18n.t("Периодически и всегда по TCP, чтобы не прерывать подключение",
@@ -99,12 +119,7 @@ final class ExitFyPreferencesFragment
         setSafeClick(autoCheckRow.view, this::showAutoCheckDialog);
         content.addView(autoCheckRow.view, sectionParams());
 
-        callStateRow = settingRow(context, R.drawable.msg_stats,
-                I18n.t("Состояние звонков", "Call routing state"),
-                I18n.t("Врезки / запросы / сопоставлено / отправлено / получено",
-                        "Hooks / requests / mapped / sent / received"));
-        setSafeClick(callStateRow.view, this::loadCallState);
-        content.addView(callStateRow.view, sectionParams());
+        sectionDivider(context, content, I18n.t("Звонки", "Calls"));
 
         callsRow = settingRow(context, R.drawable.msg_secret,
                 I18n.t("Звонки через exitFy (эксперимент)",
@@ -114,10 +129,23 @@ final class ExitFyPreferencesFragment
         setSafeClick(callsRow.view, this::showCallsDialog);
         content.addView(callsRow.view, sectionParams());
 
-        failoverRow = settingRow(context, R.drawable.msg_retry,
-                I18n.t("Менять сервер при обрыве", "Switch server on failure"), "");
-        setSafeClick(failoverRow.view, this::showFailoverDialog);
-        content.addView(failoverRow.view, sectionParams());
+        callStateRow = settingRow(context, R.drawable.msg_stats,
+                I18n.t("Состояние звонков", "Call routing state"),
+                I18n.t("Врезки / запросы / сопоставлено / отправлено / получено",
+                        "Hooks / requests / mapped / sent / received"));
+        setSafeClick(callStateRow.view, this::loadCallState);
+        content.addView(callStateRow.view, sectionParams());
+
+        sectionDivider(context, content, I18n.t("Компоненты", "Components"));
+
+        dualCoreRow = settingRow(context, R.drawable.msg_permissions,
+                I18n.t("Два ядра сразу (эксперимент)", "Both cores at once (experimental)"), "");
+        setSafeClick(dualCoreRow.view, this::showDualCoreDialog);
+        content.addView(dualCoreRow.view, sectionParams());
+
+        coreVersionRow = settingRow(context, R.drawable.msg_info,
+                I18n.t("Версии компонентов", "Component versions"), "");
+        content.addView(coreVersionRow.view, sectionParams());
 
         restartRow = settingRow(context, R.drawable.msg_reset,
                 I18n.t("Перезапустить exteraGram", "Restart exteraGram"),
@@ -126,14 +154,15 @@ final class ExitFyPreferencesFragment
         setSafeClick(restartRow.view, this::confirmRestart);
         content.addView(restartRow.view, sectionParams());
 
-        coreVersionRow = settingRow(context, R.drawable.msg_info,
-                I18n.t("Версии компонентов", "Component versions"), "");
-        content.addView(coreVersionRow.view, sectionParams());
-
-        dualCoreRow = settingRow(context, R.drawable.msg_permissions,
-                I18n.t("Два ядра сразу (эксперимент)", "Both cores at once (experimental)"), "");
-        setSafeClick(dualCoreRow.view, this::showDualCoreDialog);
-        content.addView(dualCoreRow.view, sectionParams());
+        sectionDivider(context, content, I18n.t("Помощь", "Help"));
+        SettingRow tutorialRow = settingRow(context, R.drawable.msg_help,
+                I18n.t("Как пользоваться exitFy", "How to use exitFy"),
+                I18n.t("Показать подсказки, начиная с выбора источника", "Show hints starting with the server source"));
+        setSafeClick(tutorialRow.view, () -> {
+            if (tutorial != null) tutorial.close();
+            ExitFyTutorial.start(this, true);
+        });
+        content.addView(tutorialRow.view, sectionParams());
 
         renderUiState(state);
         loadCoreVersions();

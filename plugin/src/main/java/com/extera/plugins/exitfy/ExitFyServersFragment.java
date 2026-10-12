@@ -56,6 +56,32 @@ final class ExitFyServersFragment
     private boolean pageDirty = true;
     private boolean pageRequestInFlight;
     private boolean commandBusy;
+    private final ExitFyTutorial tutorial;
+
+    ExitFyServersFragment() { this(null); }
+    ExitFyServersFragment(ExitFyTutorial tutorial) { this.tutorial = tutorial; }
+
+    @Override public void onResume() {
+        super.onResume();
+        if (tutorial != null) tutorial.attach(this, this::renderTutorial);
+    }
+
+    @Override public void onPause() {
+        if (tutorial != null) tutorial.detach(this);
+        super.onPause();
+    }
+
+    @Override public void onFragmentDestroy() {
+        if (tutorial != null) tutorial.detach(this);
+        super.onFragmentDestroy();
+    }
+
+    private void renderTutorial() {
+        if (tutorial != null && providerRow != null) {
+            tutorial.servers(this, state, providerRow.view, addSubscriptionRow.view,
+                    refreshRow.view, nodeRows.isEmpty() ? null : nodeRows.get(0).view);
+        }
+    }
 
     private SettingRow providerRow;
     private SettingRow searchRow;
@@ -370,13 +396,20 @@ final class ExitFyServersFragment
         }
         showChoiceDialog(I18n.t("Провайдер", "Provider"), labels,
                 state.providerId, available, index -> {
-                    if (index < 0 || index >= available.length
-                            || !available[index] || index == state.providerId) {
+                    if (index < 0 || index >= available.length || !available[index]) {
+                        return;
+                    }
+                    if (index == state.providerId) {
+                        if (tutorial != null) tutorial.providerChosen(index,
+                                state.customUrlCount > 0 || state.serverCount > 0);
                         return;
                     }
                     offset = 0;
                     pageDirty = true;
-                    setSetting("provider_id", index);
+                    executeCommand(() -> new JSONObject().put("command", "set_setting")
+                            .put("key", "provider_id").put("value", index), false, result -> {
+                        if (result.ok && tutorial != null) tutorial.providerChosen(index, state.customUrlCount > 0);
+                    });
                 });
     }
 
@@ -681,7 +714,7 @@ final class ExitFyServersFragment
                         ? I18n.t("Сервер", "Server") : node.name)
                 .setMessage(nodeDetails(node))
                 .setNegativeButton(I18n.t("Закрыть", "Close"), null);
-        if (!selected) {
+        if (!selected || (tutorial != null && tutorial.selectingServer())) {
             builder.setPositiveButton(I18n.t("Выбрать", "Select"),
                     (ignored, which) -> runUiAction(() -> selectNode(node)));
         }
@@ -963,8 +996,20 @@ final class ExitFyServersFragment
     }
 
     private void runMutation(CommandFactory command) {
-        executeCommand(command, true, result -> {
+        java.util.concurrent.atomic.AtomicReference<String> name = new java.util.concurrent.atomic.AtomicReference<>("");
+        executeCommand(() -> {
+            JSONObject request = command.create();
+            name.set(request.optString("command", ""));
+            return request;
+        }, true, result -> {
             if (!result.ok) return;
+            if (tutorial != null) {
+                tutorial.serverCommand(name.get());
+                if ("select_node".equals(name.get()) && tutorial.returningToDashboard()) {
+                    finishFragment();
+                    return;
+                }
+            }
             // Mutations such as add_node may also switch the provider. Wait
             // for the authoritative runtime state before asking for a page,
             // otherwise the old provider id could label a page from the new
