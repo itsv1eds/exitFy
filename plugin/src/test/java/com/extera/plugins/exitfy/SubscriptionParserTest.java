@@ -25,6 +25,64 @@ public class SubscriptionParserTest {
                     + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
     @Test
+    public void tcpAndXhttpXmuxAtOneEndpointRemainSeparateInHappSubscription() throws Exception {
+        JSONObject extra = new JSONObject().put("xmux", new JSONObject()
+                .put("cMaxReuseTimes", 0).put("maxConcurrency", "16-32")
+                .put("maxConnections", 0).put("hKeepAlivePeriod", 0)
+                .put("hMaxRequestTimes", "600-900").put("hMaxReusableSecs", "1800-3000"))
+                .put("headers", new JSONObject()).put("noGRPCHeader", false)
+                .put("xPaddingBytes", "100-1000").put("scMaxEachPostBytes", 1000000)
+                .put("scMinPostsIntervalMs", 30).put("scStreamUpServerSecs", "20-80");
+        String tcp = VLESS.replace("#One", "&type=tcp#Same");
+        String xhttp = VLESS.replace("#One", "&type=xhttp&mode=auto&path=%2Fstream&extra="
+                + java.net.URLEncoder.encode(extra.toString(), "UTF-8") + "#Same");
+        for (String body : new String[]{xhttp + "\n" + tcp,
+                Base64.getEncoder().encodeToString((xhttp + "\n" + tcp).getBytes(StandardCharsets.UTF_8))}) {
+            SubscriptionParser.ParseResult result = SubscriptionParser.parseDetailed(body);
+            assertEquals(2, result.nodes.size());
+            assertEquals(0, result.rejected);
+            assertNotEquals(result.nodes.get(0).normalizedKey, result.nodes.get(1).normalizedKey);
+            assertEquals("xhttp", result.nodes.get(0).outbound.getJSONObject("transport").getString("type"));
+            assertTrue(result.nodes.get(0).supports(CoreFamily.XRAY));
+            assertTrue(result.nodes.get(1).supports(CoreFamily.SING_BOX));
+        }
+    }
+
+    @Test
+    public void inlineMetadataAndRoutingAreNotImportedAsServers() {
+        String body = "#profile-title: base64:8J+TsSBJLlNocmltcCBMVEU=\n"
+                + "#announce: example " + VLESS.replace("One", "Notice") + "\n"
+                + "://routing/onadd/" + VLESS.replace("One", "Routing") + "\n" + VLESS;
+        SubscriptionParser.ParseResult result = SubscriptionParser.parseDetailed(body);
+        assertEquals(1, result.nodes.size());
+        assertEquals(0, result.rejected);
+        assertEquals("One", result.nodes.get(0).name);
+        assertEquals("base64:8J+TsSBJLlNocmltcCBMVEU=", SubscriptionParser.inlineProfileTitle(body));
+    }
+
+    @Test
+    public void socksAndAuthenticatedHttpLinksAreServersButSubscriptionUrlsAreNot() throws Exception {
+        String body = "socks5://user%3Aname:pass%2Bword@proxy.example:1080#SOCKS\n"
+                + "http://user:pass@proxy.example:8080#HTTP\n"
+                + "https://user:pass@proxy.example:8443?sni=edge.example#HTTPS\n"
+                + "https://subscription.example/path\n" + VLESS;
+        SubscriptionParser.ParseResult result = SubscriptionParser.parseDetailed(body);
+        assertEquals(4, result.nodes.size()); assertEquals(0, result.rejected);
+        JSONObject account = result.nodes.get(0).xrayOutbound.getJSONObject("settings")
+                .getJSONArray("servers").getJSONObject(0).getJSONArray("users").getJSONObject(0);
+        assertEquals("user:name", account.getString("user"));
+        assertEquals("pass+word", account.getString("pass"));
+        assertEquals("tls", result.nodes.get(2).xrayOutbound.getJSONObject("streamSettings").getString("security"));
+        for (int i = 0; i < 3; i++) {
+            ProtocolParser.Node node = result.nodes.get(i);
+            assertTrue(node.supports(CoreFamily.XRAY));
+            assertEquals(node.normalizedKey, ProtocolParser.fromStoredJson(node.toStoredJson()).normalizedKey);
+            assertEquals(node.xrayOutbound.getString("protocol"), XrayConfigRenderer.build(node, 30000, "u", "p")
+                    .getJSONArray("outbounds").getJSONObject(0).getString("protocol"));
+        }
+    }
+
+    @Test
     public void decodesBase64Subscription() {
         String body = Base64.getEncoder().encodeToString((VLESS + "\n").getBytes(StandardCharsets.UTF_8));
         List<ProtocolParser.Node> nodes = SubscriptionParser.parseNodes(body);

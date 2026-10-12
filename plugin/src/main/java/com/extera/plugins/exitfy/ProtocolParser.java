@@ -60,7 +60,8 @@ final class ProtocolParser {
     static final String WS_XRAY_PATH_SEMANTICS = "xray_path_semantics";
     static final String[] SCHEMES = {
             "vless://", "vmess://", "trojan://", "ss://", "hy2://",
-            "hysteria2://", "hysteria://", "tuic://"
+            "hysteria2://", "hysteria://", "tuic://", "amneziawg://", "awg://",
+            "socks://", "socks5://", "wireguard://", "wg://", "http://", "https://"
     };
     private static final String[] STREAM_PARAMS = {
             "security", "sni", "peer", "insecure", "allowInsecure", "allow_insecure",
@@ -94,7 +95,14 @@ final class ProtocolParser {
         String lower = uri.toLowerCase(Locale.US);
         JSONObject outbound;
         String name;
-        if (lower.startsWith("vless://")) {
+        if (lower.startsWith("amneziawg://") || lower.startsWith("awg://")) {
+            return AwgConfigParser.parseLink(uri);
+        } else if (lower.startsWith("socks://") || lower.startsWith("socks5://")
+                || lower.startsWith("http://") || lower.startsWith("https://")) {
+            return parseProxyLink(uri);
+        } else if (lower.startsWith("wireguard://") || lower.startsWith("wg://")) {
+            return parseWireGuardLink(uri);
+        } else if (lower.startsWith("vless://")) {
             Parsed parsed = parseStandard(uri);
             outbound = parseVless(parsed);
             name = parsed.name;
@@ -133,6 +141,99 @@ final class ProtocolParser {
         Node node = new Node(uri, cleanName(name), outbound, sha256(canonical));
         if (requireCoreSupport) requireSupported(node);
         return node;
+    }
+
+    private static Node parseProxyLink(String uri) throws Exception {
+        Parsed parsed = parseStandard(uri);
+        boolean http = uri.toLowerCase(Locale.US).startsWith("http");
+        rejectUnknownParams(parsed.params, "HTTP/SOCKS", "sni", "insecure");
+        URI address = new URI(uri);
+        String auth = address.getRawUserInfo();
+        if (http && auth == null) throw new IllegalArgumentException("HTTP proxy credentials are missing");
+        JSONObject server = new JSONObject().put("address", parsed.host).put("port", parsed.port);
+        if (auth != null && !auth.isEmpty()) {
+            int separator = auth.indexOf(':');
+            if (separator < 0) throw new IllegalArgumentException("proxy username/password are missing");
+            String user = decode(auth.substring(0, separator));
+            String pass = decode(auth.substring(separator + 1));
+            if (user.isEmpty() || containsControl(user) || containsControl(pass)) {
+                throw new IllegalArgumentException("invalid proxy credentials");
+            }
+            server.put("users", new JSONArray().put(new JSONObject().put("user", user).put("pass", pass)));
+        }
+        JSONObject outbound = new JSONObject().put("protocol", http ? "http" : "socks")
+                .put("settings", new JSONObject().put("servers", new JSONArray().put(server)));
+        if (uri.toLowerCase(Locale.US).startsWith("https://")) {
+            JSONObject tls = new JSONObject().put("serverName", value(parsed.params, "sni", parsed.host));
+            if (containsWhitespaceOrControl(tls.getString("serverName"))) {
+                throw new IllegalArgumentException("invalid HTTPS proxy server name");
+            }
+            if (parsed.params.containsKey("insecure")
+                    && strictBooleanParam(parsed.params, "insecure")) {
+                throw new IllegalArgumentException(XRAY_INSECURE_TLS_UNSUPPORTED);
+            }
+            outbound.put("streamSettings", new JSONObject().put("security", "tls").put("tlsSettings", tls));
+        } else if (!parsed.params.isEmpty()) {
+            throw new IllegalArgumentException("TLS parameters require an HTTPS proxy");
+        }
+        return fromXrayOutbound(uri, parsed.name, outbound);
+    }
+
+    private static Node parseWireGuardLink(String uri) throws Exception {
+        int scheme = uri.indexOf("://"), fragment = uri.indexOf('#');
+        String work = fragment < 0 ? uri : uri.substring(0, fragment);
+        int query = work.indexOf('?', scheme + 3);
+        String authority = work.substring(scheme + 3, query < 0 ? work.length() : query);
+        int at = authority.lastIndexOf('@');
+        if (at < 1) throw new IllegalArgumentException("WireGuard private key is missing");
+        HostPort endpoint = parseHostPort(authority.substring(at + 1));
+        Map<String, String> params = parseQuery(query < 0 ? null : work.substring(query + 1));
+        rejectUnknownParams(params, "WireGuard", "publickey", "publicKey", "public_key",
+                "presharedkey", "preSharedKey", "preshared_key", "address", "ip", "dns", "mtu",
+                "allowedips", "allowedIPs", "allowed_ips", "keepalive", "reserved");
+        String secret = decode(authority.substring(0, at));
+        for (String value : params.values()) {
+            if (containsControl(value)) throw new IllegalArgumentException("invalid WireGuard parameter");
+        }
+        if (containsControl(secret)) throw new IllegalArgumentException("invalid WireGuard private key");
+        String hostPort = (endpoint.host.contains(":") ? "[" + endpoint.host + "]" : endpoint.host) + ":" + endpoint.port;
+        String preshared = valueAny(params, "presharedkey", "preSharedKey", "preshared_key");
+        String config = "[Interface]\nPrivateKey = " + secret
+                + "\nAddress = " + valueAny(params, "address", "ip")
+                + "\nDNS = " + value(params, "dns", "1.1.1.1")
+                + "\nMTU = " + value(params, "mtu", "1280")
+                + "\n[Peer]\nPublicKey = " + valueAny(params, "publickey", "publicKey", "public_key")
+                + (preshared.isEmpty() ? "" : "\nPresharedKey = " + preshared)
+                + "\nEndpoint = " + hostPort
+                + "\nAllowedIPs = " + (valueAny(params, "allowedips", "allowedIPs", "allowed_ips").isEmpty()
+                ? "0.0.0.0/0, ::/0" : valueAny(params, "allowedips", "allowedIPs", "allowed_ips"))
+                + "\nPersistentKeepalive = " + value(params, "keepalive", "0") + "\n";
+        JSONObject neutral = AwgConfigParser.parse(config).outbound;
+        JSONObject sourcePeer = neutral.getJSONArray("peers").getJSONObject(0);
+        if (!(sourcePeer.get("persistent_keepalive_interval") instanceof Number)) {
+            throw new IllegalArgumentException("WireGuard keepalive must be an integer");
+        }
+        JSONObject peer = new JSONObject().put("publicKey", sourcePeer.getString("public_key"))
+                .put("endpoint", hostPort).put("allowedIPs", sourcePeer.getJSONArray("allowed_ips"))
+                .put("keepAlive", sourcePeer.get("persistent_keepalive_interval"));
+        if (!preshared.isEmpty()) peer.put("preSharedKey", preshared);
+        JSONObject settings = new JSONObject().put("secretKey", neutral.getString("private_key"))
+                .put("address", neutral.getJSONArray("local_address")).put("mtu", neutral.getInt("mtu"))
+                .put("noKernelTun", true).put("peers", new JSONArray().put(peer));
+        if (params.containsKey("dns")) settings.put("remoteDNS", neutral.getJSONArray("dns"));
+        if (params.containsKey("reserved")) {
+            JSONArray reserved = new JSONArray();
+            String[] values = params.get("reserved").split(",", -1);
+            if (values.length != 3) throw new IllegalArgumentException("invalid WireGuard reserved bytes");
+            for (String value : values) {
+                if (!value.trim().matches("[0-9]{1,3}")) throw new IllegalArgumentException("invalid WireGuard reserved bytes");
+                int number = Integer.parseInt(value.trim());
+                if (number > 255) throw new IllegalArgumentException("invalid WireGuard reserved bytes");
+                reserved.put(number);
+            }
+            settings.put("reserved", reserved);
+        }
+        return fromXrayOutbound(uri, fragmentName(uri), new JSONObject().put("protocol", "wireguard").put("settings", settings));
     }
 
     static Node fromOutbound(String uri, String name, JSONObject outbound) throws Exception {
@@ -373,6 +474,10 @@ final class ProtocolParser {
     static boolean supports(String value) {
         if (value == null) return false;
         String lower = value.trim().toLowerCase(Locale.US);
+        if (lower.startsWith("http://") || lower.startsWith("https://")) {
+            try { return new URI(value.trim()).getRawUserInfo() != null; }
+            catch (Exception invalid) { return false; }
+        }
         for (String scheme : SCHEMES) {
             if (lower.startsWith(scheme)) return true;
         }
@@ -926,6 +1031,9 @@ final class ProtocolParser {
                 }
                 JSONObject parsedExtra = JsonGuard.object(extra);
                 validateXhttpExtra(parsedExtra);
+                if (mode.equals("stream-one") && parsedExtra.has("downloadSettings")) {
+                    throw new IllegalArgumentException("XHTTP downloadSettings require a separate download mode");
+                }
                 value.put("extra", parsedExtra);
             }
             return value;
@@ -1034,17 +1142,19 @@ final class ProtocolParser {
     private static final int MAX_XHTTP_EXTRA_VALUE_CHARS = 256;
 
     static void validateXhttpExtra(JSONObject extra) {
+        validateXhttpExtra(extra, 0);
+    }
+
+    private static void validateXhttpExtra(JSONObject extra, int depth) {
+        if (depth > 4) throw new IllegalArgumentException("XHTTP downloadSettings are too deep");
         if (extra == null) return;
         try {
             AtomicStore.jsonUtf8Size(extra, 64 * 1024);
         } catch (IllegalArgumentException boundedFailure) {
             throw new IllegalArgumentException("invalid or oversized XHTTP extra (64 KiB maximum)");
         }
-        // The four fields below carry ranges this client depends on, so they
-        // keep their exact checks. Everything else is bounded by shape instead
-        // of by name: real subscriptions carry padding, sequence and session
-        // options that an allow-list of names cannot keep up with, and
-        // rejecting one unknown key discards the whole server.
+        // Preserve bounded transport options, including Xray's structured
+        // multiplexing and header maps. Unknown nested objects stay refused.
         java.util.HashSet<String> ranged = new java.util.HashSet<>();
         Collections.addAll(ranged, "scMaxEachPostBytes", "scMinPostsIntervalMs",
                 "xPaddingBytes", "noSSEHeader");
@@ -1058,6 +1168,31 @@ final class ProtocolParser {
             }
             if (++fields > MAX_XHTTP_EXTRA_FIELDS || key.length() > 64) {
                 throw new IllegalArgumentException("unsupported XHTTP extra field: " + key);
+            }
+            if (key.equals("xmux")) {
+                if (!(value instanceof JSONObject)) {
+                    throw new IllegalArgumentException("invalid XHTTP xmux");
+                }
+                validateXhttpXmux((JSONObject) value);
+                continue;
+            }
+            if (key.equals("headers")) {
+                if (!(value instanceof JSONObject)) {
+                    throw new IllegalArgumentException("invalid XHTTP headers");
+                }
+                validateXhttpHeaders((JSONObject) value);
+                continue;
+            }
+            if (key.equals("downloadSettings")) {
+                if (!(value instanceof JSONObject)) {
+                    throw new IllegalArgumentException("invalid XHTTP downloadSettings");
+                }
+                try {
+                    validateXhttpDownloadSettings((JSONObject) value, depth + 1);
+                } catch (IllegalArgumentException invalid) {
+                    throw new IllegalArgumentException("invalid XHTTP downloadSettings: " + invalid.getMessage());
+                }
+                continue;
             }
             if (!ranged.contains(key)) {
                 // Nested structures would let a source reach past this field.
@@ -1081,6 +1216,146 @@ final class ProtocolParser {
                 validateInt32Range(value, 1, 8 * 1024 * 1024, key);
             } else {
                 validateInt32Range(value, 0, 60_000, key);
+            }
+        }
+    }
+
+    private static void validateXhttpDownloadSettings(JSONObject stream, int depth) {
+        requireOnlyNeutralKeys(stream, "XHTTP downloadSettings", "address", "port", "network",
+                "method", "security", "tlsSettings", "realitySettings", "xhttpSettings",
+                "splithttpSettings", "sockopt");
+        String address = neutralString(stream, "address", true, false, 1024);
+        if (address.isEmpty() || containsWhitespaceOrControl(address)
+                || address.matches(".*[/@?#].*") || isUnreachableServer(address)) {
+            throw new IllegalArgumentException("invalid XHTTP download address");
+        }
+        neutralInteger(stream, "port", true, 1, 65535);
+        String network = stream.has("method")
+                ? neutralString(stream, "method", true, false, 32)
+                : neutralString(stream, "network", true, false, 32);
+        if (!network.equalsIgnoreCase("xhttp") && !network.equalsIgnoreCase("splithttp")) {
+            throw new IllegalArgumentException("XHTTP downloadSettings require XHTTP transport");
+        }
+        String security = stream.has("security")
+                ? neutralString(stream, "security", true, false, 32).toLowerCase(Locale.US) : "";
+        if (!security.isEmpty() && !security.equals("none") && !security.equals("tls")
+                && !security.equals("reality")) {
+            throw new IllegalArgumentException("invalid XHTTP download security");
+        }
+        for (String key : new String[]{"tlsSettings", "realitySettings", "sockopt"}) {
+            if (!stream.has(key)) continue;
+            JSONObject settings = neutralObject(stream, key, true);
+            if (key.equals("sockopt")) {
+                for (String selector : new String[]{"dialerProxy", "interface", "mark"}) {
+                    if (settings.has(selector)) throw new IllegalArgumentException("unsupported XHTTP download socket selector");
+                }
+            } else if (key.equals("tlsSettings") && settings.optBoolean("allowInsecure", false)) {
+                throw new IllegalArgumentException(XRAY_INSECURE_TLS_UNSUPPORTED);
+            }
+        }
+        for (String key : new String[]{"xhttpSettings", "splithttpSettings"}) {
+            if (!stream.has(key)) continue;
+            JSONObject settings = neutralObject(stream, key, true);
+            JSONObject options = new JSONObject();
+            Iterator<String> keys = settings.keys();
+            while (keys.hasNext()) {
+                String option = keys.next();
+                if (option.equals("host") || option.equals("path") || option.equals("mode")) {
+                    String value = neutralString(settings, option, true, false, MAX_URI_BYTES);
+                    if (containsControl(value)) throw new IllegalArgumentException("invalid XHTTP download transport");
+                    if (option.equals("mode") && !value.isEmpty() && !value.equals("auto")
+                            && !value.equals("packet-up") && !value.equals("stream-up")
+                            && !value.equals("stream-one")) {
+                        throw new IllegalArgumentException("invalid XHTTP download mode");
+                    }
+                } else if (option.equals("extra")) {
+                    validateXhttpExtra(neutralObject(settings, option, true), depth);
+                } else {
+                    try { options.put(option, settings.opt(option)); }
+                    catch (org.json.JSONException invalid) { throw new IllegalArgumentException("invalid XHTTP download transport"); }
+                }
+            }
+            validateXhttpExtra(options, depth);
+            if (settings.optString("mode", "").equals("stream-one")
+                    && (settings.has("downloadSettings")
+                    || (settings.optJSONObject("extra") != null
+                    && settings.optJSONObject("extra").has("downloadSettings")))) {
+                throw new IllegalArgumentException("XHTTP downloadSettings require a separate download mode");
+            }
+        }
+    }
+
+    private static void validateXhttpXmux(JSONObject xmux) {
+        HashSet<String> ranges = new HashSet<>();
+        Collections.addAll(ranges, "maxConcurrency", "maxConnections", "cMaxReuseTimes",
+                "hMaxRequestTimes", "hMaxReusableSecs");
+        Iterator<String> keys = xmux.keys();
+        while (keys.hasNext()) {
+            String key = keys.next();
+            Object value = xmux.opt(key);
+            if (ranges.contains(key)) {
+                xhttpXmuxRangeUpper(value);
+            } else if (key.equals("hKeepAlivePeriod")) {
+                // Xray uses -1 to disable HTTP/2 keepalive; zero means default.
+                if (!(value instanceof Number) || !String.valueOf(value).matches("-?[0-9]+")
+                        || ((Number) value).longValue() < -1
+                        || ((Number) value).longValue() > Integer.MAX_VALUE) {
+                    throw new IllegalArgumentException("invalid XHTTP xmux.hKeepAlivePeriod");
+                }
+            } else {
+                throw new IllegalArgumentException("unsupported XHTTP xmux field");
+            }
+        }
+        if (positiveXhttpRange(xmux.opt("maxConcurrency"))
+                && positiveXhttpRange(xmux.opt("maxConnections"))) {
+            throw new IllegalArgumentException(
+                    "XHTTP xmux maxConcurrency and maxConnections conflict");
+        }
+    }
+
+    private static boolean positiveXhttpRange(Object value) {
+        return value != null && xhttpXmuxRangeUpper(value) > 0;
+    }
+
+    private static long xhttpXmuxRangeUpper(Object value) {
+        if (!(value instanceof Number) && !(value instanceof String)) {
+            throw new IllegalArgumentException("invalid XHTTP xmux range");
+        }
+        String encoded = String.valueOf(value);
+        if (encoded.isEmpty()) return 0;
+        if (encoded.length() > 32) throw new IllegalArgumentException("invalid XHTTP xmux range");
+        java.util.regex.Matcher range = java.util.regex.Pattern.compile(
+                "^(-?[0-9]+)(?:-(-?[0-9]+))?$").matcher(encoded);
+        if (!range.matches()) throw new IllegalArgumentException("invalid XHTTP xmux range");
+        try {
+            long first = Long.parseLong(range.group(1));
+            long last = range.group(2) == null ? first : Long.parseLong(range.group(2));
+            if (first < Integer.MIN_VALUE || first > Integer.MAX_VALUE
+                    || last < Integer.MIN_VALUE || last > Integer.MAX_VALUE) {
+                throw new NumberFormatException();
+            }
+            return Math.max(first, last);
+        } catch (NumberFormatException invalid) {
+            throw new IllegalArgumentException("invalid XHTTP xmux range");
+        }
+    }
+
+    private static void validateXhttpHeaders(JSONObject headers) {
+        try {
+            AtomicStore.jsonUtf8Size(headers, 16 * 1024);
+        } catch (IllegalArgumentException invalid) {
+            throw new IllegalArgumentException("XHTTP headers exceed 16 KiB");
+        }
+        HashSet<String> normalizedNames = new HashSet<>();
+        Iterator<String> keys = headers.keys();
+        int count = 0;
+        while (keys.hasNext()) {
+            String key = keys.next();
+            Object value = headers.opt(key);
+            if (++count > 128 || !validHeaderName(key) || key.equalsIgnoreCase("host")
+                    || !normalizedNames.add(key.toLowerCase(Locale.US))
+                    || !(value instanceof String) || !validHeaderValue(value)) {
+                throw new IllegalArgumentException("invalid XHTTP header");
             }
         }
     }
@@ -2182,7 +2457,11 @@ final class ProtocolParser {
                     throw new IllegalArgumentException("unsupported neutral XHTTP mode");
                 }
                 if (transport.has("extra")) {
-                    validateXhttpExtra(neutralObject(transport, "extra", true));
+                    JSONObject extra = neutralObject(transport, "extra", true);
+                    validateXhttpExtra(extra);
+                    if (mode.equals("stream-one") && extra.has("downloadSettings")) {
+                        throw new IllegalArgumentException("XHTTP downloadSettings require a separate download mode");
+                    }
                 }
                 break;
             case "mkcp":

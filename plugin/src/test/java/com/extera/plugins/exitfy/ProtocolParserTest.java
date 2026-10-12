@@ -375,7 +375,7 @@ public class ProtocolParserTest {
     @Test
     public void rejectsUnsupportedAndInvalidPorts() {
         try {
-            ProtocolParser.parse("socks://example.com:1080");
+            ProtocolParser.parse("ssr://unsupported");
             throw new AssertionError("unsupported protocol accepted");
         } catch (Exception expected) {
             assertNotNull(expected.getMessage());
@@ -2088,7 +2088,7 @@ public class ProtocolParserTest {
     }
 
     @Test
-    public void xhttpExtraStillRejectsNestedAndOversizedValues() {
+    public void xhttpExtraStillRejectsUnknownNestedAndOversizedValues() {
         String base = "vless://00000000-0000-0000-0000-000000000000@example.invalid:443?"
                 + "encryption=none&security=tls&sni=a.invalid&type=xhttp&mode=auto&path=%2Fp&extra=";
         StringBuilder oversized = new StringBuilder();
@@ -2106,5 +2106,118 @@ public class ProtocolParserTest {
                 assertTrue(expected.getMessage().toLowerCase().contains("xhttp"));
             }
         }
+    }
+
+    @Test
+    public void preservesXmuxRangesAndHeadersThroughStorageAndXrayRendering() throws Exception {
+        JSONObject xmux = new JSONObject().put("cMaxReuseTimes", 0)
+                .put("maxConcurrency", "16-32").put("maxConnections", 0)
+                .put("hKeepAlivePeriod", -1).put("hMaxRequestTimes", "600-900")
+                .put("hMaxReusableSecs", "1800-3000");
+        JSONObject headers = new JSONObject().put("User-Agent", "example-client")
+                .put("X-Test", "example");
+        JSONObject extra = new JSONObject().put("xmux", xmux).put("headers", headers)
+                .put("noGRPCHeader", false).put("xPaddingBytes", "100-1000")
+                .put("scMaxEachPostBytes", 1000000).put("scMinPostsIntervalMs", 30)
+                .put("scStreamUpServerSecs", "20-80");
+        assertXhttpExtraRoundTrip(extra);
+    }
+
+    private static void assertXhttpExtraRoundTrip(JSONObject extra) throws Exception {
+        ProtocolParser.Node parsed = ProtocolParser.parse(xhttpUri(extra));
+        ProtocolParser.Node restored = ProtocolParser.fromStoredJson(parsed.toStoredJson());
+        assertEquals(parsed.normalizedKey, restored.normalizedKey);
+        assertTrue(restored.supports(CoreFamily.XRAY));
+        assertFalse(restored.supports(CoreFamily.SING_BOX));
+        JSONObject rendered = XrayConfigRenderer.build(restored, 39003, "user", "pass")
+                .getJSONArray("outbounds").getJSONObject(0)
+                .getJSONObject("streamSettings").getJSONObject("xhttpSettings")
+                .getJSONObject("extra");
+        JSONObject roundTrip = new JSONObject(restored.outbound.toString());
+        roundTrip.getJSONObject("transport").put("extra", rendered);
+        assertEquals(parsed.normalizedKey,
+                ProtocolParser.fromOutbound("", "", roundTrip).normalizedKey);
+    }
+
+    @Test
+    public void validatesXmuxAndHeaderShapesWithoutAcceptingArbitraryNestedConfig() throws Exception {
+        JSONObject[] invalid = {
+                new JSONObject().put("xmux", true),
+                new JSONObject().put("xmux", new JSONObject().put("maxConcurrency", "32-16-10")),
+                new JSONObject().put("xmux", new JSONObject().put("maxConcurrency", 2147483648L)),
+                new JSONObject().put("xmux", new JSONObject().put("maxConcurrency", 1.5)),
+                new JSONObject().put("xmux", new JSONObject().put("maxConnections", 2147483648L)),
+                new JSONObject().put("xmux", new JSONObject().put("maxConcurrency", new JSONArray())),
+                new JSONObject().put("xmux", new JSONObject().put("hKeepAlivePeriod", "20")),
+                new JSONObject().put("xmux", new JSONObject().put("hKeepAlivePeriod", -2)),
+                new JSONObject().put("xmux", new JSONObject().put("maxConcurrency", "16-32")
+                        .put("maxConnections", 2)),
+                new JSONObject().put("xmux", new JSONObject().put("outbounds", new JSONArray())),
+                new JSONObject().put("headers", new JSONArray()),
+                new JSONObject().put("headers", new JSONObject().put("X-Test", new JSONObject())),
+                new JSONObject().put("headers", new JSONObject().put("Host", "example.com")),
+                new JSONObject().put("headers", new JSONObject().put("X-Test", "ok\r\nInjected: yes")),
+                new JSONObject().put("headers", new JSONObject().put("X-Test", "a").put("x-test", "b")),
+        };
+        for (JSONObject extra : invalid) {
+            try {
+                ProtocolParser.parse(xhttpUri(extra));
+                throw new AssertionError("invalid XHTTP xmux/headers accepted");
+            } catch (IllegalArgumentException expected) {
+                assertTrue(expected.getMessage().contains("XHTTP"));
+            }
+        }
+        assertXhttpExtraRoundTrip(new JSONObject().put("xmux", new JSONObject()).put("headers", new JSONObject()));
+        assertXhttpExtraRoundTrip(new JSONObject().put("xmux", new JSONObject()
+                .put("maxConcurrency", "32-16").put("cMaxReuseTimes", -1)
+                .put("hMaxReusableSecs", "-4--1").put("hKeepAlivePeriod", -1)));
+    }
+
+    @Test
+    public void preservesSeparateXhttpDownloadChannelAndItsXmux() throws Exception {
+        JSONObject download = xhttpDownloadSettings().put("security", "tls")
+                .put("tlsSettings", new JSONObject().put("serverName", "download.example")
+                        .put("fingerprint", "chrome").put("alpn", new JSONArray().put("h2")))
+                .put("xhttpSettings", new JSONObject().put("path", "/download").put("mode", "auto")
+                        .put("extra", new JSONObject().put("headers", new JSONObject().put("X-Test", "value"))
+                                .put("xmux", new JSONObject().put("maxConcurrency", "8-16"))));
+        assertXhttpExtraRoundTrip(new JSONObject().put("downloadSettings", download));
+        assertXhttpExtraRoundTrip(new JSONObject().put("downloadSettings", xhttpDownloadSettings()
+                .put("network", "splithttp").put("splithttpSettings", new JSONObject().put("path", "/download"))));
+    }
+
+    @Test
+    public void rejectsInvalidXhttpDownloadEndpointTransportAndChaining() throws Exception {
+        JSONObject[] invalid = {
+                new JSONObject(),
+                xhttpDownloadSettings().put("address", "0.0.0.0"),
+                xhttpDownloadSettings().put("address", "example.com/path"),
+                xhttpDownloadSettings().put("port", 0),
+                xhttpDownloadSettings().put("port", "443"),
+                xhttpDownloadSettings().put("network", "ws"),
+                xhttpDownloadSettings().put("security", "unknown"),
+                xhttpDownloadSettings().put("tlsSettings", new JSONArray()),
+                xhttpDownloadSettings().put("sockopt", new JSONObject().put("dialerProxy", "other")),
+                xhttpDownloadSettings().put("outbounds", new JSONArray()),
+                xhttpDownloadSettings().put("xhttpSettings", new JSONObject().put("path", new JSONObject())),
+                xhttpDownloadSettings().put("xhttpSettings", new JSONObject()
+                        .put("xmux", new JSONObject().put("maxConcurrency", new JSONObject()))),
+        };
+        for (JSONObject download : invalid) {
+            assertUriRejected(xhttpUri(new JSONObject().put("downloadSettings", download)), "XHTTP");
+        }
+        String extra = xhttpUri(new JSONObject().put("downloadSettings", xhttpDownloadSettings()));
+        assertUriRejected(extra.replace("mode=packet-up", "mode=stream-one"), "XHTTP");
+    }
+
+    private static JSONObject xhttpDownloadSettings() throws Exception {
+        return new JSONObject().put("address", "download.example").put("port", 443).put("network", "xhttp");
+    }
+
+    @Test
+    public void httpsProxyRejectsInsecureTlsRemovedByPinnedXray() throws Exception {
+        assertUriRejected("https://user:pass@proxy.example:443?insecure=true", "Xray");
+        ProtocolParser.Node valid = ProtocolParser.parse("https://user:pass@proxy.example:443?insecure=false");
+        assertTrue(valid.supports(CoreFamily.XRAY));
     }
 }

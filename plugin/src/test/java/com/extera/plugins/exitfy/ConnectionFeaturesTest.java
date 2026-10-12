@@ -71,6 +71,61 @@ public class ConnectionFeaturesTest {
         }
     }
 
+    @Test public void awgSubscriptionLinksAndContainersKeepValidEntriesAndNames() throws Exception {
+        String conf = Base64.getUrlEncoder().withoutPadding().encodeToString(awg().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        ProtocolParser.Node link = ProtocolParser.parse("amneziawg://" + conf + "#My%20AWG%2B");
+        assertEquals("My AWG+", link.name);
+        assertEquals("", link.uri);
+        String second = Base64.getUrlEncoder().withoutPadding().encodeToString(
+                awg().replace("example.com:51820", "other.example:51820").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String body = "awg://" + conf + "#First\n"
+                + "amneziawg://" + second + "#Second\nawg://not-base64!#Broken\n"
+                + "vless://11111111-1111-1111-1111-111111111111@example.com:443?security=tls#VLESS";
+        SubscriptionParser.ParseResult mixed = SubscriptionParser.parseDetailed(body);
+        assertEquals(3, mixed.nodes.size()); assertEquals(1, mixed.rejected);
+        JSONObject container = new JSONObject().put("type", "amneziawg").put("version", 1)
+                .put("servers", new JSONArray()
+                        .put(new JSONObject().put("name", "First").put("config", conf))
+                        .put(new JSONObject().put("name", "Bad").put("config", "broken!"))
+                        .put(new JSONObject().put("name", "Second").put("config", second))
+                        .put(new JSONObject().put("name", "Duplicate").put("config", conf)));
+        JSONObject xray = new JSONObject().put("remarks", "VLESS").put("outbounds",
+                new JSONArray().put(XrayConfigRenderer.build(vless(1), 30000, "", "")
+                        .getJSONArray("outbounds").getJSONObject(0)));
+        SubscriptionParser.ParseResult json = SubscriptionParser.parseDetailed(new JSONArray().put(xray).put(container).toString());
+        assertEquals(3, json.nodes.size()); assertEquals(1, json.rejected);
+        assertEquals("First", json.nodes.get(1).name);
+        assertEquals("Second", json.nodes.get(2).name);
+        assertEquals(link.normalizedKey, json.nodes.get(1).normalizedKey);
+        assertEquals(link.normalizedKey, ProtocolParser.fromStoredJson(link.toStoredJson()).normalizedKey);
+    }
+
+    @Test public void awgDeviceSectionUsesTheSameBoundedParameterParser() throws Exception {
+        assertEquals(AwgConfigParser.parse(awg()).normalizedKey,
+                AwgConfigParser.parse(awg().replace("Jc = 3", "[Device]\nJc = 3")).normalizedKey);
+        assertEquals(0, SubscriptionParser.parseDetailed(awg().replace("Jc = 3", "[Device]\nPostUp = command")).nodes.size());
+    }
+
+    @Test public void wireGuardShareLinkKeepsKeysIpv6AndReservedBytesInNativeOutbound() throws Exception {
+        String uri = "wireguard://" + key(1) + "@[2001:db8::1]:51820?publickey="
+                + java.net.URLEncoder.encode(key(2), "UTF-8")
+                + "&address=10.23.0.2%2F32%2Cfd00%3A%3A2%2F128&reserved=0%2C2%2C255&keepalive=25#WG";
+        ProtocolParser.Node node = ProtocolParser.parse(uri);
+        assertEquals("wireguard", node.outbound.getString("type"));
+        assertEquals("2001:db8::1", node.outbound.getString("server"));
+        assertTrue(node.supports(CoreFamily.XRAY));
+        JSONObject settings = XrayConfigRenderer.build(node, 30000, "u", "p")
+                .getJSONArray("outbounds").getJSONObject(0).getJSONObject("settings");
+        assertEquals(key(1), settings.getString("secretKey"));
+        assertEquals(2, settings.getJSONArray("address").length());
+        assertEquals(255, settings.getJSONArray("reserved").getInt(2));
+        assertEquals(25, settings.getJSONArray("peers").getJSONObject(0).getInt("keepAlive"));
+        assertEquals(node.normalizedKey, ProtocolParser.fromStoredJson(node.toStoredJson()).normalizedKey);
+        assertEquals(1, SubscriptionParser.parseDetailed(uri + "\n" + uri.replace("wireguard://", "wg://")).nodes.size());
+        assertTrue(SubscriptionParser.parseDetailed(uri.replace("0%2C2%2C255", "0%2C2%2C256")).nodes.isEmpty());
+        assertTrue(SubscriptionParser.parseDetailed(uri.replace(key(1), "bad-private-key")).nodes.isEmpty());
+    }
+
     @Test public void awgRejectsDangerousHandshakeSizesBeforeImport() throws Exception {
         for (String parameter : new String[]{"Jc = 4294967295", "I1 = <r -1>",
                 "I1 = <r 999999999>", "Jc = 128\nJmax = 65000", "S4 = 65000"}) {

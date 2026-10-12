@@ -1806,6 +1806,23 @@ public class SubscriptionManagerTest {
     }
 
     @Test
+    public void inlineTitleSupportsEncodedBodiesAndYieldsToHttpHeader() {
+        String body = "#profile-title: base64:8J+TsSBJLlNocmltcCBMVEU=\n"
+                + "vless://11111111-1111-1111-1111-111111111111@example.com:443?security=tls#Server";
+        Map<String, String> headers = new HashMap<>();
+        byte[] encoded = java.util.Base64.getUrlEncoder().withoutPadding()
+                .encode(body.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertEquals("\uD83D\uDCF1 I.Shrimp LTE", SubscriptionManager.responseTitle(
+                new LimitedHttpClient.Response(200, encoded, headers), "https://example.invalid/sub"));
+        headers.put("subscription-name", "Alternate header");
+        assertEquals("Alternate header", SubscriptionManager.responseTitle(
+                new LimitedHttpClient.Response(200, encoded, headers), "https://example.invalid/sub"));
+        headers.put("profile-title", "Header source");
+        assertEquals("Header source", SubscriptionManager.responseTitle(
+                new LimitedHttpClient.Response(200, encoded, headers), "https://example.invalid/sub"));
+    }
+
+    @Test
     public void anInvalidKeyNamesWhatTheParserRefused() {
         // "Invalid key" alone left people comparing a key another client
         // accepts against no information at all.

@@ -108,6 +108,22 @@ final class XrayNativeOutbound {
     private static HostPort extractEndpoint(JSONObject outbound) {
         JSONObject settings = outbound.optJSONObject("settings");
         if (settings != null) {
+            if ("wireguard".equals(outbound.optString("protocol", ""))) {
+                JSONArray peers = settings.optJSONArray("peers");
+                JSONObject peer = peers == null ? null : peers.optJSONObject(0);
+                if (peer != null) {
+                    try {
+                        java.net.URI endpoint = new java.net.URI("udp://" + peer.getString("endpoint"));
+                        if (endpoint.getHost() != null && endpoint.getPort() > 0
+                                && endpoint.getUserInfo() == null && endpoint.getQuery() == null
+                                && endpoint.getFragment() == null && endpoint.getRawPath().isEmpty()) {
+                            String host = endpoint.getHost();
+                            if (host.startsWith("[") && host.endsWith("]")) host = host.substring(1, host.length() - 1);
+                            return new HostPort(host, endpoint.getPort());
+                        }
+                    } catch (Exception invalid) { }
+                }
+            }
             HostPort nested = firstServer(settings.optJSONArray("vnext"));
             if (nested == null) nested = firstServer(settings.optJSONArray("servers"));
             if (nested != null) return nested;

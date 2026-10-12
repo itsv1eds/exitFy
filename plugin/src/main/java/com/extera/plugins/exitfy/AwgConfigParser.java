@@ -4,6 +4,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import java.net.InetAddress;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.util.Base64;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -25,18 +26,54 @@ final class AwgConfigParser {
         return text.trim().matches("(?is)(?:[#;][^\\n]*\\n\\s*)*\\[Interface\\].*");
     }
 
+    static ProtocolParser.Node parseLink(String uri) throws Exception {
+        int scheme = uri.indexOf("://");
+        int fragment = uri.indexOf('#', scheme + 3);
+        String encoded = uri.substring(scheme + 3, fragment < 0 ? uri.length() : fragment);
+        String name = fragment < 0 ? "" : URLDecoder.decode(
+                uri.substring(fragment + 1).replace("+", "%2B"), "UTF-8");
+        return parseEncoded(encoded, name);
+    }
+
+    static ProtocolParser.Node parseEncoded(String encoded, String name) throws Exception {
+        if (encoded == null || encoded.isEmpty() || encoded.length() > MAX_CONFIG_CHARS * 4 / 3 + 8
+                || !encoded.matches("[A-Za-z0-9+/_=-]+")) throw invalid("base64", "base64");
+        byte[] bytes;
+        try { bytes = Base64.getUrlDecoder().decode(encoded); }
+        catch (IllegalArgumentException standard) {
+            try { bytes = Base64.getDecoder().decode(encoded); }
+            catch (IllegalArgumentException invalid) { throw invalid("base64", "base64"); }
+        }
+        if (bytes.length > MAX_CONFIG_CHARS) throw invalid("размер файла", "file size");
+        String text = SubscriptionParser.decodeStrictUtf8(bytes);
+        ProtocolParser.Node parsed = parse(text);
+        if (name == null || name.trim().isEmpty()) {
+            java.util.regex.Matcher comment = java.util.regex.Pattern.compile(
+                    "(?im)^\\s*#\\s*Name\\s*=\\s*([^\\r\\n]{1,256})").matcher(text);
+            name = comment.find() ? comment.group(1) : parsed.outbound.getString("server");
+        }
+        return ProtocolParser.fromOutbound("", name, parsed.outbound);
+    }
+
     static ProtocolParser.Node parse(String text) throws Exception {
         if (text == null || text.length() > MAX_CONFIG_CHARS) throw invalid("размер файла", "file size");
         if (text.startsWith("\ufeff")) text = text.substring(1);
         Map<String, String> iface = new LinkedHashMap<>();
         java.util.List<Map<String, String>> peers = new java.util.ArrayList<>();
         Map<String, String> section = null;
+        boolean interfaceSeen = false, deviceSeen = false;
         for (String raw : text.split("\\r?\\n")) {
             if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException();
             String line = raw.trim();
             if (line.isEmpty() || line.startsWith("#") || line.startsWith(";")) continue;
             if (line.equalsIgnoreCase("[Interface]")) {
-                if (section != null) throw invalid("повторная секция Interface", "duplicate Interface section");
+                if (interfaceSeen || section != null) throw invalid("повторная секция Interface", "duplicate Interface section");
+                interfaceSeen = true;
+                section = iface; continue;
+            }
+            if (line.equalsIgnoreCase("[Device]")) {
+                if (!interfaceSeen || deviceSeen || !peers.isEmpty()) throw invalid("секция Device", "Device section");
+                deviceSeen = true;
                 section = iface; continue;
             }
             if (line.equalsIgnoreCase("[Peer]")) {

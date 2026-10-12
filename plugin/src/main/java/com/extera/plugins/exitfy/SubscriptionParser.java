@@ -36,11 +36,14 @@ final class SubscriptionParser {
     // second multi-megabyte allocation inside the CBOR object graph.
     private static final int MAX_CBOR_BLOB_BYTES = MAX_HIT_CONFIG_BYTES;
     private static final Pattern PROXY_LINK = Pattern.compile(
-            "(?i)(?:vless|vmess|trojan|ss|hy2|hysteria2|hysteria|tuic)://[^\\s\\\"'<>]+"
+            "(?i)(?:(?:vless|vmess|trojan|ss|hy2|hysteria2|hysteria|tuic|amneziawg|awg|wireguard|wg|socks|socks5)://[^\\s\\\"'<>]+"
+                    + "|https?://[^\\s\\\"'<>/@]+@[^\\s\\\"'<>]+)"
     );
     private static final Pattern HIT_LINK = Pattern.compile(
             "(?i)(?:https://hvpn\\.io/|https://hitray\\.io/|hitvpn://)[A-Za-z0-9_\\-=]+"
     );
+    private static final Pattern INLINE_TITLE = Pattern.compile(
+            "(?im)^[\\t ]*#[\\t ]*profile-title[\\t ]*:[\\t ]*([^\\r\\n]{1,16384})$");
     // Hysteria rate units are case-insensitive in real Clash subscriptions.
     // Keep b/B distinct (bits/bytes), normalize the prefix and suffix spelling,
     // then reject values the selected pinned sing-box integer-Mbps field cannot
@@ -56,6 +59,21 @@ final class SubscriptionParser {
 
     static List<ProtocolParser.Node> parseNodes(String body) {
         return parseDetailed(body).nodes;
+    }
+
+    static String inlineProfileTitle(String body) {
+        if (body == null || utf8Exceeds(body, LimitedHttpClient.MAX_EXPANDED_BYTES)) return "";
+        try {
+            String text = normalizeDocumentBom(body);
+            if (!containsKnownLink(text)) {
+                String decoded = tryBase64(text);
+                if (!decoded.isEmpty()) text = normalizeDocumentBom(decoded);
+            }
+            int start = firstNonWhitespace(text);
+            if (start < 0 || text.charAt(start) == '{' || text.charAt(start) == '[') return "";
+            Matcher title = INLINE_TITLE.matcher(text);
+            return title.find() ? title.group(1).trim() : "";
+        } catch (Exception invalid) { return ""; }
     }
 
     static ParseResult parseDetailed(String body) {
@@ -113,8 +131,9 @@ final class SubscriptionParser {
                 // unrelated YAML fields must never become a runnable node.
                 collectSimpleClashYaml(text, links, rejections, budget);
             } else {
-                collectRegex(text, PROXY_LINK, links, budget);
-                collectHitLinks(text, links, budget);
+                String servers = withoutServiceLines(text);
+                collectRegex(servers, PROXY_LINK, links, budget);
+                collectHitLinks(servers, links, budget);
             }
         } catch (ImportInterruptedException interrupted) {
             links.clear();
@@ -142,6 +161,22 @@ final class SubscriptionParser {
         return new ParseResult(new ArrayList<>(exact.values()), rejections.rejected,
                 new ArrayList<>(rejections.reasons),
                 new ArrayList<>(rejections.notices));
+    }
+
+    private static String withoutServiceLines(String text) {
+        StringBuilder result = new StringBuilder(text.length());
+        int start = 0, lines = 0;
+        while (start < text.length()) {
+            if ((lines++ & 1023) == 0 && Thread.currentThread().isInterrupted()) throw new ImportInterruptedException();
+            int end = text.indexOf('\n', start);
+            if (end < 0) end = text.length();
+            int content = start;
+            while (content < end && Character.isWhitespace(text.charAt(content))) content++;
+            if (content < end && text.charAt(content) != '#' && text.charAt(content) != ';'
+                    && !text.startsWith("://", content)) result.append(text, start, end).append('\n');
+            start = end + 1;
+        }
+        return result.toString();
     }
 
     private static void addExactBounded(Map<String, ProtocolParser.Node> values,
@@ -343,7 +378,9 @@ final class SubscriptionParser {
                     ? JsonGuard.object(text) : JsonGuard.array(text);
             if (root instanceof JSONObject) {
                 JSONObject object = (JSONObject) root;
-                if (object.has("outbounds")) {
+                if (isAwgContainer(object)) {
+                    collectAwgContainer(object, nodes, rejections, budget);
+                } else if (object.has("outbounds")) {
                     collectProfileOutbounds(object, nodes, rejections, budget);
                 } else if (isProxyOutbound(object)) {
                     collectExplicitOutbound(object, nodes, rejections, budget);
@@ -363,7 +400,9 @@ final class SubscriptionParser {
                         throw new ImportInterruptedException();
                     }
                     JSONObject object = values.optJSONObject(i);
-                    if (object != null && object.has("outbounds")) {
+                    if (object != null && isAwgContainer(object)) {
+                        collectAwgContainer(object, nodes, rejections, budget);
+                    } else if (object != null && object.has("outbounds")) {
                         if (proxyOutboundCount(object.optJSONArray("outbounds")) > 1) {
                             pools.add(object);
                         } else {
@@ -404,6 +443,28 @@ final class SubscriptionParser {
         }
     }
 
+    private static boolean isAwgContainer(JSONObject object) {
+        return "amneziawg".equals(object.opt("type")) && object.has("servers");
+    }
+
+    private static void collectAwgContainer(JSONObject object, List<ProtocolParser.Node> nodes,
+                                            RejectionTracker rejections, CandidateBudget budget) {
+        Object raw = object.opt("servers");
+        if (!(raw instanceof JSONArray)) { rejections.reject("invalid_json"); return; }
+        JSONArray servers = (JSONArray) raw;
+        for (int i = 0; i < servers.length(); i++) {
+            if (!budget.reserve()) return;
+            try {
+                JSONObject server = servers.optJSONObject(i);
+                if (server == null || !(server.opt("config") instanceof String)
+                        || (server.has("name") && !(server.opt("name") instanceof String))) {
+                    throw new IllegalArgumentException("invalid AmneziaWG container entry");
+                }
+                nodes.add(AwgConfigParser.parseEncoded(server.getString("config"), server.optString("name", "")));
+            } catch (Exception invalid) { rejections.reject(reasonCode(invalid)); }
+        }
+    }
+
     private static void collectProfileOutbounds(JSONObject profile,
                                                 List<ProtocolParser.Node> nodes,
                                                 RejectionTracker rejections,
@@ -435,7 +496,9 @@ final class SubscriptionParser {
                 if ((i & 1023) == 0 && Thread.currentThread().isInterrupted()) throw new ImportInterruptedException();
                 JSONObject profile = items.optJSONObject(i);
                 if (profile == null) continue;
-                if (profile.has("outbounds")) {
+                if (isAwgContainer(profile)) {
+                    collectAwgContainer(profile, nodes, rejections, budget);
+                } else if (profile.has("outbounds")) {
                     if (proxyOutboundCount(profile.optJSONArray("outbounds")) > 1) pools.add(profile);
                     else collectProfileOutbounds(profile, nodes, rejections, budget);
                 } else if (isProxyOutbound(profile)) collectExplicitOutbound(profile, nodes, rejections, budget);

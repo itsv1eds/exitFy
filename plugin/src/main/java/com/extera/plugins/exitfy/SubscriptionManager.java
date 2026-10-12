@@ -1791,6 +1791,13 @@ final class SubscriptionManager implements Closeable {
 
     static String responseTitle(LimitedHttpClient.Response response, String url) {
         String title = cleanTitle(boundedHeader(response.header("profile-title")));
+        if (title.isEmpty()) title = cleanTitle(boundedHeader(response.header("subscription-name")));
+        if (title.isEmpty()) {
+            try {
+                title = cleanTitle(SubscriptionParser.inlineProfileTitle(
+                        SubscriptionParser.decodeStrictUtf8(response.body)));
+            } catch (Exception ignored) { }
+        }
         if (title.isEmpty()) {
             String disposition = boundedHeader(response.header("content-disposition"));
             Matcher matcher = FILE_NAME.matcher(disposition == null ? "" : disposition);
