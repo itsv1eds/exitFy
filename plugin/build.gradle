@@ -1289,6 +1289,17 @@ tasks.register("validateEmbeddedDexConfig") {
             throw new GradleException(
                     "QUIC-only TCP results must remain informational in every Android view")
         }
+        ["check_timeout", "worker_unavailable", "worker_failed", "check_failed"].each { status ->
+            if (!dashboardStateText.contains('"' + status + '"')
+                    || !serversText.contains('"' + status + '"')) {
+                throw new GradleException("Local check failures must remain distinct from cancellation")
+            }
+        }
+        if (!runtimeText.contains("LatencyCheckRunner.run(")
+                || !runtimeText.contains("finishManualPing(token, nodes, unfinishedStatus)")
+                || !runtimeText.contains("publishProbeResult(long token, ProbeOutcome outcome)")) {
+            throw new GradleException("Latency checks must isolate workers and guard result publication")
+        }
         ["corePolicy", "requiredCore", "loadedCore", "coreUpdateRunning",
          "CoreStatus", "\"cores\""].each { token ->
             if (dashboardStateText.contains(token)) {

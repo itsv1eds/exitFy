@@ -22,6 +22,8 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
@@ -1551,8 +1553,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             } catch (RuntimeException rejected) {
                 pingKind = PingKind.NONE;
                 pingSocksSession = null;
-                pingState = "cancelled";
-                subscriptions.cancelPendingProbes(taskNodes);
+                pingState = "completed";
+                pingCompleted += subscriptions.finishPendingProbes(taskNodes, "worker_unavailable");
                 submissionFailure = rejected;
             }
         }
@@ -1680,33 +1682,21 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     }
 
     private void runTcpPing(long token, List<ProtocolParser.Node> nodes) {
-        BlockingQueue<Future<ProbeOutcome>> completion = new LinkedBlockingQueue<>();
-        List<Future<ProbeOutcome>> futures = new ArrayList<>();
-        for (ProtocolParser.Node node : nodes) {
-            futures.add(RuntimeExecutors.submitCompletion(pingWorkers, completion,
-                    () -> tcpProbe(node),
-                    new ProbeOutcome(node, false, -1L, "worker_unavailable")));
-        }
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(90);
-        int remaining = futures.size();
+        String unfinishedStatus = "check_timeout";
         try {
-            while (remaining-- > 0 && isPingCurrent(token)) {
-                long wait = deadline - System.nanoTime();
-                if (wait <= 0L) break;
-                Future<ProbeOutcome> completed = completion.poll(wait, TimeUnit.NANOSECONDS);
-                if (completed == null) break;
-                publishProbeResult(completed.get());
-            }
+            LatencyCheckRunner.run(nodes, pingWorkers, 4, deadline,
+                    () -> isPingCurrent(token), this::tcpProbe,
+                    node -> new ProbeOutcome(node, false, -1L, "worker_unavailable"),
+                    node -> new ProbeOutcome(node, false, -1L, "worker_failed"),
+                    outcome -> publishProbeResult(token, outcome));
         } catch (InterruptedException interrupted) {
+            unfinishedStatus = "check_failed";
             Thread.currentThread().interrupt();
         } catch (Exception error) {
+            unfinishedStatus = "check_failed";
         } finally {
-            RuntimeExecutors.cancelAndRemove(pingWorkers, futures);
-            if (isPingCurrent(token)) {
-                subscriptions.cancelPendingProbes(nodes);
-                pingState = "completed";
-                invalidateSettings();
-            }
+            finishManualPing(token, nodes, unfinishedStatus);
             finishPingTask(token);
         }
     }
@@ -1768,11 +1758,18 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         ProxySession.StateGuard resumeGuard = null;
         boolean pauseAttempted = false;
         boolean externalProxyChanged = false;
+        String unfinishedStatus = "check_timeout";
         synchronized (lifecycleLock) {
             probePausing = true;
             try {
-                if (!isPingCurrent(token)
-                        || !revisionGate.isCurrent(runtimeOperation, loaded, settings.enabled)) return;
+                if (!isPingCurrent(token)) return;
+                if (!settings.enabled) {
+                    for (ProtocolParser.Node node : nodes) {
+                        publishProbeResult(token, new ProbeOutcome(node, false, -1L, "connect_required"));
+                    }
+                    return;
+                }
+                if (!revisionGate.isCurrent(runtimeOperation, loaded, settings.enabled)) return;
                 // A page probe must not turn into an unbounded core download.
                 // The one process-wide Go family must already be mapped by a
                 // connection attempt.
@@ -1788,9 +1785,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                     // Say so on every row: silently clearing the statuses left
                     // the user with no idea why nothing was measured.
                     for (ProtocolParser.Node node : nodes) {
-                        subscriptions.setProbeResult(
-                                node.normalizedKey, "connect_required", -1L);
-                        pingCompleted++;
+                        publishProbeResult(token, new ProbeOutcome(node, false, -1L, "connect_required"));
                     }
                     return;
                 }
@@ -1805,8 +1800,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                     if (!node.supports(family) || !NativeCoreRuntime.isFamilyLoaded(family)
                             || "amneziawg".equals(node.outbound.optString("type"))
                             && !NativeCoreRuntime.mappedAwgSupported()) {
-                        subscriptions.setProbeResult(node.normalizedKey, "restart_required", -1L);
-                        pingCompleted++;
+                        publishProbeResult(token, new ProbeOutcome(node, false, -1L, "restart_required"));
                     } else {
                         groups.computeIfAbsent(family, ignored -> new ArrayList<>()).add(node);
                     }
@@ -1827,8 +1821,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                         if (!started.ok) {
                             String status = started.restartRequired ? "restart_required" : "start_failed";
                             for (ProtocolParser.Node node : batch) {
-                                subscriptions.setProbeResult(node.normalizedKey, status, -1L);
-                                pingCompleted++;
+                                publishProbeResult(token, new ProbeOutcome(node, false, -1L, status));
                             }
                             if (nativeCore.isQuarantined()) break;
                             continue;
@@ -1837,30 +1830,24 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                                 batch, ports, token, probeDeadline, socksSession);
                         if (!isPingCurrent(token)) break;
                         for (ProbeOutcome outcome : outcomes) {
-                            publishProbeResult(outcome);
+                            publishProbeResult(token, outcome);
                         }
                         nativeCore.stop(Math.min(3_000L, remainingMillis(probeDeadline)));
                         if (nativeCore.isQuarantined()) break;
                     }
                     if (nativeCore.isQuarantined()) break;
                 }
-                subscriptions.cancelPendingProbes(nodes);
             } catch (ProxySession.ExternalProxyChangeException externalChange) {
                 externalProxyChanged = true;
                 // The full-path check has to borrow Telegram's proxy setting.
                 // Something else owns it, and reporting that as "cancelled"
                 // told the user nothing about what to do next.
                 for (ProtocolParser.Node node : nodes) {
-                    subscriptions.setProbeResult(
-                            node.normalizedKey, "proxy_busy", -1L);
-                    pingCompleted++;
+                    publishProbeResult(token, new ProbeOutcome(node, false, -1L, "proxy_busy"));
                 }
             } catch (Exception error) {
-                if (pauseAttempted && resumeGuard == null) {
-                    markProbeGuardUnavailable(nodes);
-                } else {
-                    subscriptions.cancelPendingProbes(nodes);
-                }
+                unfinishedStatus = pauseAttempted && resumeGuard == null
+                        ? "guard_unavailable" : "check_failed";
             } finally {
                 if (RuntimePolicy.proxyProbeMayStopCore(
                         loaded, settings.enabled, pingGeneration.get(), token,
@@ -1895,14 +1882,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                         RuntimePolicy.shouldClearProbeResumeGuard(loaded, settings.enabled,
                                 restoreHandled && !deferredRestore));
                 probePausing = false;
-                if (isPingCurrent(token)) {
-                    // No exit path may leave rows pending: a return taken
-                    // before the loop used to strand them on "Checking…"
-                    // with nothing left running to resolve them.
-                    subscriptions.cancelPendingProbes(nodes);
-                    pingState = "completed";
-                    invalidateSettings();
-                }
+                finishManualPing(token, nodes, unfinishedStatus);
                 socksProbe.closeSession(socksSession);
                 finishPingTask(token);
             }
@@ -1914,18 +1894,21 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                                           SocksHttpProbe.Session socksSession) {
         BlockingQueue<Future<ProbeOutcome>> completion = new LinkedBlockingQueue<>();
         List<Future<ProbeOutcome>> futures = new ArrayList<>();
+        java.util.Map<Future<ProbeOutcome>, ProtocolParser.Node> targets = new java.util.LinkedHashMap<>();
         SocksHttpProbe.Session batchSession = socksProbe.beginChildSession(socksSession);
         long batchDeadline = Math.min(pageDeadline,
                 System.nanoTime() + TimeUnit.SECONDS.toNanos(6));
         for (int i = 0; i < nodes.size(); i++) {
             final ProtocolParser.Node node = nodes.get(i);
             final int port = ports.get(i);
-            futures.add(RuntimeExecutors.submitCompletion(pingWorkers, completion, () -> {
+            Future<ProbeOutcome> future = RuntimeExecutors.submitCompletion(pingWorkers, completion, () -> {
                 long timeout = Math.min(6_000L, remainingMillis(batchDeadline));
                 SocksHttpProbe.Result result = socksProbe.probe(
                         port, "", "", timeout, batchSession);
                 return new ProbeOutcome(node, result.ok, result.millis, result.status);
-            }, new ProbeOutcome(node, false, -1L, "worker_unavailable")));
+            }, new ProbeOutcome(node, false, -1L, "worker_unavailable"));
+            futures.add(future);
+            targets.put(future, node);
         }
         List<ProbeOutcome> outcomes = new ArrayList<>();
         try {
@@ -1934,7 +1917,10 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 if (wait <= 0L) break;
                 Future<ProbeOutcome> future = completion.poll(wait, TimeUnit.NANOSECONDS);
                 if (future == null) break;
-                outcomes.add(future.get());
+                try { outcomes.add(future.get()); }
+                catch (ExecutionException | CancellationException failure) {
+                    outcomes.add(new ProbeOutcome(targets.get(future), false, -1L, "worker_failed"));
+                }
             }
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
@@ -2009,14 +1995,6 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         } catch (Exception ignored) {
         }
         return guard;
-    }
-
-    private void markProbeGuardUnavailable(List<ProtocolParser.Node> nodes) {
-        if (nodes == null) return;
-        for (ProtocolParser.Node node : nodes) {
-            subscriptions.setProbeResult(node.normalizedKey, "guard_unavailable", -1L);
-            pingCompleted++;
-        }
     }
 
     private void restoreConnectionAfterPing(RuntimeOperationToken operation) {
@@ -2103,11 +2081,26 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         }
     }
 
-    private void publishProbeResult(ProbeOutcome outcome) {
-        subscriptions.setProbeResult(outcome.node.normalizedKey,
-                outcome.ok ? "ok" : outcome.status, outcome.millis);
-        pingCompleted++;
-        invalidateSettings();
+    private void publishProbeResult(long token, ProbeOutcome outcome) {
+        synchronized (pingControl) {
+            if (!isPingCurrent(token)) return;
+            subscriptions.setProbeResult(outcome.node.normalizedKey,
+                    outcome.ok ? "ok" : outcome.status, outcome.millis);
+            pingCompleted++;
+            invalidateSettings();
+        }
+    }
+
+    private void finishManualPing(long token, List<ProtocolParser.Node> nodes, String status) {
+        synchronized (pingControl) {
+            // Only explicit cancellation/replacement may mark rows cancelled.
+            // An interrupted task still has to settle its pending rows, while
+            // an old generation must not touch a newly started check.
+            if (!loaded || pingGeneration.get() != token) return;
+            pingCompleted += subscriptions.finishPendingProbes(nodes, status);
+            pingState = "completed";
+            invalidateSettings();
+        }
     }
 
     private boolean isPingCurrent(long token) {

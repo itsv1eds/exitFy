@@ -992,12 +992,19 @@ final class SubscriptionManager implements Closeable {
     }
 
     void cancelPendingProbes(List<ProtocolParser.Node> nodes) {
-        if (nodes == null) return;
+        finishPendingProbes(nodes, "cancelled");
+    }
+
+    int finishPendingProbes(List<ProtocolParser.Node> nodes, String status) {
+        if (nodes == null) return 0;
+        int count = 0;
         for (ProtocolParser.Node node : nodes) {
-            if (pingStatusCache.replace(node.normalizedKey, "pending", "cancelled")) {
+            if (pingStatusCache.replace(node.normalizedKey, "pending", status)) {
                 latencyCache.put(node.normalizedKey, -1L);
+                count++;
             }
         }
+        return count;
     }
 
     void cancelPendingProbesNonBlocking() {

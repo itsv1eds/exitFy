@@ -245,6 +245,27 @@ public class ExitFyServerPageTest {
         assertTrue(result.nodes.isEmpty());
     }
 
+    @Test
+    public void localCheckFailuresSurviveListParsingAndHaveSpecificDashboardLabels() throws Exception {
+        String[] statuses = {"check_timeout", "worker_unavailable", "worker_failed", "check_failed", "connect_required"};
+        String[] labels = {
+                I18n.t("Время проверки истекло", "Check deadline exceeded"),
+                I18n.t("Проверка занята — повторите", "Check is busy — try again"),
+                I18n.t("Не удалось выполнить проверку", "Could not perform the check"),
+                I18n.t("Не удалось выполнить проверку", "Could not perform the check"),
+                I18n.t("Сначала подключитесь", "Connect first")};
+        for (int i = 0; i < statuses.length; i++) {
+            JSONObject row = node(key(1), "Server", false).put("pingStatus", statuses[i]);
+            ExitFyServerPage list = ExitFyServerPage.parse(page(new JSONArray().put(row), new JSONArray(),
+                    0, 50, 1, 1, false, false, key(1), "", "all").toString());
+            assertEquals(statuses[i], list.nodes.get(0).pingStatus);
+            ExitFyDashboardState dashboard = ExitFyDashboardState.parse(
+                    new JSONObject().put("activeNodeInfo", row).toString());
+            assertEquals(labels[i], dashboard.activePingSummary());
+            assertFalse(labels[i].equals(I18n.t("Проверка отменена", "Check cancelled")));
+        }
+    }
+
     private static JSONObject page(JSONArray nodes, JSONArray sources,
                                    int offset, int limit, int total, int unfilteredTotal,
                                    boolean hasPrevious, boolean hasNext,

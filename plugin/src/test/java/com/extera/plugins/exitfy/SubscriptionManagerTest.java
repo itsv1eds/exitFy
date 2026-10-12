@@ -494,6 +494,29 @@ public class SubscriptionManagerTest {
     }
 
     @Test
+    public void timedOutBatchSettlesOnlyPendingRowsAndKeepsCompletedLatency() throws Exception {
+        File root = Files.createTempDirectory("exitfy-probe-finish").toFile();
+        LimitedHttpClient http = new LimitedHttpClient();
+        SubscriptionManager manager = new SubscriptionManager(new AtomicStore(root), http);
+        try {
+            manager.importText(A1 + "\n" + A2);
+            List<ProtocolParser.Node> nodes = manager.nodes(SettingsModel.CUSTOM_PROVIDER_ID);
+            manager.markProbePending(nodes);
+            manager.setProbeResult(nodes.get(0).normalizedKey, "ok", 37L);
+            assertEquals(1, manager.finishPendingProbes(nodes, "check_timeout"));
+            assertEquals(0, manager.finishPendingProbes(nodes, "check_failed"));
+            JSONArray rows = manager.uiState(SettingsModel.CUSTOM_PROVIDER_ID, 0, 50).getJSONArray("nodes");
+            assertEquals("ok", rows.getJSONObject(0).getString("pingStatus"));
+            assertEquals(37L, rows.getJSONObject(0).getLong("latency"));
+            assertEquals("check_timeout", rows.getJSONObject(1).getString("pingStatus"));
+            manager.markProbePending(nodes);
+            manager.cancelPendingProbes(nodes);
+            assertEquals("cancelled", manager.uiState(SettingsModel.CUSTOM_PROVIDER_ID, 0, 50)
+                    .getJSONArray("nodes").getJSONObject(0).getString("pingStatus"));
+        } finally { manager.close(); http.close(); TestFiles.deleteRecursively(root); }
+    }
+
+    @Test
     public void selectedNodeReportsPersistenceFailure() throws Exception {
         File root = Files.createTempDirectory("exitfy-selected-persist").toFile();
         LimitedHttpClient http = new LimitedHttpClient();

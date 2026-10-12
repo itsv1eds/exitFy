@@ -1155,6 +1155,15 @@ final class ExitFyServersFragment
         if ("cancelled".equals(node.pingStatus)) {
             return I18n.t("Проверка отменена", "Check cancelled");
         }
+        if ("check_timeout".equals(node.pingStatus)) {
+            return I18n.t("Время проверки истекло", "Check deadline exceeded");
+        }
+        if ("worker_unavailable".equals(node.pingStatus)) {
+            return I18n.t("Проверка занята — повторите", "Check is busy — try again");
+        }
+        if ("worker_failed".equals(node.pingStatus) || "check_failed".equals(node.pingStatus)) {
+            return I18n.t("Не удалось выполнить проверку", "Could not perform the check");
+        }
         if ("proxy_busy".equals(node.pingStatus)) {
             return I18n.t("Прокси Telegram занят",
                     "Telegram proxy is in use");

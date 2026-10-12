@@ -236,6 +236,15 @@ final class ExitFyDashboardState {
         if ("cancelled".equals(activePingStatus)) {
             return I18n.t("Проверка отменена", "Check cancelled");
         }
+        if ("check_timeout".equals(activePingStatus)) {
+            return I18n.t("Время проверки истекло", "Check deadline exceeded");
+        }
+        if ("worker_unavailable".equals(activePingStatus)) {
+            return I18n.t("Проверка занята — повторите", "Check is busy — try again");
+        }
+        if ("worker_failed".equals(activePingStatus) || "check_failed".equals(activePingStatus)) {
+            return I18n.t("Не удалось выполнить проверку", "Could not perform the check");
+        }
         if (!"idle".equals(activePingStatus) && !"ok".equals(activePingStatus)) {
             return I18n.t("Нет ответа", "No response");
         }
