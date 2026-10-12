@@ -181,6 +181,10 @@ Device testing is performed by the beta tester after receiving
   Only the newest generation may publish results. A node unavailable in the
   current process must use neutral wording; TCP failure for a QUIC-only node is
   informational and cannot change the selected node.
+- Run Proxy GET with exitFy disabled: every requested node must explain that
+  a connection is required. Failed workers and an exhausted check deadline must
+  report their own cause, keep completed measurements and settle every pending
+  row. Only explicit cancellation or replacement may say the check was cancelled.
 - Confirm the dashboard contains no node-failover control. Repeated connection and
   health failures must only reconnect the currently selected node.
 
@@ -276,6 +280,16 @@ gates; mixed balancers must also be checked with both families running.
 - Refresh a source with TCP and XHTTP/xmux at the same endpoint: both servers
   appear and XHTTP keeps its xmux/header settings after a restart. Import mixed
   links, Base64 and JSON with AmneziaWG: broken entries do not hide valid ones.
+- Refresh a full Xray profile source containing standard enabled `mux` with
+  concurrency and XUDP settings. All distinct outbounds must survive import,
+  storage, restart and rendering; identical pool members must appear once.
+  A malformed mux entry must not hide healthy siblings.
+- Import sing-box Hysteria/Hysteria2/TUIC, SOCKS4/4a/5, HTTP/HTTPS, AnyTLS and
+  multiplex profiles. Check their options after restart and actual traffic
+  through user-owned servers; TCP refusal for a QUIC server is informational.
+  Import legacy WireGuard and current `endpoints` JSON with multiple peers,
+  including an endpoint-only profile and a mixed profile. Foreign listeners
+  and system interfaces must not be installed.
 - Import `.conf` from a document provider and clipboard text, including IPv6,
   multiple peers, preshared keys, signature packets and keepalive ranges. Test
   actual Telegram traffic and calls against the user's own AWG server.

@@ -37,6 +37,13 @@ Base64 subscriptions also accept SOCKS5, authenticated HTTP/HTTPS, WireGuard
 AmneziaWG `servers[]` containers can be mixed with full Xray profiles. Bad entries
 are rejected individually, and exact outbound duplicates are collapsed.
 AmneziaWG `.conf` supports a separate `[Device]` section for its device parameters.
+Native Xray outbounds retain standard `mux` settings, including concurrency and
+XUDP policy, through parsing, private storage and rendering. A mux profile and
+its plain counterpart stay separate; repeated identical pool members collapse.
+sing-box JSON also imports QUIC protocols, SOCKS/HTTP proxies and supported
+`multiplex` settings. AnyTLS links/JSON and legacy/current WireGuard JSON
+endpoints are supported. Ordinary SOCKS5 and HTTP/HTTPS proxies can also be
+imported from Clash YAML. Unknown explicit JSON server types count as rejections.
 Inline `#profile-title:` is used when the HTTP title is absent; metadata and
 routing directive lines never become runnable servers. See
 [subscription compatibility](SUBSCRIPTION_COMPATIBILITY.md) for sources, formats
@@ -132,6 +139,10 @@ latency or check status and updates while the dialog stays open.
 TCP is the default latency check and the first option offered: it measures
 without borrowing Telegram's proxy, so it works while connected. Proxy GET
 remains for the full-path measurement.
+Each failed worker reports its own result without cancelling its siblings.
+Deadline expiry, a busy worker pool and Proxy GET without an active connection
+have specific statuses. Only explicit cancellation/replacement reports a
+cancelled check, and an older run cannot overwrite the newest run's results.
 
 Saved subscriptions answer a long press with reorder, hide and delete. Hiding
 drops a source's servers from the list without losing the URL. A page holds 10,
