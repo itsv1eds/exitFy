@@ -28,6 +28,20 @@ names. Members available only in a pool remain selectable. The pool's title
 is not assigned to every member. Refreshing an old pool alias preserves its
 selected endpoint without reconnecting when its running settings are unchanged.
 
+XHTTP share links retain `extra.xmux` integer/range settings, string HTTP
+headers and a separate XHTTP `extra.downloadSettings` channel through parsing,
+private storage and Xray rendering. TCP and XHTTP
+connections to the same endpoint are distinct servers. Plain and Base64/URL-safe
+Base64 subscriptions also accept SOCKS5, authenticated HTTP/HTTPS, WireGuard
+(`wireguard://` / `wg://`) and AmneziaWG (`amneziawg://` / `awg://`) links.
+AmneziaWG `servers[]` containers can be mixed with full Xray profiles. Bad entries
+are rejected individually, and exact outbound duplicates are collapsed.
+AmneziaWG `.conf` supports a separate `[Device]` section for its device parameters.
+Inline `#profile-title:` is used when the HTTP title is absent; metadata and
+routing directive lines never become runnable servers. See
+[subscription compatibility](SUBSCRIPTION_COMPATIBILITY.md) for sources, formats
+and the supported limits.
+
 This covers clean installs in exteraGram and AyuGram, including
 `org.telegram.messenger` and `org.telegram.messenger.web`; cached servers are
 not required. Failed refreshes retain the last working list and show the cause.
@@ -326,10 +340,14 @@ session credentials/markers; an address or port alone never identifies a proxy
 as exitFy's.
 
 Fresh installation offers a welcome dialog once. Only accepting it opens the
-eight-step tutorial. Native View hints frame the actual controls with rounded
+eight-step tutorial, with an extra input step for an unconfigured Custom source.
+The added step outlines the actual editable URL field inside its native dialog
+and waits for an accepted import; cancellation does not skip it.
+Native View hints frame the actual controls with rounded
 corners and display a moving tap indicator and ripple. Compact hint cards fade
 and scale between steps; the spotlight moves to the next target. Native
-GradientDrawables form the rounded cutout without custom Canvas drawing.
+ShapeDrawable/PathShape paints a single antialiased rounded cutout without
+custom Canvas drawing or separate corner gradient tiles.
 Animations respect the system animator setting. Only the user's tap is
 forwarded to the original click handler.
 Component installation must finish before the source-selection steps begin.
@@ -337,6 +355,7 @@ Cancelled dialogs and failed commands do not acknowledge their action. Progress
 is persisted for completion status; it never opens a page on load or app resume.
 Advanced groups settings under Connection, Subscriptions, Latency checks,
 Calls, Components and Help, with headings and spacing instead of extra lines.
+Rows without a value collapse its TextView so descriptions sit below their title.
 Help replays the tutorial from step two (Source), skipping installation and
 reusing the dashboard already in the same account's navigation stack. Completing
 or ending the tutorial returns there and removes intermediate plugin screens;

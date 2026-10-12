@@ -253,6 +253,10 @@ gates; mixed balancers must also be checked with both families running.
   Decline, restart and resume: no repeat welcome or automatic exitFy page.
   Upgrade with incomplete saved tutorial progress: no automatic page or prompt.
 - Accept the welcome and check all eight highlighted steps on real screens.
+  Choose an unconfigured Custom source: the count becomes nine, Add subscription
+  leads to a native dialog with an outlined editable URL field and step counter.
+  Cancel or fail an import: the input step stays available. Confirm an import:
+  proceed to Refresh. Existing configured sources skip duplicate input.
   Component installation must finish before Source; cancel/reopen provider and
   server dialogs and fail/retry commands without skipping their action. Confirm
   choosing the already active server also allows advancing the guide.
@@ -267,6 +271,11 @@ gates; mixed balancers must also be checked with both families running.
   Check themed hints, large font and landscape; hints must scroll their
   target into view and stay clear of it. Pause, navigate back, finish and destroy the guide: no orphan
   overlay, timer or animated pointer should remain over the client.
+- Check Restart and Help rows have no blank value line above their description;
+  non-empty setting values must remain visible after changing them.
+- Refresh a source with TCP and XHTTP/xmux at the same endpoint: both servers
+  appear and XHTTP keeps its xmux/header settings after a restart. Import mixed
+  links, Base64 and JSON with AmneziaWG: broken entries do not hide valid ones.
 - Import `.conf` from a document provider and clipboard text, including IPv6,
   multiple peers, preshared keys, signature packets and keepalive ranges. Test
   actual Telegram traffic and calls against the user's own AWG server.
