@@ -1240,7 +1240,10 @@ tasks.register("validateEmbeddedDexConfig") {
                 "next.defaultHwid.isEmpty() ? \"—\" : next.defaultHwid")
                 || !subscreenText.contains("if (showCancel)")
                 || !subscreenText.contains("editText.setText(\"\")")
-                || !subscreenText.contains("if (hasSummary)")) {
+                || !subscreenText.contains("if (hasSummary)")
+                || !subscreenText.contains("valueView.setVisibility(hasValue ? View.VISIBLE : View.GONE)")
+                || !subscreenText.contains("CharSequence tutorialProgress")
+                || !serversText.contains("tutorial.subscriptionInputProgress()")) {
             throw new GradleException(
                     "Compact preferences/HWID dialog contract is incomplete")
         }
@@ -2083,9 +2086,20 @@ tasks.register("verifyPluginArtifact") {
         if (dexText.contains("exitfyviews")
                 || dexText.contains("exitfynativeui")
                 || dexText.contains("exitfyui")
-                || dexText.contains("universalfragment")
-                || dexText.contains("android/graphics/path;")) {
+                || dexText.contains("universalfragment")) {
             throw new GradleException("Obsolete or unsupported UI remains in decoded DEX")
+        }
+        // A native ShapeDrawable/PathShape supplies the tutorial's compound
+        // rounded cutout. The tutorial must not introduce a custom painter.
+        String tutorialOverlayText = file(
+                "src/main/java/com/extera/plugins/exitfy/TutorialOverlay.java").getText("UTF-8")
+        if (dexText.contains("landroid/graphics/path;")
+                && (!dexText.contains("landroid/graphics/drawable/shapedrawable;")
+                || !dexText.contains("landroid/graphics/drawable/shapes/pathshape;")
+                || !dexText.contains("setantialias")
+                || tutorialOverlayText.contains("import android.graphics.Canvas;")
+                || tutorialOverlayText.contains("void onDraw("))) {
+            throw new GradleException("Tutorial path must use an antialiased native shape")
         }
         if (!dexText.contains("createDashboardFragment".toLowerCase(Locale.ROOT))
                 || !dexText.contains("lorg/telegram/ui/actionbar/basefragment;")) {

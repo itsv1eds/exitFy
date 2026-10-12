@@ -875,9 +875,15 @@ final class ExitFyServersFragment
     }
 
     private void showAddSubscriptionDialog() {
+        String progress = tutorial == null ? "" : tutorial.subscriptionInputProgress();
+        boolean guided = !progress.isEmpty();
         showTextInputDialog(
-                I18n.t("Добавить подписку", "Add subscription"),
-                I18n.t(
+                guided ? I18n.t("Вставьте ссылку подписки", "Paste the subscription URL")
+                        : I18n.t("Добавить подписку", "Add subscription"),
+                guided ? I18n.t(
+                        "Вставьте сюда HTTP- или HTTPS-ссылку подписки от вашего провайдера. Затем нажмите «Добавить». Если отмените ввод, этот шаг можно повторить.",
+                        "Paste the HTTP or HTTPS subscription URL from your provider into the highlighted field, then tap Add. Cancel to retry this step later.")
+                        : I18n.t(
                         "Поддерживаются только HTTP- и HTTPS-ссылки. После добавления exitFy переключится на пользовательский источник.",
                         "Only HTTP and HTTPS URLs are accepted. After adding, exitFy switches to the Custom source."),
                 "https://",
@@ -885,6 +891,7 @@ final class ExitFyServersFragment
                 null,
                 MAX_SUBSCRIPTION_CHARS,
                 false,
+                progress,
                 url -> runMutation(() -> new JSONObject()
                         .put("command", "add_subscription")
                         .put("url", url)),

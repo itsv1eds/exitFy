@@ -26,7 +26,6 @@ final class ExitFyTutorial {
     private View pollView;
     private TutorialOverlay overlay;
     private boolean active = true;
-    private boolean needsCustomSource;
     private boolean pauseAction;
     private final Runnable poll = new Runnable() {
         @Override public void run() {
@@ -149,15 +148,14 @@ final class ExitFyTutorial {
 
     void sourceOpened() { advance(TutorialFlow.Step.SOURCE); }
     void providerChosen(int provider, boolean configured) {
-        if (flow.step() != TutorialFlow.Step.PROVIDER) return;
-        needsCustomSource = provider == SettingsModel.CUSTOM_PROVIDER_ID && !configured;
-        if (!needsCustomSource) advance(TutorialFlow.Step.PROVIDER);
+        if (active && flow.chooseProvider(provider == SettingsModel.CUSTOM_PROVIDER_ID && !configured)) {
+            saveProgress();
+        }
     }
     void serverCommand(String command) {
-        if (needsCustomSource && ("add_subscription".equals(command)
+        if (flow.step() == TutorialFlow.Step.SUBSCRIPTION && ("add_subscription".equals(command)
                 || "add_node".equals(command) || "import_text".equals(command))) {
-            needsCustomSource = false;
-            advance(TutorialFlow.Step.PROVIDER);
+            advance(TutorialFlow.Step.SUBSCRIPTION);
         }
         if ("refresh_subscriptions".equals(command)) advance(TutorialFlow.Step.REFRESH);
         if ("select_node".equals(command)) advance(TutorialFlow.Step.SELECT);
@@ -168,6 +166,12 @@ final class ExitFyTutorial {
     boolean returningToDashboard() {
         return active && flow.step().ordinal() >= TutorialFlow.Step.PING.ordinal();
     }
+    String subscriptionInputProgress() {
+        return active && flow.step() == TutorialFlow.Step.SUBSCRIPTION ? counter() : "";
+    }
+    private String counter() {
+        return I18n.format("Шаг %s из %s", "Step %s of %s", flow.displayPosition() + 1, flow.totalSteps());
+    }
 
     void dashboard(BaseFragment owner, ExitFyDashboardState state,
                    View install, View source, View server, View ping, View advanced) {
@@ -177,7 +181,8 @@ final class ExitFyTutorial {
         TutorialFlow.Step step = flow.step();
         pauseAction = state.coreInstall.active() || (step == TutorialFlow.Step.PING && state.pingRunning)
                 || (step == TutorialFlow.Step.CONNECT && state.pingRunning);
-        if (step == TutorialFlow.Step.PROVIDER || step == TutorialFlow.Step.REFRESH) {
+        if (step == TutorialFlow.Step.PROVIDER || step == TutorialFlow.Step.SUBSCRIPTION
+                || step == TutorialFlow.Step.REFRESH) {
             show(owner, source, I18n.t("Продолжите в списке серверов", "Continue in the server list"),
                     I18n.t("Откройте источник, чтобы выбрать провайдера и обновить подписки.",
                             "Open the source to choose a provider and refresh subscriptions."), null);
@@ -229,20 +234,15 @@ final class ExitFyTutorial {
                  View provider, View add, View refreshTarget, View firstServer) {
         if (!active) return;
         pauseAction = state.refreshRunning || state.importRunning;
-        if (needsCustomSource && state.providerId == SettingsModel.CUSTOM_PROVIDER_ID
-                && (state.customUrlCount > 0 || state.serverCount > 0)) {
-            needsCustomSource = false;
-            advance(TutorialFlow.Step.PROVIDER);
-        }
         TutorialFlow.Step step = flow.step();
         if (step == TutorialFlow.Step.PROVIDER) {
-            show(owner, needsCustomSource ? add : provider,
-                    needsCustomSource ? I18n.t("Добавьте свою подписку", "Add your subscription")
-                            : I18n.t("Выберите провайдера", "Choose a provider"),
-                    needsCustomSource ? I18n.t("Нажмите «Добавить подписку» и вставьте ссылку. Добавление выполняется только после подтверждения.",
-                            "Tap Add subscription and paste the link. It is added only after you confirm.")
-                            : I18n.t("Нажмите на провайдера и выберите Shrimp, Elix, Sworkle или «Пользовательский». Можно подтвердить уже выбранный источник.",
+            show(owner, provider, I18n.t("Выберите провайдера", "Choose a provider"),
+                    I18n.t("Нажмите на провайдера и выберите Shrimp, Elix, Sworkle или «Пользовательский». Можно подтвердить уже выбранный источник.",
                             "Tap Provider and choose Shrimp, Elix, Sworkle or Custom. You can confirm the current source."), null);
+        } else if (step == TutorialFlow.Step.SUBSCRIPTION) {
+            show(owner, add, I18n.t("Добавьте свою подписку", "Add your subscription"),
+                    I18n.t("Нажмите «Добавить подписку». В открывшемся окне будет выделено поле для ссылки, которую вам выдал провайдер.",
+                            "Tap Add subscription. The dialog highlights where to paste the subscription URL from your provider."), null);
         } else if (step == TutorialFlow.Step.REFRESH || step == TutorialFlow.Step.SELECT) {
             boolean choose = step == TutorialFlow.Step.SELECT && firstServer != null && !state.refreshRunning;
             show(owner, choose ? firstServer : refreshTarget,
@@ -268,7 +268,7 @@ final class ExitFyTutorial {
         if (owner.getVisibleDialog() != null && owner.getVisibleDialog().isShowing()) { hide(); return; }
         if (overlay == null || overlay.isClosed()) overlay = new TutorialOverlay(owner);
         overlay.present(target, title, body,
-                I18n.format("Шаг %s из %s", "Step %s of %s", flow.position() + 1, count()),
+                counter(),
                 action == null ? I18n.t("Нажать", "Tap")
                         : flow.step() == TutorialFlow.Step.ADVANCED ? I18n.t("Готово", "Done")
                         : I18n.t("Продолжить", "Continue"), action, this::finish, !pauseAction);

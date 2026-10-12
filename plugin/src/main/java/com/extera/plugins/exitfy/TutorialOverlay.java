@@ -6,11 +6,14 @@ import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.graphics.Path;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
+import android.graphics.drawable.ShapeDrawable;
+import android.graphics.drawable.shapes.PathShape;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -29,8 +32,9 @@ import org.telegram.ui.ActionBar.Theme;
 final class TutorialOverlay implements AutoCloseable {
     private static final int DIM = 0xAA000000;
     private final FrameLayout layer;
-    private final View[] shades = new View[4];
-    private final View[] corners = new View[4];
+    private final View shade;
+    private final Rect shadedArea = new Rect();
+    private int shadedWidth, shadedHeight;
     private final FrameLayout focus;
     private final View cursor;
     private final View wave;
@@ -62,13 +66,8 @@ final class TutorialOverlay implements AutoCloseable {
         layer.setFocusableInTouchMode(true);
         layer.setAlpha(motion ? 0f : 1f);
         root.addView(layer, new ViewGroup.LayoutParams(-1, -1));
-        for (int i = 0; i < 4; i++) {
-            shades[i] = new View(context);
-            shades[i].setBackgroundColor(DIM);
-            layer.addView(shades[i], new FrameLayout.LayoutParams(0, 0));
-            corners[i] = new View(context);
-            layer.addView(corners[i], new FrameLayout.LayoutParams(0, 0));
-        }
+        shade = new View(context);
+        layer.addView(shade, new FrameLayout.LayoutParams(-1, -1));
         focus = new FrameLayout(context);
         focus.setContentDescription(I18n.t("Нажать выделенную кнопку", "Tap the highlighted button"));
         layer.addView(focus, new FrameLayout.LayoutParams(0, 0));
@@ -238,27 +237,24 @@ final class TutorialOverlay implements AutoCloseable {
     private void renderGeometry() {
         Rect area = displayed;
         int width = layer.getWidth(), height = layer.getHeight();
-        place(shades[0], 0, 0, width, area.top);
-        place(shades[1], 0, area.bottom, width, height - area.bottom);
-        place(shades[2], 0, area.top, area.left, area.height());
-        place(shades[3], area.right, area.top, width - area.right, area.height());
         int radius = Math.min(targetRadius(), Math.min(area.width(), area.height()) / 2);
-        if (radius != cornerRadius) {
+        if (radius != cornerRadius || !area.equals(shadedArea)
+                || width != shadedWidth || height != shadedHeight) {
             cornerRadius = radius;
+            shadedArea.set(area); shadedWidth = width; shadedHeight = height;
             focus.setBackground(rounded(0, accent, dp(2), radius));
-            for (int i = 0; i < 4; i++) {
-                GradientDrawable mask = new GradientDrawable();
-                mask.setGradientType(GradientDrawable.RADIAL_GRADIENT);
-                mask.setColors(new int[]{0, 0, DIM}, new float[]{0f, 0.995f, 1f});
-                mask.setGradientRadius(Math.max(1, radius));
-                mask.setGradientCenter((i % 2 == 0) ? 1f : 0f, i < 2 ? 1f : 0f);
-                corners[i].setBackground(mask);
-            }
+            // One native shape paints the outside of the rounded cutout.
+            // Antialiasing applies to the curve, with no gradient tile seams.
+            Path mask = new Path();
+            mask.setFillType(Path.FillType.EVEN_ODD);
+            mask.addRect(0, 0, width, height, Path.Direction.CW);
+            mask.addRoundRect(area.left, area.top, area.right, area.bottom,
+                    radius, radius, Path.Direction.CW);
+            ShapeDrawable drawable = new ShapeDrawable(new PathShape(mask, width, height));
+            drawable.getPaint().setColor(DIM);
+            drawable.getPaint().setAntiAlias(true);
+            shade.setBackground(drawable);
         }
-        place(corners[0], area.left, area.top, radius, radius);
-        place(corners[1], area.right - radius, area.top, radius, radius);
-        place(corners[2], area.left, area.bottom - radius, radius, radius);
-        place(corners[3], area.right - radius, area.bottom - radius, radius, radius);
         place(focus, area.left, area.top, area.width(), area.height());
         layer.getWindowVisibleDisplayFrame(visibleWindow);
         int safeTop = Math.max(0, visibleWindow.top - origin[1]);

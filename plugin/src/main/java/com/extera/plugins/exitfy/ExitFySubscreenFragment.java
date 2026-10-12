@@ -7,6 +7,7 @@ import android.graphics.PorterDuff;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.text.InputFilter;
 import android.text.InputType;
@@ -415,7 +416,7 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
                                              TextInputListener submitListener,
                                              Runnable resetListener) {
         showTextInputDialog(title, explanation, hint, positiveText, resetText,
-                MAX_TEXT_INPUT_CHARS, false, true, null, submitListener, resetListener);
+                MAX_TEXT_INPUT_CHARS, false, true, null, null, submitListener, resetListener);
     }
 
     protected final void showTextInputDialog(CharSequence title, CharSequence explanation,
@@ -424,7 +425,7 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
                                              TextInputListener submitListener,
                                              Runnable resetListener) {
         showTextInputDialog(title, explanation, hint, positiveText, resetText,
-                MAX_TEXT_INPUT_CHARS, false, showCancel, null,
+                MAX_TEXT_INPUT_CHARS, false, showCancel, null, null,
                 submitListener, resetListener);
     }
 
@@ -435,7 +436,7 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
                                              TextInputListener submitListener,
                                              Runnable resetListener) {
         showTextInputDialog(title, explanation, hint, positiveText, resetText,
-                MAX_TEXT_INPUT_CHARS, false, showCancel, initialText,
+                MAX_TEXT_INPUT_CHARS, false, showCancel, initialText, null,
                 submitListener, resetListener);
     }
 
@@ -446,14 +447,24 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
                                              TextInputListener submitListener,
                                              Runnable resetListener) {
         showTextInputDialog(title, explanation, hint, positiveText, resetText,
-                maxChars, multiline, true, null, submitListener, resetListener);
+                maxChars, multiline, true, null, null, submitListener, resetListener);
+    }
+
+    protected final void showTextInputDialog(CharSequence title, CharSequence explanation,
+                                             CharSequence hint, CharSequence positiveText,
+                                             CharSequence resetText, int maxChars,
+                                             boolean multiline, CharSequence tutorialProgress,
+                                             TextInputListener submitListener,
+                                             Runnable resetListener) {
+        showTextInputDialog(title, explanation, hint, positiveText, resetText,
+                maxChars, multiline, true, null, tutorialProgress, submitListener, resetListener);
     }
 
     private void showTextInputDialog(CharSequence title, CharSequence explanation,
                                      CharSequence hint, CharSequence positiveText,
                                      CharSequence resetText, int maxChars,
                                      boolean multiline, boolean showCancel,
-                                     CharSequence initialText,
+                                     CharSequence initialText, CharSequence tutorialProgress,
                                      TextInputListener submitListener,
                                      Runnable resetListener) {
         runUiAction(() -> {
@@ -462,6 +473,18 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
 
             LinearLayout container = new LinearLayout(context);
             container.setOrientation(LinearLayout.VERTICAL);
+            boolean guided = !TextUtils.isEmpty(tutorialProgress);
+            if (guided) {
+                TextView step = new TextView(context);
+                step.setText(tutorialProgress);
+                step.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+                step.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlueText));
+                LinearLayout.LayoutParams stepParams = matchWrap();
+                stepParams.leftMargin = dp(24);
+                stepParams.rightMargin = dp(24);
+                stepParams.bottomMargin = dp(6);
+                container.addView(step, stepParams);
+            }
             if (!TextUtils.isEmpty(explanation)) {
                 TextView description = new TextView(context);
                 description.setTextColor(getThemedColor(Theme.key_dialogTextBlack));
@@ -504,7 +527,14 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
             editText.setBackground(Theme.createEditTextDrawable(context,
                     getThemedColor(Theme.key_dialogInputField),
                     getThemedColor(Theme.key_dialogInputFieldActivated)));
-            editText.setPadding(0, dp(6), 0, dp(6));
+            if (guided) {
+                GradientDrawable frame = new GradientDrawable();
+                frame.setColor(Color.TRANSPARENT);
+                frame.setCornerRadius(dp(8));
+                frame.setStroke(dp(2), getThemedColor(Theme.key_windowBackgroundWhiteBlueText));
+                editText.setBackground(new LayerDrawable(new Drawable[]{editText.getBackground(), frame}));
+            }
+            editText.setPadding(guided ? dp(10) : 0, dp(6), guided ? dp(10) : 0, dp(6));
             LinearLayout.LayoutParams inputParams = matchWrap();
             inputParams.leftMargin = dp(24);
             inputParams.rightMargin = dp(24);
@@ -613,6 +643,7 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
                 Theme.key_windowBackgroundWhiteBlueText, true);
         valueView.setMaxLines(1);
         valueView.setEllipsize(TextUtils.TruncateAt.END);
+        valueView.setVisibility(View.GONE);
         labels.addView(valueView, topMargin(3));
 
         TextView summaryView = null;
@@ -915,8 +946,11 @@ abstract class ExitFySubscreenFragment<S> extends BaseFragment {
         }
 
         void setValue(CharSequence value) {
-            valueView.setText(value);
-            String description = title + ". " + value;
+            boolean hasValue = !TextUtils.isEmpty(value);
+            valueView.setText(hasValue ? value : "");
+            valueView.setVisibility(hasValue ? View.VISIBLE : View.GONE);
+            String description = title.toString();
+            if (hasValue) description += ". " + value;
             if (!TextUtils.isEmpty(summary)) description += ". " + summary;
             view.setContentDescription(description);
         }
