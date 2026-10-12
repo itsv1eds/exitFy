@@ -4,7 +4,8 @@ Device testing is performed by the beta tester after receiving
 `exitfy.plugin`. Use real `arm64-v8a` hardware only:
 
 - One Android 10/API 29 arm64 device and one current Android arm64 device.
-- exteraGram 12.5.1 (`e17f1bde…`) and 12.8.1 (`ab284232…`).
+- exteraGram 12.10.6 (minimum supported client) and the current release.
+- Confirm the host rejects plugin installation on client versions below 12.10.6.
 - Confirm the plugin is `exitFy_v2`, version `4.5`, schema 6, and an
   upgrade preserves settings, subscriptions and nodes. Legacy string, numeric
   and malformed `core_policy` values must become the inert `auto` tombstone;

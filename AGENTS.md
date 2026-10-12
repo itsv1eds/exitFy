@@ -38,8 +38,8 @@ exitFy is a **classic single-file** `BasePlugin`, not an [Elyx](https://plugins.
 ### Runtime
 
 - Plugins are Python, running inside exteraGram through Chaquopy (docs currently: Python **3.11**, SDK **1.4.4.3**).
-- Too-old app builds put the SDK in safe mode and plugin modules refuse to initialize. Treat **exteraGram 12.5.1+** as the baseline.
-- exitFy currently declares `__app_version__ = ">=12.5.1"` and `__sdk_version__ = ">=1.4.3.3"`. Do not silently bump those constants; they are a compatibility contract with installed copies.
+- Too-old app builds put the SDK in safe mode and plugin modules refuse to initialize. exitFy requires **exteraGram 12.10.6+**.
+- exitFy currently declares `__app_version__ = ">=12.10.6"` and `__sdk_version__ = ">=1.4.3.3"`. Do not silently bump those constants; they are a compatibility contract with installed copies.
 - Main modules: `base_plugin` (lifecycle, hooks, menus, `MethodHook`), `android_utils` (UI thread, listeners, log, clipboard), `client_utils` (queues, requests, send/edit, fragments, controllers), `file_utils`, `hook_utils` (reflection), `ui.settings` / `ui.bulletin`, `extera_utils` (class proxy). Java interop uses `from java import jclass` and `org.telegram.*`.
 
 ### Metadata (AST-parsed)
@@ -92,7 +92,7 @@ User-facing notices: `ui.bulletin.BulletinHelper.show_info` / `show_error`. Open
 
 Runtime lives in `plugin/src/main/java/com/extera/plugins/exitfy`. The Python file is a thin loader and settings bus, not a second implementation of proxy logic.
 
-**Host:** exteraGram ≥ 12.5.1, plugin SDK ≥ 1.4.3.3 (see SDK section), Android 10 / API 29+, 64-bit process, primary ABI `arm64-v8a`. The loader checks all three before creating any exitFy files.
+**Host:** exteraGram ≥ 12.10.6, plugin SDK ≥ 1.4.3.3 (see SDK section), Android 10 / API 29+, 64-bit process, primary ABI `arm64-v8a`. The loader checks all three before creating any exitFy files.
 
 **Telegram source** for compile is `~/work/exteraGram-Dev` (override with `telegramSourceDir` / `EXTERAGRAM_SOURCE_DIR`). Gradle/D8/JNI/core updater/ELF checks all use API 29 and ELF64/`EM_AARCH64`.
 

@@ -926,7 +926,7 @@ tasks.register("validateEmbeddedDexConfig") {
                 "plugin version"     : "__version__ = \"${pluginVersion}\"",
                 "plugin author"      : "__author__ = \"${pluginAuthor}\"",
                 "plugin icon"        : "__icon__ = \"${pluginIcon}\"",
-                "minimum app"        : "__app_version__ = \">=12.5.1\"",
+                "minimum app"        : "__app_version__ = \">=12.10.6\"",
                 "minimum sdk"        : "__sdk_version__ = \">=1.4.3.3\"",
                 "entry class"        : "ENTRY_CLASS = \"${dexEntryClass}\"",
                 "DEX keeper prefix"  : "DEX_KEEPER_PREFIX = \"exitfy-dex-keeper:exitFy_v2:\"",
@@ -1978,7 +1978,7 @@ tasks.register("verifyPluginArtifact") {
                 "__version__ = \"${pluginVersion}\"",
                 "__author__ = \"${pluginAuthor}\"",
                 "__icon__ = \"${pluginIcon}\"",
-                "__app_version__ = \">=12.5.1\"",
+                "__app_version__ = \">=12.10.6\"",
                 "__sdk_version__ = \">=1.4.3.3\"",
         ].each { metadata ->
             if (!text.contains(metadata)) throw new GradleException("Generated metadata is invalid: ${metadata}")
