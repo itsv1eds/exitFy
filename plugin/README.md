@@ -1,4 +1,4 @@
-# exitFy 4.5
+# exitFy 4.5.1
 
 Release notes: [CHANGELOG.md](CHANGELOG.md).
 
@@ -200,7 +200,7 @@ loading a different embedded DEX version fails closed until exteraGram is
 restarted.
 
 The plugin ID remains `exitFy_v2` and the settings schema is 6. Upgrading to
-4.5 does not clear settings, custom subscriptions or custom nodes.
+4.5.1 does not clear settings, custom subscriptions or custom nodes.
 
 The 3.x plugin used the separate id `exitfy`, so the host installs this one
 beside it instead of replacing it. On first load exitFy reads that plugin's
@@ -389,5 +389,5 @@ or ending the tutorial returns there and removes intermediate plugin screens;
 it never removes another client screen. The final hint targets the replay row
 in Help. Opening a tutorial never starts a
 connection, refresh or download. Each generated artifact carries a DEX/native build
-identity, so replacing 4.5 with a different 4.5 build asks for a complete
+identity, so replacing 4.5.1 with a different 4.5.1 build asks for a complete
 client restart in the user's language instead of reusing stale Java code.
