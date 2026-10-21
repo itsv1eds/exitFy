@@ -27,6 +27,7 @@ final class ExitFyPreferencesFragment
     private String coreVersions = "";
     private String callState = "";
     private SettingRow failoverRow;
+    private SettingRow pauseOnVpnRow;
     private SettingRow refreshOnOpenRow;
     private SettingRow autoCheckRow;
     private SettingRow callsRow;
@@ -79,7 +80,7 @@ final class ExitFyPreferencesFragment
                 I18n.t("Round Robin — распределять новые соединения; Sticky Session — самый быстрый сервер",
                         "Round Robin distributes new connections; Sticky Session uses the fastest server"));
         setSafeClick(balanceRow.view, () -> showChoiceDialog(I18n.t("Балансировщик", "Balancer"),
-                new CharSequence[]{I18n.t("Выключено", "Off"), "Round Robin", "Sticky Session"},
+                new CharSequence[]{I18n.t("Выключено", "Off"), I18n.t("Round Robin", "Round Robin"), I18n.t("Sticky Session", "Sticky Session")},
                 "round_robin".equals(state.balanceMode) ? 1 : "sticky".equals(state.balanceMode) ? 2 : 0,
                 index -> setSetting("balance_mode", new String[]{"off", "round_robin", "sticky"}[index])));
         content.addView(balanceRow.view, sectionParams());
@@ -88,6 +89,16 @@ final class ExitFyPreferencesFragment
                 I18n.t("Менять сервер при обрыве", "Switch server on failure"), "");
         setSafeClick(failoverRow.view, this::showFailoverDialog);
         content.addView(failoverRow.view, sectionParams());
+
+        pauseOnVpnRow = settingRow(context, R.drawable.drawer_proxy_on,
+                I18n.t("Приостанавливать при VPN", "Pause while VPN is active"),
+                I18n.t("При включённом exitFy подключение восстановится после выключения VPN. Настройка клиента также учитывается",
+                        "With exitFy enabled, the connection resumes when the VPN turns off. The client's proxy policy is also respected"));
+        setSafeClick(pauseOnVpnRow.view, () -> showChoiceDialog(
+                I18n.t("Приостанавливать при VPN", "Pause while VPN is active"),
+                new CharSequence[]{I18n.t("Выключено", "Off"), I18n.t("Включено", "On")},
+                state.pauseOnVpn ? 1 : 0, index -> setSetting("pause_on_vpn", index == 1)));
+        content.addView(pauseOnVpnRow.view, sectionParams());
 
         sectionHeading(context, content, I18n.t("Подписки", "Subscriptions"));
 
@@ -191,7 +202,7 @@ final class ExitFyPreferencesFragment
         }
         if (next.runtimeAvailable) {
             balanceRow.setValue("off".equals(next.balanceMode) ? I18n.t("Выключено", "Off")
-                    : "round_robin".equals(next.balanceMode) ? "Round Robin" : "Sticky Session");
+                    : "round_robin".equals(next.balanceMode) ? I18n.t("Round Robin", "Round Robin") : I18n.t("Sticky Session", "Sticky Session"));
             pingTypeRow.setValue(pingTypeLabel(next.pingType));
             customHwidRow.setValue(next.customHwidSet
                     ? I18n.t("Настроен", "Configured")
@@ -203,6 +214,8 @@ final class ExitFyPreferencesFragment
             coreVersionRow.setValue(coreVersions.isEmpty()
                     ? I18n.t("Загрузка…", "Loading…") : coreVersions);
             failoverRow.setValue(next.failover
+                    ? I18n.t("Включено", "On") : I18n.t("Выключено", "Off"));
+            pauseOnVpnRow.setValue(next.pauseOnVpn
                     ? I18n.t("Включено", "On") : I18n.t("Выключено", "Off"));
             refreshOnOpenRow.setValue(next.refreshOnOpen
                     ? I18n.t("Включено", "On") : I18n.t("Выключено", "Off"));
@@ -217,13 +230,14 @@ final class ExitFyPreferencesFragment
         } else {
             String unavailable = I18n.t("Runtime недоступен", "Runtime unavailable");
             balanceRow.setValue("off".equals(next.balanceMode) ? I18n.t("Выключено", "Off")
-                    : "round_robin".equals(next.balanceMode) ? "Round Robin" : "Sticky Session");
+                    : "round_robin".equals(next.balanceMode) ? I18n.t("Round Robin", "Round Robin") : I18n.t("Sticky Session", "Sticky Session"));
             pingTypeRow.setValue(unavailable);
             customHwidRow.setValue(unavailable);
             subscriptionUserAgentRow.setValue(unavailable);
             dualCoreRow.setValue(unavailable);
             coreVersionRow.setValue(unavailable);
             failoverRow.setValue(unavailable);
+            pauseOnVpnRow.setValue(unavailable);
             refreshOnOpenRow.setValue(unavailable);
             autoCheckRow.setValue(unavailable);
             callsRow.setValue(unavailable);
@@ -247,6 +261,7 @@ final class ExitFyPreferencesFragment
         if (subscriptionUserAgentRow != null) subscriptionUserAgentRow.setEnabled(enabled);
         if (dualCoreRow != null) dualCoreRow.setEnabled(enabled);
         if (failoverRow != null) failoverRow.setEnabled(enabled);
+        if (pauseOnVpnRow != null) pauseOnVpnRow.setEnabled(enabled);
         if (refreshOnOpenRow != null) refreshOnOpenRow.setEnabled(enabled);
         if (autoCheckRow != null) autoCheckRow.setEnabled(enabled);
         if (callsRow != null) callsRow.setEnabled(enabled);

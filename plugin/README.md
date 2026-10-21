@@ -13,6 +13,17 @@ and updates remain automatic. Whenever either connection component is missing,
 the dashboard exposes one generic action which installs/checks both components
 and reports combined progress; it never exposes family names, versions,
 selection or per-family update controls. Component versions are listed only in Advanced.
+
+Advanced → Connection includes an opt-in pause while a system VPN is active.
+With exitFy enabled, its owned Telegram proxy resumes when that VPN goes away.
+The host's automatic proxy-disable policy is respected even with this option
+off. A user-selected different proxy is preserved and manual exitFy disable
+cancels resumption. Native cores can remain idle during a VPN pause; the
+connection icon and status show the pause. TCP latency checks remain available.
+Settings and tutorial copy follow the client's Russian, English or Chinese
+language. Chinese UI text uses a single catalog; translated format arguments
+and literal-message coverage are checked in tests.
+
 Subscriptions use one default client identity, `Happ/5.2.0`. Advanced can replace
 it with one custom User-Agent; failed responses never trigger another identity.
 Unreachable placeholder entries are rejected rather than counted. Reordering the catalog moves stored subscriptions,
@@ -37,6 +48,11 @@ Base64 subscriptions also accept SOCKS5, authenticated HTTP/HTTPS, WireGuard
 AmneziaWG `servers[]` containers can be mixed with full Xray profiles. Bad entries
 are rejected individually, and exact outbound duplicates are collapsed.
 AmneziaWG `.conf` supports a separate `[Device]` section for its device parameters.
+Empty optional export fields are skipped. Repeated Address, DNS and AllowedIPs
+lines are combined within the existing size limits; conflicting scalar values
+remain errors. Interface commands are rejected. The AWG implementation is
+`amneziawg-go/v3 v3.0.3`, pinned in the SB core module; this plugin change does
+not rebuild that core or promise all future AWG protocol extensions.
 Native Xray outbounds retain standard `mux` settings, including concurrency and
 XUDP policy, through parsing, private storage and rendering. A mux profile and
 its plain counterpart stay separate; repeated identical pool members collapse.

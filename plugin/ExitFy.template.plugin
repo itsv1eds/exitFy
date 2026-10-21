@@ -67,53 +67,76 @@ Process = jclass("android.os.Process")
 LocaleController = jclass("org.telegram.messenger.LocaleController")
 
 _TRANSLATIONS = {
-    "restart_update": (
+    'restart_update': (
         "Плагин обновлён. Полностью закройте клиент и откройте снова, чтобы загрузить новую версию exitFy.",
         "Plugin updated. Fully close and reopen the client to load the new exitFy version.",
+        "插件已更新。请完全关闭客户端后重新打开，以加载新版 exitFy。",
     ),
-    "runtime_not_started": ("exitFy не запущен: ", "exitFy did not start: "),
-    "runtime_unavailable": ("Runtime exitFy недоступен", "exitFy runtime is unavailable"),
-    "menu_settings": ("Настройки exitFy", "exitFy settings"),
-    "open_dashboard": ("Открыть exitFy", "Open exitFy"),
-    "open_dashboard_hint": (
+    'runtime_not_started': (
+        "exitFy не запущен: ",
+        "exitFy did not start: ",
+        "exitFy 未启动：",
+    ),
+    'runtime_unavailable': (
+        "Runtime exitFy недоступен",
+        "exitFy runtime is unavailable",
+        "exitFy 运行时不可用",
+    ),
+    'menu_settings': (
+        "Настройки exitFy",
+        "exitFy settings",
+        "exitFy 设置",
+    ),
+    'open_dashboard': (
+        "Открыть exitFy",
+        "Open exitFy",
+        "打开 exitFy",
+    ),
+    'open_dashboard_hint': (
         "Серверы и подключение настраиваются там же",
         "Servers and the connection are set up there",
+        "服务器和连接也在此处设置",
     ),
-    "legacy_still_enabled": (
-        "Старый плагин exitFy включён. Выключите его, иначе оба будут "
-        "переключать прокси Telegram",
-        "The old exitFy plugin is enabled. Turn it off, or both will keep "
-        "switching the Telegram proxy",
+    'legacy_still_enabled': (
+        "Старый плагин exitFy включён. Выключите его, иначе оба будут переключать прокси Telegram",
+        "The old exitFy plugin is enabled. Turn it off, or both will keep switching the Telegram proxy",
+        "旧版 exitFy 插件仍在启用。请将其关闭，否则两个插件会不断切换 Telegram 代理",
     ),
-    "legacy_imported": (
+    'legacy_imported': (
         "Перенесено из старого exitFy: подписок %d, серверов %d",
         "Imported from the old exitFy: %d subscriptions, %d servers",
+        "已从旧版 exitFy 导入：%d 个订阅，%d 个服务器",
     ),
-    "settings_open_failed": (
+    'settings_open_failed': (
         "Не удалось открыть exitFy",
         "Could not open exitFy",
+        "无法打开 exitFy",
     ),
 }
 
 
-def _is_russian():
+def _language_code():
     try:
         info = LocaleController.getInstance().getCurrentLocaleInfo()
-        code = str(info.shortName or "") if info is not None else ""
+        code = str(info.shortName or "").strip() if info is not None else ""
         if code:
-            return code.lower().startswith("ru")
+            return code.lower().replace("_", "-").split("-", 1)[0]
     except Exception:
         pass
     try:
-        Locale = jclass("java.util.Locale")
-        return str(Locale.getDefault().getLanguage() or "").lower() == "ru"
+        return str(jclass("java.util.Locale").getDefault().getLanguage() or "en").lower()
     except Exception:
-        return False
+        return "en"
+
+
+def _is_russian():
+    return _language_code() == "ru"
 
 
 def _t(key):
-    value = _TRANSLATIONS.get(key, (key, key))
-    return value[0] if _is_russian() else value[1]
+    value = _TRANSLATIONS.get(key, (key, key, key))
+    language = _language_code()
+    return value[0] if language == "ru" else value[2] if language == "zh" else value[1]
 
 
 def _ui_error(message):
@@ -534,6 +557,7 @@ class ExitFyPlugin(BasePlugin):
             provider_value = self.get_setting("provider_id", 0)
         return {
             "enabled": self._as_bool(self.get_setting("enabled", False)),
+            "pause_on_vpn": self._as_bool(self.get_setting("pause_on_vpn", False)),
             "provider_id": self._bounded_index(provider_value, CUSTOM_PROVIDER_ID),
             "custom_hwid": normalized_headers["custom_hwid"],
             "subscription_user_agent": normalized_headers["subscription_user_agent"],

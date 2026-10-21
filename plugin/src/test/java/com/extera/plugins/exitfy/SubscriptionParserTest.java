@@ -417,6 +417,35 @@ public class SubscriptionParserTest {
     }
 
     @Test
+    public void namedProfilesKeepTheirNamesBesideAuxiliaryRoutesAndPoolDuplicates() throws Exception {
+        JSONObject primary = xrayVnext("vless", "country.example",
+                "11111111-1111-1111-1111-111111111111", "none").put("tag", "proxy");
+        JSONObject auxiliary = xrayVnext("vless", "auxiliary.example",
+                "22222222-2222-2222-2222-222222222222", "none").put("tag", "special-route");
+        JSONObject another = xrayVnext("vless", "other.example",
+                "33333333-3333-3333-3333-333333333333", "none").put("tag", "proxy-2");
+        JSONObject pool = new JSONObject().put("remarks", "Auto selection")
+                .put("outbounds", new JSONArray().put(primary).put(another).put(auxiliary));
+        JSONObject country = new JSONObject().put("remarks", "🇩🇪 Germany")
+                .put("outbounds", new JSONArray().put(primary).put(auxiliary));
+        JSONObject other = new JSONObject().put("remarks", "🇳🇱 Netherlands")
+                .put("outbounds", new JSONArray().put(new JSONObject(another.toString()).put("tag", "proxy"))
+                        .put(auxiliary));
+        SubscriptionParser.ParseResult parsed = SubscriptionParser.parseDetailed(
+                new JSONArray().put(pool).put(country).put(other).toString());
+        assertEquals(3, parsed.nodes.size());
+        assertEquals(0, parsed.rejected);
+        assertEquals("🇩🇪 Germany", parsed.nodes.get(0).name);
+        assertEquals("special-route", parsed.nodes.get(1).name);
+        assertEquals("🇳🇱 Netherlands", parsed.nodes.get(2).name);
+        SubscriptionParser.ParseResult reversed = SubscriptionParser.parseDetailed(
+                new JSONObject().put("remarks", "🇩🇪 Germany")
+                        .put("outbounds", new JSONArray().put(auxiliary).put(primary)).toString());
+        assertEquals("special-route", reversed.nodes.get(0).name);
+        assertEquals("🇩🇪 Germany", reversed.nodes.get(1).name);
+    }
+
+    @Test
     public void poolOnlyMembersRemainAvailableAndDifferentTransportsAreNotDeduplicated()
             throws Exception {
         JSONObject first = xrayVnext("vless", "pool.example",

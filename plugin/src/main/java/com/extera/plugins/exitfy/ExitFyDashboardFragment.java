@@ -541,11 +541,11 @@ final class ExitFyDashboardFragment extends BaseFragment {
     private void applyState(ExitFyDashboardState state) {
         if (connectButton == null) return;
         connectionStatusView.setText(state.connectionTitle());
-        connectionStatusView.setTextColor(connectionColor(state.runtimeState));
+        connectionStatusView.setTextColor(connectionColor(state.vpnPaused ? "STOPPED" : state.runtimeState));
         if (connectionIconView != null) {
             // The icon says the same thing as the words above it, so it has to
             // follow them rather than always showing a live connection.
-            connectionIconView.setImageResource("RUNNING".equals(state.runtimeState)
+            connectionIconView.setImageResource("RUNNING".equals(state.runtimeState) && !state.vpnPaused
                     ? R.drawable.drawer_proxy_on : R.drawable.drawer_proxy_off);
         }
         boolean showConnectionIssue = "ERROR".equals(state.runtimeState)

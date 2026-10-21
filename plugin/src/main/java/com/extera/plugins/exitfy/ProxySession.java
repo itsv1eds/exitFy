@@ -43,6 +43,7 @@ final class ProxySession implements Closeable {
     private volatile boolean markerReadFailed;
     private volatile long recoveryToken;
     private final ActivationGuardState<StateGuard> activationGuard = new ActivationGuardState<>();
+    private volatile boolean vpnPaused;
 
     ProxySession(AtomicStore store) {
         this.store = store;
@@ -428,7 +429,39 @@ final class ProxySession implements Closeable {
         }
     }
 
+    /** Pause only this session's exact proxy; keep its credentials and previous snapshot. */
+    boolean setVpnPaused(boolean paused) {
+        if (!active) { vpnPaused = paused; return true; }
+        JSONObject saved = readSessionMarker();
+        if (saved == null || !recoveryReady()) return false;
+        long token = beginOperation();
+        boolean wasPaused = vpnPaused;
+        try {
+            boolean applied = runOnUi(token, DEFAULT_UI_TIMEOUT_MS, () -> {
+                ProxySnapshotModel snapshot = ProxySnapshotModel.fromJson(saved);
+                SharedConfig.ProxyInfo current = backend().current();
+                if (current == null || !matchesFingerprint(snapshot.ownedFingerprint, current)) return false;
+                SharedPreferences preferences = MessagesController.getGlobalMainSettings();
+                boolean enabled = preferences.getBoolean("proxy_enabled", false);
+                if (!paused && !vpnPaused && !enabled) return false;
+                vpnPaused = paused;
+                if (enabled == !paused) return true;
+                preferences.edit().putBoolean("proxy_enabled", !paused).apply();
+                ProxyCompat.configure(!paused, paused ? null : current);
+                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxySettingsChanged);
+                return true;
+            });
+            if (applied && wasPaused != paused) {
+                JSONObject next = JsonGuard.object(saved.toString()).put("vpnPaused", paused);
+                writeSessionMarker(next, saved);
+                rememberSessionSnapshot(next);
+            }
+            return applied;
+        } catch (Exception unavailable) { return false; }
+    }
+
     boolean reapplyIfOwned() {
+        if (vpnPaused) return true;
         if (!recoveryReady()) return false;
         JSONObject saved = readSessionMarker();
         if (saved == null) return false;
@@ -479,6 +512,7 @@ final class ProxySession implements Closeable {
                                         long token, long timeoutMillis,
                                         boolean retainActivationGuard) throws Exception {
         ProxySnapshotModel durableSnapshot = ProxySnapshotModel.fromJson(saved);
+        boolean paused = vpnPaused || saved.optBoolean("vpnPaused", false);
         RestoreOutcome outcome = runOnUi(token, timeoutMillis, true, () -> {
             SharedPreferences preferences = MessagesController.getGlobalMainSettings();
             ProxySnapshotModel snapshot = durableSnapshot;
@@ -486,7 +520,7 @@ final class ProxySession implements Closeable {
             SharedConfig.ProxyInfo current = value.current();
             boolean currentCalls = preferences.getBoolean("proxy_enabled_calls", false);
             boolean ownedCurrent = current != null
-                    && preferences.getBoolean("proxy_enabled", false)
+                    && (paused || preferences.getBoolean("proxy_enabled", false))
                     && matchesFingerprint(snapshot.ownedFingerprint, current);
             if (!ownedCurrent) {
                 removeOwned(value, snapshot.ownedFingerprint);
@@ -512,11 +546,11 @@ final class ProxySession implements Closeable {
                     .putString("proxy_user", raw.username)
                     .putString("proxy_pass", raw.password)
                     .putString("proxy_secret", raw.secret)
-                    .putBoolean("proxy_enabled", raw.enabled)
+                    .putBoolean("proxy_enabled", raw.enabled && !paused)
                     .putBoolean("proxy_enabled_calls",
                             callsPreferenceAfterRestore(raw.calls, currentCalls))
                     .apply();
-            if (raw.enabled && restored != null) {
+            if (raw.enabled && !paused && restored != null) {
                 ProxyCompat.configure(true, restored);
             } else {
                 ProxyCompat.configure(false, null);
@@ -528,10 +562,11 @@ final class ProxySession implements Closeable {
         });
         if (relativeName != null) {
             markInactive(relativeName, saved);
-            activationGuard.restored(new StateGuard(
-                    durableSnapshot.previous, durableSnapshot.preferences),
-                    retainActivationGuard);
+            if (paused) activationGuard.disabled();
+            else activationGuard.restored(new StateGuard(
+                    durableSnapshot.previous, durableSnapshot.preferences), retainActivationGuard);
         }
+        vpnPaused = false;
         return outcome;
     }
 

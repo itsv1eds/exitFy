@@ -225,6 +225,16 @@ class TutorialStartupTests(unittest.TestCase):
 
 
 class TemplateLifecycleTest(unittest.TestCase):
+    def test_vpn_pause_preference_persists_in_loader_runtime_snapshot(self):
+        plugin_type, *_ = load_plugin_class()
+        plugin = plugin_type()
+        self.assertFalse(plugin._settings_dict()["pause_on_vpn"])
+        plugin.set_setting("pause_on_vpn", True)
+        self.assertTrue(plugin._settings_dict()["pause_on_vpn"])
+        restored = plugin_type()
+        restored.settings.update(plugin.settings)
+        self.assertTrue(restored._settings_dict()["pause_on_vpn"])
+
     def test_removed_legacy_provider_selection_falls_back_to_first_source(self):
         plugin_type, *_ = load_plugin_class()
         plugin = plugin_type()

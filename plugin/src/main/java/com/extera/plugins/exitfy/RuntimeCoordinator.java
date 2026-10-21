@@ -3,6 +3,7 @@ package com.extera.plugins.exitfy;
 import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.Network;
+import android.net.NetworkCapabilities;
 
 import com.exteragram.messenger.plugins.PluginsController;
 
@@ -61,6 +62,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     private final ProxySession proxySession;
     private final LocalPortAllocator localPorts;
     private final ConnectionStateMachine stateMachine = new ConnectionStateMachine();
+    private volatile boolean vpnPaused;
+    private volatile boolean externalVpnActive;
     private final ScheduledThreadPoolExecutor coordinator;
     private final ThreadPoolExecutor coreExecutor;
     private final ExecutorService subscriptionExecutor;
@@ -214,6 +217,14 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             public void onLost(Network network) {
                 requestReconnect("network_lost");
             }
+
+            @Override public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {
+                safeExecute(() -> {
+                    if (!reconcileVpnPolicy() && settings.enabled && stateMachine.get() != RuntimeState.RUNNING) {
+                        requestReconnect("network_available");
+                    }
+                });
+            }
         };
     }
 
@@ -334,6 +345,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
 
     private void recordChangedSettingRevisions(SettingsModel previous, SettingsModel next,
                                                long revision) {
+        if (previous.pauseOnVpn != next.pauseOnVpn) settingPersistenceRevisions.record("pause_on_vpn", revision);
         if (!previous.balanceMode.equals(next.balanceMode)) settingPersistenceRevisions.record("balance_mode", revision);
         if (previous.sortByPing != next.sortByPing) settingPersistenceRevisions.record("sort_by_ping", revision);
         if (previous.tutorialStep != next.tutorialStep) settingPersistenceRevisions.record("tutorial_step", revision);
@@ -395,6 +407,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         // after exteraGram restarts.
         NativeCoreRuntime.setDualCoreEnabled(next.dualCore);
         appliedSettings.markApplied(requestedRevision);
+        reconcileVpnPolicy();
+        if (!revisionGate.settingsRequestIsCurrent(requestedRevision)) return;
         if (previous.providerId != next.providerId) {
             restartRequired = false;
             subscriptionIssue = "";
@@ -436,7 +450,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             if ("call_relay_map".equals(command)) {
                 callMapRequests.incrementAndGet();
                 CallRelay relay = callRelay;
-                if (relay == null || !settings.callsViaProxy
+                if (relay == null || !settings.callsViaProxy || vpnPaused
                         || stateMachine.get() != RuntimeState.RUNNING) {
                     // Naming which of the three is missing is the difference
                     // between a fixable report and "it does not work".
@@ -846,6 +860,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             value.put("runtimeAvailable", loaded);
             value.put("state", state.name());
             value.put("enabled", current.enabled);
+            value.put("pauseOnVpn", current.pauseOnVpn);
+            value.put("vpnPaused", vpnPaused);
+            value.put("vpnPauseReason", externalVpnActive ? "vpn" : "client");
             value.put("providerId", current.providerId);
             JSONArray providerAvailability = new JSONArray();
             for (int provider = 0; provider < ProviderCatalog.size(); provider++) {
@@ -968,6 +985,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     public void didReceivedNotification(int id, int account, Object... args) {
         if (id != NotificationCenter.proxySettingsChanged || !loaded || probePausing) return;
         safeExecute(() -> {
+            if (reconcileVpnPolicy()) return;
             if (!loaded || !settings.enabled || stateMachine.get() != RuntimeState.RUNNING) return;
             ProxySession.Ownership ownership = proxySession.ownership();
             if (ownership == ProxySession.Ownership.EXTERNALLY_CHANGED) {
@@ -978,6 +996,33 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 scheduleOwnershipRetry("telegram_proxy_unknown");
             }
         });
+    }
+
+    private boolean reconcileVpnPolicy() {
+        if (!loaded || !settings.enabled) return false;
+        boolean vpn = VpnConnectionPolicy.vpnActive(connectivity);
+        boolean pause = VpnConnectionPolicy.shouldPause(settings.enabled, settings.pauseOnVpn,
+                vpn, VpnConnectionPolicy.hostAutoDisabled());
+        boolean changed = vpnPaused != pause || externalVpnActive != vpn;
+        externalVpnActive = vpn;
+        if (pause) {
+            vpnPaused = true;
+            cancelReconnect();
+            if (changed && pingKind == PingKind.PROXY_GET) cancelPing(true);
+            if (stateMachine.get() == RuntimeState.RUNNING && !proxySession.setVpnPaused(true)) {
+                disableFromJava(RuntimePolicy.TELEGRAM_PROXY_CHANGED);
+                return true;
+            }
+        } else if (vpnPaused) {
+            if (!proxySession.setVpnPaused(false)) {
+                disableFromJava(RuntimePolicy.TELEGRAM_PROXY_CHANGED);
+                return true;
+            }
+            vpnPaused = false;
+            if (stateMachine.get() == RuntimeState.STOPPED) requestReconnect("network_available");
+        }
+        if (changed) invalidateSettings();
+        return pause;
     }
 
     private void requestReconnect(String reason) {
@@ -1007,6 +1052,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
 
     private void handleReconnectRequest(String reason) {
         if (!loaded || !settings.enabled) return;
+        if (reconcileVpnPolicy()) return;
         if (ReconnectBackoff.resetsForReason(reason)) {
             restartRequired = false;
             coreSelectionBlocked = false;
@@ -1038,6 +1084,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
 
     private void checkRuntimeAndProxy(String reason) {
         if (!loaded || !settings.enabled) return;
+        if (reconcileVpnPolicy()) return;
         if (stateMachine.get() == RuntimeState.RUNNING) {
             ProxySession.Ownership ownership = proxySession.ownership();
             if (ownership == ProxySession.Ownership.EXTERNALLY_CHANGED) {
@@ -1130,6 +1177,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                                         ProxySession.StateGuard expectedProxyState,
                                         long absoluteDeadline) {
         if (!revisionGate.isCurrent(operation, loaded, settings.enabled)) return false;
+        if (reconcileVpnPolicy()) return false;
         try {
             if (!proxySession.recoverIfNeeded()) {
                 throw proxySession.recoveryPendingException();
@@ -1239,6 +1287,12 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             long proxyTimeout = boundedWait(absoluteDeadline, 2_000L);
             if (proxyTimeout <= 0L) {
                 stopServicesOnly(absoluteDeadline);
+                return false;
+            }
+            // A VPN may have appeared while the native core was starting.
+            if (reconcileVpnPolicy()) {
+                stopServicesOnly(absoluteDeadline);
+                transition(RuntimeState.STOPPED);
                 return false;
             }
             proxySession.activate(port, credentials, proxyTimeout, expectedProxyState);
@@ -1384,6 +1438,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         if (preserveCurrentTelegramProxy) proxySession.releasePreservingCurrent();
         else if (!settings.enabled) proxySession.restoreForDisable();
         else proxySession.restore();
+        if (!settings.enabled) vpnPaused = false;
     }
 
     private void stopServicesOnly() {
@@ -1512,6 +1567,15 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     }
 
     private void startManualPing(List<ProtocolParser.Node> nodes, String requestedType) {
+        if (SettingsModel.PING_PROXY_GET.equals(requestedType)
+                && (vpnPaused || VpnConnectionPolicy.shouldPause(settings.enabled, settings.pauseOnVpn,
+                VpnConnectionPolicy.vpnActive(connectivity), VpnConnectionPolicy.hostAutoDisabled()))) {
+            throw new IllegalStateException(VpnConnectionPolicy.vpnActive(connectivity)
+                    ? I18n.t("Для полной проверки выключите VPN или выберите TCP",
+                            "Turn off the VPN for a full-path check, or choose TCP")
+                    : I18n.t("Прокси отключён настройками клиента; выберите TCP",
+                            "The client's network settings disable proxies; choose TCP"));
+        }
         if (nodes == null || nodes.isEmpty()) {
             throw new IllegalArgumentException(I18n.t(
                     "На текущей странице нет серверов", "The current page has no nodes"));
@@ -3230,6 +3294,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     }
 
     private void healthTick() {
+        if (reconcileVpnPolicy()) return;
         if (!loaded || !settings.enabled || stateMachine.get() != RuntimeState.RUNNING
                 || "running".equals(pingState)) return;
         long healthGeneration = generation.get();
@@ -3273,6 +3338,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     private void applyHealthResult(long token, long healthGeneration,
                                    ProxySession.Ownership ownership,
                                    boolean runtimeHealthy) {
+        if (reconcileVpnPolicy()) return;
         if (!loaded || generation.get() != healthGeneration
                 || pingGeneration.get() != token
                 || stateMachine.get() != RuntimeState.RUNNING

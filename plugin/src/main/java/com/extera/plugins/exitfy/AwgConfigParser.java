@@ -86,9 +86,28 @@ final class AwgConfigParser {
             String value = line.substring(separator + 1).trim();
             int comment = value.indexOf(" #");
             if (comment >= 0) value = value.substring(0, comment).trim();
-            if (value.isEmpty() || value.length() > 2048 || section.put(key, value) != null) {
-                throw invalid("пустой или повторный параметр", "empty or duplicate parameter");
+            if (value.length() > 2048) throw invalid("длина параметра", "parameter length");
+            // Official exporters may leave optional entries blank. Keep required
+            // keys strict and validate unknown directives below even when blank.
+            boolean optional = section == iface
+                    ? key.equals("dns") || key.equals("mtu") || key.equals("listenport")
+                        || key.equals("table") || key.equals("fwmark") || key.equals("saveconfig")
+                        || isParameter(key)
+                    : key.equals("presharedkey") || key.equals("persistentkeepalive");
+            if (value.isEmpty() && optional) continue;
+            if (value.isEmpty()) throw invalid("пустой обязательный параметр", "empty required parameter");
+            String previous = section.get(key);
+            if (previous != null) {
+                boolean list = section == iface ? key.equals("address") || key.equals("dns")
+                        : key.equals("allowedips");
+                if (list) {
+                    value = previous + ", " + value;
+                    if (value.length() > 2048) throw invalid("длина параметра", "parameter length");
+                } else if (!previous.equals(value)) {
+                    throw invalid("конфликт повторных параметров", "conflicting duplicate parameters");
+                }
             }
+            section.put(key, value);
         }
         if (peers.isEmpty()) throw invalid("нет Peer", "no Peer");
         JSONObject awg = new JSONObject();
@@ -290,6 +309,7 @@ final class AwgConfigParser {
         return lower;
     }
     private static IllegalArgumentException invalid(String ru, String en) {
-        return new IllegalArgumentException(I18n.t("Конфиг AmneziaWG: "+ru, "AmneziaWG configuration: "+en));
+        return new IllegalArgumentException(I18n.t("Конфиг AmneziaWG: ", "AmneziaWG configuration: ")
+                + I18n.t(ru, en));
     }
 }

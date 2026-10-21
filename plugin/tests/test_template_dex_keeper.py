@@ -16,7 +16,7 @@ def load_dex_runtime(namespace):
             isinstance(target, ast.Name) and target.id in names for target in node.targets
         ):
             selected.append(node)
-        elif isinstance(node, ast.FunctionDef) and node.name in {"_t", "_is_russian"}:
+        elif isinstance(node, ast.FunctionDef) and node.name in {"_t", "_is_russian", "_language_code"}:
             selected.append(node)
         elif isinstance(node, ast.ClassDef) and node.name == "DexRuntime":
             selected.append(node)
