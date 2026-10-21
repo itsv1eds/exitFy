@@ -71,6 +71,27 @@ public class ConnectionFeaturesTest {
         }
     }
 
+    @Test public void awgAcceptsEmptyOptionalFieldsAndRepeatedAddressLists() throws Exception {
+        String exported = awg().replace("Address = 10.23.0.2/32, fd00::2/128",
+                "Address = 10.23.0.2/32\nAddress = fd00::2/128")
+                .replace("DNS = 1.1.1.1", "DNS =\nDNS = 1.1.1.1\nDNS = 8.8.8.8")
+                .replace("Jc = 3", "Jc = 3\nJc = 3\nI1 =\nI2 =")
+                .replace("PresharedKey = " + key(3), "PresharedKey =")
+                .replace("AllowedIPs = 0.0.0.0/0, ::/0", "AllowedIPs = 0.0.0.0/0\nAllowedIPs = ::/0");
+        ProtocolParser.Node node = AwgConfigParser.parse(exported);
+        assertEquals(2, node.outbound.getJSONArray("local_address").length());
+        assertEquals(2, node.outbound.getJSONArray("dns").length());
+        JSONObject peer = node.outbound.getJSONArray("peers").getJSONObject(0);
+        assertEquals(2, peer.getJSONArray("allowed_ips").length());
+        assertFalse(peer.has("preshared_key"));
+        assertFalse(node.outbound.getJSONObject("awg").has("i1"));
+        for (String invalid : new String[]{exported.replace("Jc = 3\nJc = 3", "Jc = 3\nJc = 4"),
+                exported.replace("PrivateKey = " + key(1), "PrivateKey ="),
+                exported.replace("I1 =", "PostUp =")}) {
+            assertTrue(SubscriptionParser.parseDetailed(invalid).nodes.isEmpty());
+        }
+    }
+
     @Test public void awgSubscriptionLinksAndContainersKeepValidEntriesAndNames() throws Exception {
         String conf = Base64.getUrlEncoder().withoutPadding().encodeToString(awg().getBytes(java.nio.charset.StandardCharsets.UTF_8));
         ProtocolParser.Node link = ProtocolParser.parse("amneziawg://" + conf + "#My%20AWG%2B");

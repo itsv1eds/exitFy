@@ -1077,7 +1077,7 @@ final class SubscriptionManager implements Closeable {
     private Map<String, String> requestHeaders(SettingsModel settings, String userAgent) {
         Map<String, String> headers = new HashMap<>();
         headers.put("User-Agent", userAgent);
-        headers.put("X-Device-Locale", I18n.isRussian() ? "ru" : "en");
+        headers.put("X-Device-Locale", I18n.languageCode());
         headers.put("X-Device-model", safeHeaderValue(deviceModel(), "Android"));
         headers.put("X-Device-OS", "Android");
         headers.put("X-Ver-OS", safeHeaderValue(Build.VERSION.RELEASE, "Android"));

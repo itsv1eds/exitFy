@@ -403,7 +403,7 @@ final class SubscriptionParser {
                     if (object != null && isAwgContainer(object)) {
                         collectAwgContainer(object, nodes, rejections, budget);
                     } else if (object != null && (object.has("outbounds") || object.has("endpoints"))) {
-                        if (proxyOutboundCount(object.optJSONArray("outbounds")) > 1) {
+                        if (isMemberPool(object.optJSONArray("outbounds"))) {
                             pools.add(object);
                         } else {
                             collectProfileOutbounds(object, nodes, rejections, budget);
@@ -478,8 +478,8 @@ final class SubscriptionParser {
         // explicit proxy outbounds become servers; none of that surrounding
         // configuration is installed into the local core.
         collectExplicitOutbounds((JSONArray) rawOutbounds,
-                proxyOutboundCount((JSONArray) rawOutbounds) == 1
-                        ? xrayDisplayName(profile) : "", nodes, rejections, budget);
+                isMemberPool((JSONArray) rawOutbounds) ? "" : xrayDisplayName(profile),
+                nodes, rejections, budget);
         if (profile.has("endpoints")) {
             Object rawEndpoints = profile.opt("endpoints");
             if (!(rawEndpoints instanceof JSONArray)) rejections.reject("invalid_json");
@@ -507,7 +507,7 @@ final class SubscriptionParser {
                 if (isAwgContainer(profile)) {
                     collectAwgContainer(profile, nodes, rejections, budget);
                 } else if (profile.has("outbounds") || profile.has("endpoints")) {
-                    if (proxyOutboundCount(profile.optJSONArray("outbounds")) > 1) pools.add(profile);
+                    if (isMemberPool(profile.optJSONArray("outbounds"))) pools.add(profile);
                     else collectProfileOutbounds(profile, nodes, rejections, budget);
                 } else if (isProxyOutbound(profile)) collectExplicitOutbound(profile, nodes, rejections, budget);
                 else {
@@ -531,11 +531,36 @@ final class SubscriptionParser {
         return count;
     }
 
+    private static boolean genericOutboundName(String name) {
+        return name.matches("(?i)(proxy|outbound)([-_]?\\d+)?");
+    }
+
+    /** Numbered pool members have no individual labels; prefer named profiles over them. */
+    private static boolean isMemberPool(JSONArray values) {
+        int count = 0;
+        for (int i = 0; values != null && i < values.length(); i++) {
+            if ((i & 1023) == 0 && Thread.currentThread().isInterrupted()) throw new ImportInterruptedException();
+            JSONObject outbound = values.optJSONObject(i);
+            if (!isProxyOutbound(outbound)) continue;
+            if (genericOutboundName(outbound.optString("tag", ""))) count++;
+        }
+        return count > 1;
+    }
+
     private static void collectExplicitOutbounds(JSONArray values, String profileName,
                                                  List<ProtocolParser.Node> nodes,
                                                  RejectionTracker rejections,
                                                  CandidateBudget budget) {
         int proxyIndex = 0;
+        int proxyCount = proxyOutboundCount(values);
+        int primary = -1;
+        for (int i = 0; i < values.length(); i++) {
+            if ((i & 1023) == 0 && Thread.currentThread().isInterrupted()) throw new ImportInterruptedException();
+            JSONObject outbound = values.optJSONObject(i);
+            if (!isProxyOutbound(outbound)) continue;
+            if (primary < 0) primary = i;
+            if ("proxy".equals(outbound.optString("tag", ""))) { primary = i; break; }
+        }
         for (int i = 0; i < values.length(); i++) {
             if ((i & 1023) == 0 && Thread.currentThread().isInterrupted()) {
                 throw new ImportInterruptedException();
@@ -543,10 +568,12 @@ final class SubscriptionParser {
             JSONObject object = values.optJSONObject(i);
             if (object == null || !isProxyOutbound(object)) continue;
             proxyIndex++;
-            String name = profileName.isEmpty() ? xrayDisplayName(object) : profileName;
-            if (name.isEmpty() || (profileName.isEmpty()
-                    && name.equals(object.optString("tag", ""))
-                    && name.matches("(?i)(proxy|outbound)([-_]?\\d+)?"))) {
+            String name = xrayDisplayName(object);
+            boolean generic = name.isEmpty() || (name.equals(object.optString("tag", ""))
+                    && genericOutboundName(name));
+            if (!profileName.isEmpty() && (i == primary || proxyCount == 1)) {
+                name = profileName;
+            } else if (generic) {
                 name = I18n.format("Сервер %s", "Server %s", proxyIndex);
             }
             collectExplicitOutbound(object, name, nodes, rejections, budget);

@@ -14,6 +14,7 @@ final class SettingsModel {
     static final String DEFAULT_SUBSCRIPTION_USER_AGENT = "Happ/5.2.0";
 
     final boolean enabled;
+    final boolean pauseOnVpn;
     final int providerId;
     final String customHwid;
     final int schemaVersion;
@@ -71,7 +72,18 @@ final class SettingsModel {
                   boolean failover, boolean refreshOnOpen, int autoCheckMinutes,
                   boolean callsViaProxy, String subscriptionUserAgent,
                   String balanceMode, boolean sortByPing, int tutorialStep) {
+        this(enabled, providerId, customHwid, schemaVersion, pingType, dualCore, failover,
+                refreshOnOpen, autoCheckMinutes, callsViaProxy, subscriptionUserAgent,
+                balanceMode, sortByPing, tutorialStep, false);
+    }
+
+    SettingsModel(boolean enabled, int providerId, String customHwid,
+                  int schemaVersion, String pingType, boolean dualCore,
+                  boolean failover, boolean refreshOnOpen, int autoCheckMinutes,
+                  boolean callsViaProxy, String subscriptionUserAgent,
+                  String balanceMode, boolean sortByPing, int tutorialStep, boolean pauseOnVpn) {
         this.enabled = enabled;
+        this.pauseOnVpn = pauseOnVpn;
         this.providerId = Math.max(0, Math.min(providerId, CUSTOM_PROVIDER_ID));
         this.customHwid = normalizeHeaderValue(customHwid);
         this.schemaVersion = schemaVersion;
@@ -108,7 +120,8 @@ final class SettingsModel {
                     object.optString("subscription_user_agent", ""),
                     object.optString("balance_mode", "off"),
                     object.optBoolean("sort_by_ping", false),
-                    object.optInt("tutorial_step", 0)
+                    object.optInt("tutorial_step", 0),
+                    object.optBoolean("pause_on_vpn", false)
             );
         } catch (Exception ignored) {
             return defaults();
@@ -119,6 +132,7 @@ final class SettingsModel {
         JSONObject object = new JSONObject();
         try {
             object.put("enabled", enabled);
+            object.put("pause_on_vpn", pauseOnVpn);
             object.put("provider_id", providerId);
             object.put("custom_hwid", customHwid);
             object.put("schema_version", schemaVersion);
@@ -140,6 +154,11 @@ final class SettingsModel {
     SettingsModel withSetting(String key, Object value) {
         if (key == null) throw new IllegalArgumentException("missing setting key");
         switch (key) {
+            case "pause_on_vpn":
+                if (!(value instanceof Boolean)) throw new IllegalArgumentException("pause_on_vpn must be boolean");
+                return new SettingsModel(enabled, providerId, customHwid, schemaVersion,
+                        pingType, dualCore, failover, refreshOnOpen, autoCheckMinutes,
+                        callsViaProxy, subscriptionUserAgent, balanceMode, sortByPing, tutorialStep, (Boolean) value);
             case "enabled":
                 if (!(value instanceof Boolean)) {
                     throw new IllegalArgumentException("enabled must be boolean");
@@ -253,6 +272,7 @@ final class SettingsModel {
 
     Object settingValue(String key) {
         switch (key) {
+            case "pause_on_vpn": return pauseOnVpn;
             case "enabled":
                 return enabled;
             case "provider_id":
@@ -287,13 +307,13 @@ final class SettingsModel {
                                boolean callsViaProxy, String subscriptionUserAgent) {
         return new SettingsModel(enabled, providerId, customHwid, schemaVersion,
                 pingType, dualCore, failover, refreshOnOpen, autoCheckMinutes,
-                callsViaProxy, subscriptionUserAgent, balanceMode, sortByPing, tutorialStep);
+                callsViaProxy, subscriptionUserAgent, balanceMode, sortByPing, tutorialStep, pauseOnVpn);
     }
 
     private SettingsModel copyPreferences(String mode, boolean sort, int step) {
         return new SettingsModel(enabled, providerId, customHwid, schemaVersion,
                 pingType, dualCore, failover, refreshOnOpen, autoCheckMinutes,
-                callsViaProxy, subscriptionUserAgent, mode, sort, step);
+                callsViaProxy, subscriptionUserAgent, mode, sort, step, pauseOnVpn);
     }
 
     static boolean validBalanceMode(String value) {
@@ -397,14 +417,14 @@ final class SettingsModel {
                 && callsViaProxy == value.callsViaProxy
                 && Objects.equals(subscriptionUserAgent, value.subscriptionUserAgent)
                 && balanceMode.equals(value.balanceMode) && sortByPing == value.sortByPing
-                && tutorialStep == value.tutorialStep;
+                && tutorialStep == value.tutorialStep && pauseOnVpn == value.pauseOnVpn;
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(enabled, providerId, customHwid, schemaVersion,
                 pingType, dualCore, failover, refreshOnOpen, autoCheckMinutes,
-                callsViaProxy, subscriptionUserAgent, balanceMode, sortByPing, tutorialStep);
+                callsViaProxy, subscriptionUserAgent, balanceMode, sortByPing, tutorialStep, pauseOnVpn);
     }
 
     static final int[] AUTO_CHECK_CHOICES = {0, 15, 60, 360};

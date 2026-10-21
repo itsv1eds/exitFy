@@ -28,6 +28,9 @@ final class ExitFyDashboardState {
     final String balanceMode;
     final boolean sortByPing;
     final int tutorialStep;
+    final boolean pauseOnVpn;
+    final boolean vpnPaused;
+    final String vpnPauseReason;
     final boolean dualCore;
     final boolean failover;
     final boolean refreshOnOpen;
@@ -72,6 +75,9 @@ final class ExitFyDashboardState {
         balanceMode = value.optString("balanceMode", "off");
         sortByPing = value.optBoolean("sortByPing", false);
         tutorialStep = Math.max(0, Math.min(16, value.optInt("tutorialStep", 0)));
+        pauseOnVpn = value.optBoolean("pauseOnVpn", false);
+        vpnPaused = value.optBoolean("vpnPaused", false);
+        vpnPauseReason = value.optString("vpnPauseReason", "vpn");
         dualCore = value.optBoolean("dualCore", true);
         failover = value.optBoolean("failover", false);
         refreshOnOpen = value.optBoolean("refreshOnOpen", false);
@@ -132,6 +138,10 @@ final class ExitFyDashboardState {
      * install shows no server without saying where servers come from.
      */
     String nextStepHint() {
+        if (vpnPaused && enabled) return "vpn".equals(vpnPauseReason)
+                ? I18n.t("exitFy подключится снова после выключения VPN", "exitFy will reconnect when the VPN is turned off")
+                : I18n.t("Подключение восстановится, когда настройки сети клиента разрешат прокси",
+                        "The connection resumes when the client's network settings allow proxies");
         if (coreInstall.active() || "ERROR".equals(runtimeState)) return "";
         if (coreInstall.required) {
             return I18n.t(
@@ -148,6 +158,9 @@ final class ExitFyDashboardState {
     }
 
     String connectionTitle() {
+        if (vpnPaused && enabled) return "vpn".equals(vpnPauseReason)
+                ? I18n.t("Приостановлено: включён VPN", "Paused while VPN is active")
+                : I18n.t("Приостановлено настройками клиента", "Paused by the client's network settings");
         switch (runtimeState) {
             case "RUNNING":
                 return I18n.t("Подключено", "Connected");
@@ -189,7 +202,7 @@ final class ExitFyDashboardState {
                     : mod10 == 1 ? "сервер"
                     : mod10 >= 2 && mod10 <= 4 ? "сервера" : "серверов";
         } else {
-            noun = serverCount == 1 ? "server" : "servers";
+            noun = serverCount == 1 ? I18n.t("сервер", "server") : I18n.t("серверов", "servers");
         }
         return serverCount + " " + noun;
     }
@@ -262,6 +275,7 @@ final class ExitFyDashboardState {
 
     PrimaryAction primaryAction() {
         if (coreInstall.active()) return PrimaryAction.INSTALLING;
+        if (enabled && vpnPaused) return PrimaryAction.DISCONNECT;
         if (coreInstall.required) return PrimaryAction.INSTALL_CORES;
         return enabled ? PrimaryAction.DISCONNECT : PrimaryAction.CONNECT;
     }

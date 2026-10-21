@@ -1211,7 +1211,7 @@ tasks.register("validateEmbeddedDexConfig") {
                 throw new GradleException("Native sub-screen contract is missing: ${token}")
             }
         }
-        ["ping_type", "custom_hwid", "subscription_user_agent", "balance_mode", "ExitFyTutorial.start(this, true)", "sectionHeading(", "setSetting(",
+        ["ping_type", "custom_hwid", "subscription_user_agent", "balance_mode", "pause_on_vpn", "ExitFyTutorial.start(this, true)", "sectionHeading(", "setSetting(",
          "Тип пинга", "Ping type", "\"Proxy GET\"", "\"TCP\"",
          "\"HWID\"", "\"User-Agent\"", "next.defaultHwid",
          "\"Сохранить\"", "\"Сбросить\""].each { token ->
