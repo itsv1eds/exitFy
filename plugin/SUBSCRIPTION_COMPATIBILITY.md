@@ -1,4 +1,4 @@
-# Subscription compatibility in exitFy 4.5
+# Subscription compatibility in exitFy 4.5.1
 
 The comparison uses the public [Happ repositories](https://github.com/orgs/Happ-proxy/repositories),
 [INCY subscription specification](https://github.com/INCY-DEV/incy-docs/blob/main/ru/dev-docs/subscription-format.en.md),

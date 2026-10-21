@@ -1,4 +1,4 @@
-# exitFy 4.5 device checklist
+# exitFy 4.5.1 device checklist
 
 Device testing is performed by the beta tester after receiving
 `exitfy.plugin`. Use real `arm64-v8a` hardware only:
@@ -6,7 +6,7 @@ Device testing is performed by the beta tester after receiving
 - One Android 10/API 29 arm64 device and one current Android arm64 device.
 - exteraGram 12.10.6 (minimum supported client) and the current release.
 - Confirm the host rejects plugin installation on client versions below 12.10.6.
-- Confirm the plugin is `exitFy_v2`, version `4.5`, schema 6, and an
+- Confirm the plugin is `exitFy_v2`, version `4.5.1`, schema 6, and an
   upgrade preserves settings, subscriptions and nodes. Legacy string, numeric
   and malformed `core_policy` values must become the inert `auto` tombstone;
   no core policy may reach DEX or appear in UI.
@@ -150,9 +150,9 @@ Device testing is performed by the beta tester after receiving
   HWID are imported once, that a second load issues no import commands, and
   that unloading mid-import leaves the import pending instead of losing the
   remaining sources.
-- Disable/enable and reload the exact same 4.5 build without killing the
+- Disable/enable and reload the exact same 4.5.1 build without killing the
   process; confirm its DEX keeper is reused. Installing a different embedded
-  DEX/JNI build, including another 4.5 build, must show a localized restart
+  DEX/JNI build, including another 4.5.1 build, must show a localized restart
   notice and fail closed until the process restarts.
 
 ## Protocols and checks
@@ -245,7 +245,7 @@ Device testing is performed by the beta tester after receiving
   the mapped families working and take effect only in the next process.
 
 An artifact may be handed off once the mandatory local pipeline passes. The 100
-connect/disconnect cycles and 72-hour soak are gates for stable `4.5`, which
+connect/disconnect cycles and 72-hour soak are gates for stable `4.5.1`, which
 also requires no crash/ANR, stuck proxy, leaked workers or secrets in
 user-visible errors. Dual-core mode is enabled by default and included in those
 gates; mixed balancers must also be checked with both families running.
@@ -307,7 +307,7 @@ gates; mixed balancers must also be checked with both families running.
 - Keep foreign proxies on 10808, 12334 and another stored loopback port. Verify
   their entries remain intact, exitFy chooses another port and reuses its own
   free preferred port after reconnect/restart.
-- Replace one 4.5 artifact with another 4.5 build while the process remains
+- Replace one 4.5.1 artifact with another 4.5.1 build while the process remains
   running. It must ask in Russian/English to fully restart, then load the new
   build and retain all settings.
 
