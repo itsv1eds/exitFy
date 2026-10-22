@@ -2,7 +2,7 @@ module github.com/itsv1eds/exitfy/cores
 
 go 1.27.2
 
-require github.com/xtls/libxray v1.261017.0
+require github.com/xtls/libxray v1.261021.0
 
 require (
 	github.com/andybalholm/brotli v1.2.6 // indirect
@@ -39,11 +39,11 @@ require (
 	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/xtls/reality v0.0.0-20261014101318-83f621788ca8 // indirect
-	github.com/xtls/xray-core v1.260327.1-0.20261017152356-92ccc939aaf4 // indirect
+	github.com/xtls/xray-core v1.260327.1-0.20261021115930-1b1647cd9ddf // indirect
 	github.com/yuin/gopher-lua v1.1.2 // indirect
 	go4.org/netipx v0.0.0-20260823151212-3075585bcbeb // indirect
 	golang.org/x/crypto v0.58.0 // indirect
-	golang.org/x/crypto/x509roots/fallback v0.0.0-20261016151342-0ae6809b7559 // indirect
+	golang.org/x/crypto/x509roots/fallback v0.0.0-20261020153306-9f2b28d4331a // indirect
 	golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e // indirect
 	golang.org/x/mobile v0.0.0-20261011034528-197770444867 // indirect
 	golang.org/x/mod v0.42.0 // indirect
