@@ -251,7 +251,7 @@ class ReleaseWorkflowHardeningTest(unittest.TestCase):
                 build = workflow.split("  build:\n", 1)[1].split(
                     "  publish:\n", 1
                 )[0]
-                epoch = "1000000" if family == "sing_box" else "1000"
+                epoch = "1010000" if family == "sing_box" else "1000"
                 self.assertIn(f'WRAPPER_REVISION_EPOCH: "{epoch}"', build)
                 self.assertIn(
                     "run_offset=$((WRAPPER_REVISION_EPOCH + GITHUB_RUN_NUMBER))",

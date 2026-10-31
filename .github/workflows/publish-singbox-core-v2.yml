@@ -60,7 +60,7 @@ jobs:
       # run-number counter is ever reset.
       # This signed revision range declares AWG support without adding fields
       # to schema 3, which older plugin versions validate exactly.
-      WRAPPER_REVISION_EPOCH: "1000000"
+      WRAPPER_REVISION_EPOCH: "1010000"
     defaults:
       run:
         working-directory: cores

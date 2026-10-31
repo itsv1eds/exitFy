@@ -169,3 +169,18 @@ func TestConfigurationBoundsHandshakeAllocations(t *testing.T) {
 		t.Fatal("valid obfuscation chain rejected")
 	}
 }
+
+func TestConfigurationPreservesLongSignaturePackets(t *testing.T) {
+	private, public := keys(t)
+	packet := "<b 0x" + strings.Repeat("ab", 1600) + ">"
+	value := Options{PrivateKey: private, MTU: 1280, LocalAddress: []string{"10.0.0.2/32"}, AWG: map[string]string{"i1": packet},
+		Peers: []Peer{{PublicKey: public, Endpoint: "127.0.0.1:2345", AllowedIPs: []string{"0.0.0.0/0"}}}}
+	_, _, config, err := configuration(value)
+	if err != nil || !strings.Contains(config, "i1="+packet+"\n") {
+		t.Fatal("long I-packet was rejected or changed")
+	}
+	value.AWG["i1"] = "<b 0x" + strings.Repeat("ab", 32768) + ">"
+	if _, _, _, err = configuration(value); err == nil {
+		t.Fatal("oversized I-packet accepted")
+	}
+}

@@ -76,8 +76,10 @@ public key and requires every accepted manifest to have a valid detached
 signature. A missing secret is a publishing error, not a reason to release
 unsigned components. Private keys must remain outside Git.
 
-SB wrapper revisions from `w1000000` declare AmneziaWG support. The signed
-manifest keeps the exact schema 3 fields accepted by older plugins; no extra
+SB wrapper revisions from `w1000000` declare AmneziaWG support. Revisions from
+`w1010000` also accept bounded signature I-packets longer than 2048 characters;
+the maximum encoded parameter is 64 KiB, while packet/allocation limits remain.
+The signed manifest keeps the exact schema 3 fields accepted by older plugins; no extra
 capability field is added. The plugin records support only after verifying the
 signed release revision and its exact binary digest.
 An older mapped SB library is not given an AWG configuration; the plugin requests

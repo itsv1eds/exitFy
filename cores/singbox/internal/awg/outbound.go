@@ -190,7 +190,11 @@ func configuration(o Options) ([]netip.Addr, []netip.Addr, string, error) {
 	sort.Strings(keys)
 	for _, key := range keys {
 		value := o.AWG[key]
-		if len(value) > 2048 || strings.ContainsAny(value, "\r\n\x00") || !parameterAllowed(key) {
+		limit := 2048
+		if len(key) == 2 && key[0] == 'i' && key[1] >= '1' && key[1] <= '5' {
+			limit = 64 * 1024
+		}
+		if len(value) > limit || strings.ContainsAny(value, "\r\n\x00") || !parameterAllowed(key) {
 			return invalid("obfuscation parameter")
 		}
 		if key == "header_protection_key" {
