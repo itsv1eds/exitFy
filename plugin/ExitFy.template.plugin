@@ -859,7 +859,7 @@ class ExitFyPlugin(BasePlugin):
             # display order of the two choices does not change it.
             return ("proxy_get", "tcp")[self._bounded_index(value, 1)]
         value = str(value or "tcp").strip().lower()
-        return value if value in ("proxy_get", "tcp") else "tcp"
+        return value if value in ("proxy_get", "tcp", "icmp") else "tcp"
 
     def _normalize_runtime_setting_storage(self):
         try:

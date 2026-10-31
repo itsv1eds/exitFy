@@ -417,7 +417,8 @@ final class ProxySession implements Closeable {
                 SharedPreferences preferences = MessagesController.getGlobalMainSettings();
                 if (snapshot.ownedFingerprint.isEmpty() || current == null
                         || !matchesFingerprint(snapshot.ownedFingerprint, current)
-                        || !preferences.getBoolean("proxy_enabled", false)
+                        || (!preferences.getBoolean("proxy_enabled", false) && !vpnPaused
+                        && !saved.optBoolean("vpnPaused", false))
                         || !ownsCallsPreference(preferences.getBoolean(
                                 "proxy_enabled_calls", false))) {
                     return Ownership.EXTERNALLY_CHANGED;

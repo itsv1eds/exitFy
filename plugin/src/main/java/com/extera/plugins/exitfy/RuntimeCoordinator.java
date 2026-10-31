@@ -667,7 +667,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 String expectedPingType = request.optString(
                         "expected_ping_type", settings.pingType);
                 if (!(SettingsModel.PING_PROXY_GET.equals(expectedPingType)
-                        || SettingsModel.PING_TCP.equals(expectedPingType))) {
+                        || SettingsModel.PING_TCP.equals(expectedPingType)
+                        || SettingsModel.PING_ICMP.equals(expectedPingType))) {
                     throw new IllegalArgumentException(I18n.t(
                             "Некорректный способ проверки",
                             "Invalid latency-check method"));
@@ -683,6 +684,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 return response(true, SettingsModel.PING_PROXY_GET.equals(settings.pingType)
                         ? I18n.t("Подключение временно приостановлено для полной проверки",
                         "The connection is temporarily paused for the full-path check")
+                        : SettingsModel.PING_ICMP.equals(settings.pingType)
+                        ? I18n.t("ICMP-проверка запущена", "ICMP check started")
                         : I18n.t("TCP-проверка запущена", "TCP check started"), "").toString();
             }
             if ("cancel_ping".equals(command)) {
@@ -1000,9 +1003,11 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
 
     private boolean reconcileVpnPolicy() {
         if (!loaded || !settings.enabled) return false;
-        boolean vpn = VpnConnectionPolicy.vpnActive(connectivity);
-        boolean pause = VpnConnectionPolicy.shouldPause(settings.enabled, settings.pauseOnVpn,
-                vpn, VpnConnectionPolicy.hostAutoDisabled());
+        VpnConnectionPolicy.NetworkState network = VpnConnectionPolicy.networkState(connectivity);
+        boolean vpn = network.known ? network.vpn : externalVpnActive;
+        boolean pause = VpnConnectionPolicy.shouldPauseNetwork(settings.enabled, settings.pauseOnVpn,
+                network, VpnConnectionPolicy.hostAutoDisabled(),
+                VpnConnectionPolicy.hostDisableMask(), vpnPaused);
         boolean changed = vpnPaused != pause || externalVpnActive != vpn;
         externalVpnActive = vpn;
         if (pause) {
@@ -1010,12 +1015,16 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             cancelReconnect();
             if (changed && pingKind == PingKind.PROXY_GET) cancelPing(true);
             if (stateMachine.get() == RuntimeState.RUNNING && !proxySession.setVpnPaused(true)) {
-                disableFromJava(RuntimePolicy.TELEGRAM_PROXY_CHANGED);
+                if (proxySession.ownership() == ProxySession.Ownership.EXTERNALLY_CHANGED) {
+                    disableFromJava(RuntimePolicy.TELEGRAM_PROXY_CHANGED);
+                } else scheduleOwnershipRetry("network_available");
                 return true;
             }
         } else if (vpnPaused) {
             if (!proxySession.setVpnPaused(false)) {
-                disableFromJava(RuntimePolicy.TELEGRAM_PROXY_CHANGED);
+                if (proxySession.ownership() == ProxySession.Ownership.EXTERNALLY_CHANGED) {
+                    disableFromJava(RuntimePolicy.TELEGRAM_PROXY_CHANGED);
+                } else scheduleOwnershipRetry("network_available");
                 return true;
             }
             vpnPaused = false;
@@ -1069,6 +1078,9 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 scheduleOwnershipRetry(reason);
                 return;
             }
+            if (ownership == ProxySession.Ownership.OWNED
+                    && RuntimePolicy.retainHealthyCoreOnNetworkChange(reason)
+                    && servicesHealthy()) return;
         }
         cancelSubscriptionRefresh();
         RuntimeOperationToken operation = revisionGate.token(
@@ -1567,10 +1579,12 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     }
 
     private void startManualPing(List<ProtocolParser.Node> nodes, String requestedType) {
+        VpnConnectionPolicy.NetworkState network = VpnConnectionPolicy.networkState(connectivity);
         if (SettingsModel.PING_PROXY_GET.equals(requestedType)
-                && (vpnPaused || VpnConnectionPolicy.shouldPause(settings.enabled, settings.pauseOnVpn,
-                VpnConnectionPolicy.vpnActive(connectivity), VpnConnectionPolicy.hostAutoDisabled()))) {
-            throw new IllegalStateException(VpnConnectionPolicy.vpnActive(connectivity)
+                && (vpnPaused || VpnConnectionPolicy.shouldPauseNetwork(
+                settings.enabled, settings.pauseOnVpn, network,
+                VpnConnectionPolicy.hostAutoDisabled(), VpnConnectionPolicy.hostDisableMask(), vpnPaused))) {
+            throw new IllegalStateException(network.vpn
                     ? I18n.t("Для полной проверки выключите VPN или выберите TCP",
                             "Turn off the VPN for a full-path check, or choose TCP")
                     : I18n.t("Прокси отключён настройками клиента; выберите TCP",
@@ -1587,10 +1601,10 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             replaced = detachPingLocked();
             long token = pingGeneration.incrementAndGet();
             RuntimeOperationToken runtimeOperation = revisionGate.currentToken();
-            String nextType = SettingsModel.PING_TCP.equals(requestedType)
-                    ? SettingsModel.PING_TCP : SettingsModel.PING_PROXY_GET;
-            PingKind kind = SettingsModel.PING_TCP.equals(nextType)
-                    ? PingKind.TCP : PingKind.PROXY_GET;
+            String nextType = SettingsModel.PING_ICMP.equals(requestedType) ? SettingsModel.PING_ICMP
+                    : SettingsModel.PING_TCP.equals(requestedType) ? SettingsModel.PING_TCP : SettingsModel.PING_PROXY_GET;
+            PingKind kind = SettingsModel.PING_ICMP.equals(nextType) ? PingKind.ICMP
+                    : SettingsModel.PING_TCP.equals(nextType) ? PingKind.TCP : PingKind.PROXY_GET;
             boolean proxyRestoreContext = proxyRestoreContextLocked(replaced.kind);
             cancelReplacedFutureLocked(replaced);
             cancelProbeStatusesLocked(replaced);
@@ -1612,6 +1626,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
             try {
                 pingFuture = pingExecutor.submit(() -> {
                     if (kind == PingKind.TCP) runTcpPing(token, taskNodes);
+                    else if (kind == PingKind.ICMP) runDirectPing(token, taskNodes, true);
                     else runProxyPing(token, taskNodes, runtimeOperation, taskSession);
                 });
             } catch (RuntimeException rejected) {
@@ -1705,7 +1720,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
 
     private void cancelProbeStatusesLocked(PingTaskSnapshot replaced) {
         if (replaced == null) return;
-        if (replaced.kind == PingKind.TCP || replaced.kind == PingKind.PROXY_GET) {
+        if (replaced.kind == PingKind.TCP || replaced.kind == PingKind.ICMP
+                || replaced.kind == PingKind.PROXY_GET) {
             subscriptions.cancelPendingProbes(replaced.nodes);
         }
     }
@@ -1746,11 +1762,15 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     }
 
     private void runTcpPing(long token, List<ProtocolParser.Node> nodes) {
+        runDirectPing(token, nodes, false);
+    }
+
+    private void runDirectPing(long token, List<ProtocolParser.Node> nodes, boolean icmp) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(90);
         String unfinishedStatus = "check_timeout";
         try {
             LatencyCheckRunner.run(nodes, pingWorkers, 4, deadline,
-                    () -> isPingCurrent(token), this::tcpProbe,
+                    () -> isPingCurrent(token), node -> icmp ? icmpProbe(token, node) : tcpProbe(node),
                     node -> new ProbeOutcome(node, false, -1L, "worker_unavailable"),
                     node -> new ProbeOutcome(node, false, -1L, "worker_failed"),
                     outcome -> publishProbeResult(token, outcome));
@@ -1766,6 +1786,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     }
 
     private ProbeOutcome tcpProbe(ProtocolParser.Node node) {
+        if (isQuicOnly(node)) return new ProbeOutcome(node, false, -1L, "tcp_failed_quic");
         String host = node.outbound.optString("server", "");
         int port = node.outbound.optInt("server_port", 0);
         long started = System.nanoTime();
@@ -1803,6 +1824,33 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
         }
     }
 
+    private ProbeOutcome icmpProbe(long token, ProtocolParser.Node node) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(4);
+        Future<InetAddress[]> lookup = null;
+        try {
+            String host = node.outbound.optString("server", "");
+            lookup = dnsExecutor.submit(() -> InetAddress.getAllByName(host));
+            InetAddress[] addresses = lookup.get(Math.max(1L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+            String status = "icmp_timeout";
+            int count = Math.min(8, addresses.length);
+            for (int i = 0; i < count && isPingCurrent(token)
+                    && System.nanoTime() < deadline; i++) {
+                long now = System.nanoTime();
+                long addressDeadline = Math.min(deadline, now + Math.max(
+                        TimeUnit.MILLISECONDS.toNanos(250), (deadline - now) / (count - i)));
+                IcmpProbe.Result result = IcmpProbe.probe(addresses[i], addressDeadline, () -> isPingCurrent(token));
+                if (result.ok) return new ProbeOutcome(node, true, result.millis, result.status);
+                status = result.status;
+                if ("cancelled".equals(status)) break;
+            }
+            return new ProbeOutcome(node, false, -1L, status);
+        } catch (Exception error) {
+            return new ProbeOutcome(node, false, -1L, "icmp_dns_failed");
+        } finally {
+            RuntimeExecutors.cancelAndRemove(dnsExecutor, lookup);
+        }
+    }
+
     private void runProxyPing(long token, List<ProtocolParser.Node> nodes,
                               RuntimeOperationToken runtimeOperation,
                               SocksHttpProbe.Session socksSession) {
@@ -1835,8 +1883,8 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 }
                 if (!revisionGate.isCurrent(runtimeOperation, loaded, settings.enabled)) return;
                 // A page probe must not turn into an unbounded core download.
-                // The one process-wide Go family must already be mapped by a
-                // connection attempt.
+                // Installed families may be mapped when dual-core is enabled;
+                // the check never downloads components on its own.
                 CoreFamily preferred = nativeCore.runningFamily();
                 if (preferred == null) preferred = nativeCore.loadedFamily();
                 if (preferred == null && NativeCoreRuntime.isFamilyLoaded(CoreFamily.XRAY)) {
@@ -1861,10 +1909,16 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
                 for (ProtocolParser.Node node : nodes) {
                     CoreFamily family = node.supports(preferred) ? preferred
                             : (preferred == CoreFamily.XRAY ? CoreFamily.SING_BOX : CoreFamily.XRAY);
-                    if (!node.supports(family) || !NativeCoreRuntime.isFamilyLoaded(family)
-                            || "amneziawg".equals(node.outbound.optString("type"))
-                            && !NativeCoreRuntime.mappedAwgSupported()) {
-                        publishProbeResult(token, new ProbeOutcome(node, false, -1L, "restart_required"));
+                    boolean awg = "amneziawg".equals(node.outbound.optString("type"));
+                    nativeCore.requireAwgSupport(awg);
+                    String unavailable = RuntimePolicy.proxyProbeReadiness(
+                            NativeCoreRuntime.isFamilyLoaded(family),
+                            NativeCoreRuntime.canMapAnotherFamily(),
+                            nativeCore.hasUsableCore(family), awg,
+                            NativeCoreRuntime.mappedAwgSupported());
+                    if (!node.supports(family) || !unavailable.isEmpty()) {
+                        publishProbeResult(token, new ProbeOutcome(node, false, -1L,
+                                node.supports(family) ? unavailable : "start_failed"));
                     } else {
                         groups.computeIfAbsent(family, ignored -> new ArrayList<>()).add(node);
                     }
@@ -2183,6 +2237,7 @@ final class RuntimeCoordinator implements NotificationCenter.NotificationCenterD
     enum PingKind {
         NONE,
         TCP,
+        ICMP,
         PROXY_GET,
         HEALTH;
 

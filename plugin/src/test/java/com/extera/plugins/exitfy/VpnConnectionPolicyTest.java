@@ -5,6 +5,26 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class VpnConnectionPolicyTest {
+    @Test public void pausesBeforeTheClientsWifiNotificationArrives() {
+        VpnConnectionPolicy.NetworkState wifi = new VpnConnectionPolicy.NetworkState(true, false, true, false);
+        VpnConnectionPolicy.NetworkState mobile = new VpnConnectionPolicy.NetworkState(true, false, false, true);
+        assertTrue(VpnConnectionPolicy.shouldPauseNetwork(true, false, wifi, false, 4, false));
+        assertFalse(VpnConnectionPolicy.shouldPauseNetwork(true, false, mobile, false, 4, true));
+        assertTrue(VpnConnectionPolicy.shouldPauseNetwork(true, false, mobile, false, 2, false));
+        assertFalse(VpnConnectionPolicy.shouldPauseNetwork(false, true, wifi, true, 7, true));
+    }
+
+    @Test public void networkHandoverDoesNotPrematurelyResumeThePausedProxy() {
+        VpnConnectionPolicy.NetworkState unknown = new VpnConnectionPolicy.NetworkState(false, false, false, false);
+        assertTrue(VpnConnectionPolicy.shouldPauseNetwork(true, false, unknown, false, 4, true));
+        assertFalse(VpnConnectionPolicy.shouldPauseNetwork(true, false, unknown, false, 4, false));
+        assertTrue(VpnConnectionPolicy.shouldPauseNetwork(true, false, unknown, true, -1, false));
+        assertTrue(RuntimePolicy.retainHealthyCoreOnNetworkChange("network_available"));
+        assertTrue(RuntimePolicy.retainHealthyCoreOnNetworkChange("network_lost"));
+        assertFalse(RuntimePolicy.retainHealthyCoreOnNetworkChange("node_selected"));
+        assertFalse(RuntimePolicy.retainHealthyCoreOnNetworkChange("telegram_proxy_missing"));
+    }
+
     @Test public void respectsManualDisableAndClientPolicyBeforeAutoResume() {
         assertFalse(VpnConnectionPolicy.shouldPause(false, true, true, true));
         assertFalse(VpnConnectionPolicy.shouldPause(true, false, true, false));

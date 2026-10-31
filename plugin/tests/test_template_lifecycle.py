@@ -452,6 +452,14 @@ class TemplateLifecycleTest(unittest.TestCase):
                 self.assertEqual("tcp", plugin.settings["ping_type"])
                 self.assertNotIn("core_policy", plugin._settings_dict())
 
+    def test_icmp_selection_survives_loader_normalization(self):
+        plugin_type, *_ = load_plugin_class()
+        plugin = plugin_type()
+        plugin.settings["ping_type"] = "icmp"
+        plugin._normalize_runtime_setting_storage()
+        self.assertEqual("icmp", plugin.settings["ping_type"])
+        self.assertEqual("icmp", plugin._settings_dict()["ping_type"])
+
     def test_load_clears_obsolete_transient_settings_only(self):
         plugin_type, _runtime, *_ = load_plugin_class()
         plugin = plugin_type()

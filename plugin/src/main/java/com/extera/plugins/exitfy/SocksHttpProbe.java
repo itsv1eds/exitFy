@@ -18,6 +18,7 @@ import javax.net.ssl.SSLSocketFactory;
 
 final class SocksHttpProbe implements Closeable {
     static final String TARGET_HOST = "www.gstatic.com";
+    static final String FALLBACK_HOST = "cp.cloudflare.com";
     static final int TARGET_PORT = 443;
     static final String TARGET_PATH = "/generate_204";
     static final int MAX_RESPONSE_BYTES = 16 * 1024;
@@ -46,8 +47,19 @@ final class SocksHttpProbe implements Closeable {
 
     Result probe(int socksPort, String username, String password,
                  long timeoutMillis, Session expectedSession) {
+        long budget = Math.max(1L, timeoutMillis);
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budget);
+        Result first = probeHost(socksPort, username, password, TARGET_HOST,
+                Math.min(deadline, System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(
+                        Math.max(1L, Math.min(3_000L, budget * 2 / 3)))), expectedSession);
+        if (first.ok || "cancelled".equals(first.status)
+                || !isSessionCurrent(expectedSession) || System.nanoTime() >= deadline) return first;
+        return probeHost(socksPort, username, password, FALLBACK_HOST, deadline, expectedSession);
+    }
+
+    private Result probeHost(int socksPort, String username, String password,
+                             String host, long deadline, Session expectedSession) {
         long started = System.nanoTime();
-        long deadline = started + TimeUnit.MILLISECONDS.toNanos(Math.max(1L, timeoutMillis));
         Socket raw = new Socket();
         if (!register(raw, expectedSession)) {
             closeQuietly(raw);
@@ -59,10 +71,10 @@ final class SocksHttpProbe implements Closeable {
             InputStream input = raw.getInputStream();
             OutputStream output = raw.getOutputStream();
             negotiate(raw, input, output, username, password, deadline);
-            connectRemoteDns(raw, input, output, TARGET_HOST, TARGET_PORT, deadline);
+            connectRemoteDns(raw, input, output, host, TARGET_PORT, deadline);
 
             SSLSocket tls = (SSLSocket) ((SSLSocketFactory) SSLSocketFactory.getDefault())
-                    .createSocket(raw, TARGET_HOST, TARGET_PORT, true);
+                    .createSocket(raw, host, TARGET_PORT, true);
             if (!replace(raw, tls, expectedSession)) {
                 closeQuietly(tls);
                 throw new IllegalStateException("probe session cancelled");
@@ -76,7 +88,7 @@ final class SocksHttpProbe implements Closeable {
 
             output = tls.getOutputStream();
             output.write(("GET " + TARGET_PATH + " HTTP/1.1\r\n"
-                    + "Host: " + TARGET_HOST + "\r\n"
+                    + "Host: " + host + "\r\n"
                     + "User-Agent: exitFy/4.0\r\n"
                     + "Accept: */*\r\nConnection: close\r\n\r\n")
                     .getBytes(StandardCharsets.US_ASCII));

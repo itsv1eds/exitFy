@@ -42,7 +42,8 @@ public class SocksHttpProbeTest {
             SocksHttpProbe.Result result = probe.probe(
                     server.port(), "", "", 3000L, session);
             server.await();
-            assertEquals(SocksHttpProbe.TARGET_HOST, server.requestedHost.get());
+            assertEquals(java.util.Arrays.asList(SocksHttpProbe.TARGET_HOST,
+                    SocksHttpProbe.FALLBACK_HOST), server.requestedHosts);
             assertTrue(!result.ok);
             assertTrue("tls_failed".equals(result.status)
                     || "proxy_get_failed".equals(result.status));
@@ -76,7 +77,7 @@ public class SocksHttpProbeTest {
     }
 
     private static final class PartialSocksServer implements Closeable {
-        final AtomicReference<String> requestedHost = new AtomicReference<>("");
+        final java.util.List<String> requestedHosts = new java.util.concurrent.CopyOnWriteArrayList<>();
         private final AtomicReference<Throwable> failure = new AtomicReference<>();
         private final ServerSocket listener;
         private final Thread worker;
@@ -100,6 +101,10 @@ public class SocksHttpProbeTest {
         }
 
         private void serve() {
+            for (int attempt = 0; attempt < 2; attempt++) serveOne();
+        }
+
+        private void serveOne() {
             try (Socket socket = listener.accept()) {
                 socket.setSoTimeout(2000);
                 InputStream input = socket.getInputStream();
@@ -112,7 +117,7 @@ public class SocksHttpProbeTest {
                     throw new AssertionError("SOCKS domain request expected");
                 }
                 int length = header[4] & 255;
-                requestedHost.set(new String(readExact(input, length), StandardCharsets.US_ASCII));
+                requestedHosts.add(new String(readExact(input, length), StandardCharsets.US_ASCII));
                 readExact(input, 2);
                 writePartial(output, new byte[]{5, 0, 0, 1, 127, 0, 0, 1, 0, 0});
 

@@ -9,6 +9,12 @@ final class ChineseStrings {
     private static final Map<String, String> VALUES;
     static {
         Map<String, String> values = new LinkedHashMap<>();
+        values.put("ICMP check started", "已开始 ICMP 检测");
+        values.put("ICMP is blocked by the system", "系统不允许 ICMP 检测");
+        values.put("No ICMP response", "未收到 ICMP 响应");
+        values.put("ICMP: DNS lookup failed", "ICMP：DNS 解析失败");
+        values.put("Client restart required", "需要重启客户端");
+        values.put("TCP checks a port, ICMP a host, Proxy GET the connection through the server", "TCP 检测端口，ICMP 检测主机，Proxy GET 检测经服务器的连接");
         values.put(" h", " 小时");
         values.put(" min", " 分钟");
         values.put(" of ", " / ");

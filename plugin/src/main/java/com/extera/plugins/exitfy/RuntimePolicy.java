@@ -63,6 +63,10 @@ final class RuntimePolicy {
         return nativeQuarantined;
     }
 
+    static boolean retainHealthyCoreOnNetworkChange(String reason) {
+        return "network_available".equals(reason) || "network_lost".equals(reason);
+    }
+
     static boolean shouldReconnectAfterCoreInstall(boolean runtimeLoaded,
                                                    boolean settingsEnabled,
                                                    CoreFamily loadedFamily,
@@ -179,6 +183,14 @@ final class RuntimePolicy {
         return remainingMillis >= PROXY_PROBE_BATCH_BUDGET_MS;
     }
 
+    static String proxyProbeReadiness(boolean mapped, boolean canMap,
+                                      boolean installed, boolean awg,
+                                      boolean mappedAwg) {
+        if (mapped) return awg && !mappedAwg ? "restart_required" : "";
+        if (!canMap) return "restart_required";
+        return installed ? "" : "core_missing";
+    }
+
     static boolean shouldClearProbeResumeGuard(boolean runtimeLoaded,
                                                boolean runtimeEnabled,
                                                boolean guardedRestartSucceeded) {
@@ -193,7 +205,7 @@ final class RuntimePolicy {
     }
 
     static boolean interruptPingOnCancel(String kind) {
-        return "TCP".equals(kind) || "HEALTH".equals(kind);
+        return "TCP".equals(kind) || "ICMP".equals(kind) || "HEALTH".equals(kind);
     }
 
     static boolean shouldDisableAfterProbePauseFailure(boolean externalProxyChanged) {
@@ -209,7 +221,7 @@ final class RuntimePolicy {
 
     static boolean replacementNeedsGuardedRestore(String nextKind,
                                                   boolean proxyRestoreContext) {
-        return "TCP".equals(nextKind) && proxyRestoreContext;
+        return ("TCP".equals(nextKind) || "ICMP".equals(nextKind)) && proxyRestoreContext;
     }
 }
 

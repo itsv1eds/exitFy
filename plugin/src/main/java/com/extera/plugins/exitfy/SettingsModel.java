@@ -11,6 +11,7 @@ final class SettingsModel {
     private static final int MAX_HWID_UTF8_BYTES = 1_024;
     static final String PING_PROXY_GET = "proxy_get";
     static final String PING_TCP = "tcp";
+    static final String PING_ICMP = "icmp";
     static final String DEFAULT_SUBSCRIPTION_USER_AGENT = "Happ/5.2.0";
 
     final boolean enabled;
@@ -187,7 +188,7 @@ final class SettingsModel {
                         callsViaProxy, subscriptionUserAgent);
             case "ping_type":
                 if (!(value instanceof String)
-                        || !(PING_PROXY_GET.equals(value) || PING_TCP.equals(value))) {
+                        || !(PING_PROXY_GET.equals(value) || PING_TCP.equals(value) || PING_ICMP.equals(value))) {
                     throw new IllegalArgumentException("invalid ping_type");
                 }
                 return copy(enabled, providerId, customHwid, (String) value,
@@ -328,7 +329,7 @@ final class SettingsModel {
     // TCP is the default: it measures without taking Telegram's proxy away,
     // so it works while connected and when another app owns that setting.
     private static String normalizePingType(String value) {
-        return PING_PROXY_GET.equals(value) ? PING_PROXY_GET : PING_TCP;
+        return PING_PROXY_GET.equals(value) ? PING_PROXY_GET : PING_ICMP.equals(value) ? PING_ICMP : PING_TCP;
     }
 
     static String normalizeCustomHwid(String value) {

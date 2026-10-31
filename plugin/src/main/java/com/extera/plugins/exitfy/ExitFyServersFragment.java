@@ -1169,8 +1169,12 @@ final class ExitFyServersFragment
                     "Telegram proxy is in use");
         }
         if ("restart_required".equals(node.pingStatus)) {
-            return I18n.t("Недоступен", "Unavailable");
+            return I18n.t("Нужен перезапуск клиента", "Client restart required");
         }
+        if ("core_missing".equals(node.pingStatus)) return I18n.t("Установите компоненты", "Install components");
+        if ("icmp_unavailable".equals(node.pingStatus)) return I18n.t("ICMP запрещён системой", "ICMP is blocked by the system");
+        if ("icmp_timeout".equals(node.pingStatus) || "icmp_failed".equals(node.pingStatus)) return I18n.t("Нет ответа ICMP", "No ICMP response");
+        if ("icmp_dns_failed".equals(node.pingStatus)) return I18n.t("ICMP: ошибка DNS", "ICMP: DNS lookup failed");
         if ("connect_required".equals(node.pingStatus)) {
             return I18n.t(
                     "Сначала подключитесь",

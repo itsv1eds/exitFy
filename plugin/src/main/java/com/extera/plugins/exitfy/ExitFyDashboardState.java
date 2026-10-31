@@ -68,10 +68,9 @@ final class ExitFyDashboardState {
         serverCount = Math.max(0, value.optInt("serverCount", 0));
         customUrlCount = Math.max(0, value.optInt("customUrlCount", 0));
         restartRequired = value.optBoolean("restartRequired", false);
-        pingType = SettingsModel.PING_PROXY_GET.equals(safeToken(
-                value.optString("pingType", SettingsModel.PING_TCP),
-                SettingsModel.PING_TCP))
-                ? SettingsModel.PING_PROXY_GET : SettingsModel.PING_TCP;
+        String requestedPingType = safeToken(value.optString("pingType", SettingsModel.PING_TCP), SettingsModel.PING_TCP);
+        pingType = SettingsModel.PING_PROXY_GET.equals(requestedPingType) ? SettingsModel.PING_PROXY_GET
+                : SettingsModel.PING_ICMP.equals(requestedPingType) ? SettingsModel.PING_ICMP : SettingsModel.PING_TCP;
         balanceMode = value.optString("balanceMode", "off");
         sortByPing = value.optBoolean("sortByPing", false);
         tutorialStep = Math.max(0, Math.min(16, value.optInt("tutorialStep", 0)));
@@ -230,8 +229,12 @@ final class ExitFyDashboardState {
             return I18n.t("Проверяется…", "Checking…");
         }
         if ("restart_required".equals(activePingStatus)) {
-            return I18n.t("Недоступен", "Unavailable");
+            return I18n.t("Нужен перезапуск клиента", "Client restart required");
         }
+        if ("core_missing".equals(activePingStatus)) return I18n.t("Установите компоненты", "Install components");
+        if ("icmp_unavailable".equals(activePingStatus)) return I18n.t("ICMP запрещён системой", "ICMP is blocked by the system");
+        if ("icmp_timeout".equals(activePingStatus) || "icmp_failed".equals(activePingStatus)) return I18n.t("Нет ответа ICMP", "No ICMP response");
+        if ("icmp_dns_failed".equals(activePingStatus)) return I18n.t("ICMP: ошибка DNS", "ICMP: DNS lookup failed");
         if ("connect_required".equals(activePingStatus)) {
             return I18n.t(
                     "Сначала подключитесь",

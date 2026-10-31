@@ -15,6 +15,7 @@ final class ExitFyPreferencesFragment
     private static final String[] PING_VALUES = {
             SettingsModel.PING_TCP,
             SettingsModel.PING_PROXY_GET,
+            SettingsModel.PING_ICMP,
     };
 
     private ExitFyDashboardState state = ExitFyDashboardState.EMPTY;
@@ -124,7 +125,9 @@ final class ExitFyPreferencesFragment
         sectionHeading(context, content, I18n.t("Проверка задержки", "Latency checks"));
 
         pingTypeRow = settingRow(context, R.drawable.msg_speed,
-                I18n.t("Тип пинга", "Ping type"), "");
+                I18n.t("Тип пинга", "Ping type"),
+                I18n.t("TCP — порт, ICMP — узел, Proxy GET — подключение через сервер",
+                        "TCP checks a port, ICMP a host, Proxy GET the connection through the server"));
         setSafeClick(pingTypeRow.view, this::showPingTypeDialog);
         content.addView(pingTypeRow.view, sectionParams());
 
@@ -272,6 +275,7 @@ final class ExitFyPreferencesFragment
         CharSequence[] labels = {
                 "TCP",
                 "Proxy GET",
+                "ICMP",
         };
         showChoiceDialog(I18n.t("Тип пинга", "Ping type"),
                 labels, pingTypeIndex(state.pingType), index -> {
@@ -521,12 +525,12 @@ final class ExitFyPreferencesFragment
     }
 
     private static int pingTypeIndex(String value) {
-        return SettingsModel.PING_PROXY_GET.equals(value) ? 1 : 0;
+        return SettingsModel.PING_PROXY_GET.equals(value) ? 1 : SettingsModel.PING_ICMP.equals(value) ? 2 : 0;
     }
 
     private static String pingTypeLabel(String value) {
         return SettingsModel.PING_PROXY_GET.equals(value)
                 ? "Proxy GET"
-                : "TCP";
+                : SettingsModel.PING_ICMP.equals(value) ? "ICMP" : "TCP";
     }
 }

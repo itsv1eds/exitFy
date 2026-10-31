@@ -374,8 +374,8 @@ public class ExitFyDashboardStateTest {
                         .put("key", "node")
                         .put("pingStatus", "restart_required"))
                 .toString());
-        assertTrue(restart.activePingSummary().toLowerCase().contains("unavailable")
-                || restart.activePingSummary().toLowerCase().contains("недоступ"));
+        assertTrue(restart.activePingSummary().toLowerCase().contains("restart")
+                || restart.activePingSummary().toLowerCase().contains("перезапуск"));
 
         ExitFyDashboardState quic = ExitFyDashboardState.parse(new JSONObject()
                 .put("activeNodeInfo", new JSONObject()
