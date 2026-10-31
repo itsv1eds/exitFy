@@ -154,7 +154,16 @@ latency or check status and updates while the dialog stays open.
 
 TCP is the default latency check and the first option offered: it measures
 without borrowing Telegram's proxy, so it works while connected. Proxy GET
-remains for the full-path measurement.
+remains for the full-path measurement. Manual ICMP uses Android ping datagram
+sockets without root or a shell process, with IPv4/IPv6, bounded DNS and a
+shared per-host deadline. It measures host reachability, not a VPN handshake;
+system restrictions and unanswered echoes have explicit statuses. TCP skips
+UDP-only protocols instead of treating a TCP port as their health check.
+Proxy GET tries a second HTTPS 204 endpoint if the first fails, sharing one
+absolute timeout and retaining certificate/hostname validation and remote DNS.
+With dual-core enabled it can map an installed second family; it does not
+download components during a check. An older mapped AWG binary still needs a
+client restart after its replacement has been installed.
 Each failed worker reports its own result without cancelling its siblings.
 Deadline expiry, a busy worker pool and Proxy GET without an active connection
 have specific statuses. Only explicit cancellation/replacement reports a
@@ -359,6 +368,11 @@ signed SB component in userspace and carries Telegram traffic without a system
 VPN, root, another plugin or a relay service. Oversized handshake parameters
 are rejected before a background native goroutine can allocate them. Keys and
 obfuscation material stay in private storage and are redacted from errors.
+Long AllowedIPs lists and I1–I5 strings share the 64 KiB configuration bound;
+ordinary scalar parameters retain the 2048-character limit. Long signature
+packets require a signed SB wrapper revision at least 1010000. A separate
+verified-digest capability marker prevents older AWG-capable builds from being
+mistaken for builds supporting the larger input.
 
 The plugin remembers its own preferred SOCKS port, checks whether it is free,
 and excludes ports belonging to stored/current foreign loopback proxies.

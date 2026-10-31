@@ -178,6 +178,22 @@ Device testing is performed by the beta tester after receiving
   TLS/hostname validation, require HTTP 204 and restore the prior connection
   after success, timeout and cancellation. All user-facing wording must describe
   the connection path or check method without naming a core.
+- Select ICMP, reopen settings and restart the client: the selection must persist.
+  Check IPv4/IPv6 hosts, UDP-only nodes, a host ignoring echo requests and a
+  device that denies ping sockets. Cancel and immediately start another check;
+  every old pending row must settle and no old result may overwrite the new one.
+- With dual-core enabled, run Proxy GET on mixed nodes when only one family is
+  mapped but both are installed. The second family must be usable without a
+  restart. Test a blocked first HTTPS endpoint and a working fallback; the total
+  attempt must retain its original timeout and validate TLS/HTTP 204.
+- Toggle client proxy-disable conditions for Wi-Fi, mobile data and VPN. Switch
+  networks repeatedly: exitFy must pause/resume its exact proxy without saving
+  enabled=false. A manually chosen foreign proxy must remain untouched. Confirm
+  a healthy core is retained during a handover; collect a native backtrace if
+  safe mode recurs (a safe-mode flag alone cannot identify the native fault).
+- Import AWG with I1 longer than 2048 characters and a long AllowedIPs list.
+  Verify import, storage round trip and real traffic after installing the new
+  signed SB component. An older already-mapped AWG core must request a restart.
 - Start a second check while the first runs and toggle the connection during a check.
   Only the newest generation may publish results. A node unavailable in the
   current process must use neutral wording; TCP failure for a QUIC-only node is
