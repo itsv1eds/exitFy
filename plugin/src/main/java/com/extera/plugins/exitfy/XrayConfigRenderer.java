@@ -220,6 +220,7 @@ final class XrayConfigRenderer {
                 target.put("publicKey", require(reality, "public_key"));
                 putIfNotEmpty(target, "shortId", reality.optString("short_id", ""));
                 putIfNotEmpty(target, "spiderX", reality.optString("spider_x", ""));
+                putIfNotEmpty(target, "mldsa65Verify", reality.optString("mldsa65_verify", ""));
                 stream.put("realitySettings", target);
             } else {
                 stream.put("tlsSettings", target);

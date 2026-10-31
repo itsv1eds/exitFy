@@ -67,7 +67,7 @@ final class ProtocolParser {
             "security", "sni", "peer", "insecure", "allowInsecure", "allow_insecure",
             "alpn", "fp", "pbk", "sid", "spx", "type", "path", "host", "headers",
             "ed", "eh", "earlyDataHeaderName", "early_data_header_name", "serviceName",
-            "mode", "extra", "headerType", "header_type", "header", "seed", "mtu",
+            "mode", "extra", "x_padding_bytes", "xPaddingBytes", "pqv", "headerType", "header_type", "header", "seed", "mtu",
             "tti", "uplinkCapacity", "uplink_capacity", "downlinkCapacity",
             "downlink_capacity", "cwndMultiplier", "cwnd_multiplier", "maxSendingWindow",
             "max_sending_window"
@@ -508,7 +508,12 @@ final class ProtocolParser {
 
     private static JSONObject parseVless(Parsed parsed) throws Exception {
         rejectUnknownStreamParams(parsed.params, "VLESS", "encryption", "packetEncoding",
-                "packet_encoding", "flow");
+                "packet_encoding", "flow", "support-x25519mlkem768");
+        String hybridHint = value(parsed.params, "support-x25519mlkem768", "");
+        if (!hybridHint.isEmpty() && !hybridHint.equalsIgnoreCase("true")
+                && !hybridHint.equalsIgnoreCase("false") && !hybridHint.equals("1") && !hybridHint.equals("0")) {
+            throw new IllegalArgumentException("invalid Reality capability hint");
+        }
         requireOpaque(parsed.user, "VLESS UUID");
         String encryption = value(parsed.params, "encryption", "none").trim();
         if (encryption.isEmpty() || utf8Exceeds(encryption, MAX_URI_BYTES)
@@ -893,7 +898,7 @@ final class ProtocolParser {
                         "unsupported forced TLS security: " + security);
             }
         } else if (disabled) {
-            if (containsAny(params, "sni", "peer", "fp", "alpn", "pbk", "sid", "spx",
+            if (containsAny(params, "sni", "peer", "fp", "alpn", "pbk", "sid", "spx", "pqv",
                     "insecure", "allowInsecure", "allow_insecure")) {
                 throw new IllegalArgumentException("TLS parameters require security=tls/reality");
             }
@@ -901,7 +906,7 @@ final class ProtocolParser {
         } else if (!security.equals("tls") && !security.equals("reality")) {
             throw new IllegalArgumentException("unsupported transport security: " + security);
         }
-        if (!security.equals("reality") && containsAny(params, "pbk", "sid", "spx")) {
+        if (!security.equals("reality") && containsAny(params, "pbk", "sid", "spx", "pqv")) {
             throw new IllegalArgumentException("Reality parameters require security=reality");
         }
         rejectAliasConflict(params, "TLS SNI", "sni", "peer");
@@ -932,6 +937,8 @@ final class ProtocolParser {
                     .put("short_id", value(params, "sid", ""));
             String spiderX = value(params, "spx", "");
             if (!spiderX.isEmpty()) reality.put("spider_x", spiderX);
+            String verify = value(params, "pqv", "");
+            if (!verify.isEmpty()) reality.put("mldsa65_verify", verify);
             tls.put("reality", reality);
             if (!tls.has("utls")) {
                 tls.put("utls", new JSONObject().put("enabled", true).put("fingerprint", "chrome"));
@@ -942,6 +949,10 @@ final class ProtocolParser {
 
     private static JSONObject transport(Map<String, String> params) throws Exception {
         String network = canonicalTransportType(value(params, "type", "tcp"));
+        if (!network.equals("xhttp") && !network.equals("splithttp")
+                && containsAny(params, "x_padding_bytes", "xPaddingBytes")) {
+            throw new IllegalArgumentException("XHTTP padding requires an XHTTP transport");
+        }
         String path = value(params, "path", "/");
         // TLS SNI and transport Host are separate functional fields. Never
         // synthesize a transport Host header from SNI.
@@ -1032,11 +1043,15 @@ final class ProtocolParser {
             }
             value.put("mode", mode);
             String extra = value(params, "extra", "");
-            if (!empty(extra)) {
+            String padding = value(params, "x_padding_bytes", "");
+            String explicitPadding = value(params, "xPaddingBytes", "");
+            if (!empty(extra) || !empty(padding) || !empty(explicitPadding)) {
                 if (utf8Exceeds(extra, 64 * 1024)) {
                     throw new IllegalArgumentException("XHTTP extra exceeds 64 KiB");
                 }
-                JSONObject parsedExtra = JsonGuard.object(extra);
+                JSONObject parsedExtra = empty(extra) ? new JSONObject() : JsonGuard.object(extra);
+                if (!padding.isEmpty() && !parsedExtra.has("xPaddingBytes")) parsedExtra.put("xPaddingBytes", padding);
+                if (!explicitPadding.isEmpty()) parsedExtra.put("xPaddingBytes", explicitPadding);
                 validateXhttpExtra(parsedExtra);
                 if (mode.equals("stream-one") && parsedExtra.has("downloadSettings")) {
                     throw new IllegalArgumentException("XHTTP downloadSettings require a separate download mode");
@@ -2343,7 +2358,7 @@ final class ProtocolParser {
         if (tls.has("reality")) {
             JSONObject reality = neutralObject(tls, "reality", true);
             requireOnlyNeutralKeys(reality, "Reality", "enabled", "public_key",
-                    "short_id", "spider_x");
+                    "short_id", "spider_x", "mldsa65_verify");
             if (!neutralBoolean(reality, "enabled", true)) {
                 throw new IllegalArgumentException("neutral Reality must be enabled or omitted");
             }
@@ -2351,6 +2366,17 @@ final class ProtocolParser {
                     reality, "public_key", true, false, 1024);
             if (!validRealityPublicKey(publicKey)) {
                 throw new IllegalArgumentException("invalid Reality public key");
+            }
+            if (reality.has("mldsa65_verify")) {
+                String verify = neutralString(reality, "mldsa65_verify", true, false, 4096);
+                try {
+                    if (!verify.matches("[A-Za-z0-9_-]+")
+                            || Base64.getUrlDecoder().decode(verify).length != 1952) {
+                        throw new IllegalArgumentException("invalid Reality ML-DSA-65 verification key");
+                    }
+                } catch (IllegalArgumentException invalid) {
+                    throw new IllegalArgumentException("invalid Reality ML-DSA-65 verification key");
+                }
             }
             String shortId = neutralString(reality, "short_id", true, true, 256);
             if (!validRealityShortId(shortId)) {
@@ -3476,7 +3502,7 @@ final class ProtocolParser {
                 return !network.equals("xhttp") && !network.equals("mkcp")
                         && !(network.equals("httpupgrade") && transport != null
                         && transport.has("max_early_data"))
-                        && !spiderX
+                        && !spiderX && (reality == null || !reality.has("mldsa65_verify"))
                         && (!protocol.equals("vless")
                         || "none".equalsIgnoreCase(outbound.optString("encryption", "none")));
             }

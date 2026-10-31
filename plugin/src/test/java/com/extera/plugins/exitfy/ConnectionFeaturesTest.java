@@ -161,6 +161,23 @@ public class ConnectionFeaturesTest {
                 .getJSONObject(0).getString("persistent_keepalive_interval"));
     }
 
+    @Test public void awgKeepsLongSignaturePacketsAndAllowedIpLists() throws Exception {
+        String packet = "<b 0x" + String.join("", Collections.nCopies(1600, "ab")) + ">";
+        List<String> prefixes = new ArrayList<>();
+        for (int i = 0; i < 200; i++) {
+            prefixes.add(String.format("2001:db8:aaaa:bbbb:cccc:dddd:eeee:%04x/128", i));
+        }
+        String text = awg().replace("Jc = 3", "Jc = 3\nI1 = " + packet)
+                .replace("AllowedIPs = 0.0.0.0/0, ::/0", "AllowedIPs = " + String.join(", ", prefixes));
+        ProtocolParser.Node node = AwgConfigParser.parse(text);
+        assertEquals(packet, node.outbound.getJSONObject("awg").getString("i1"));
+        assertEquals(200, node.outbound.getJSONArray("peers").getJSONObject(0)
+                .getJSONArray("allowed_ips").length());
+        assertEquals(node.normalizedKey, ProtocolParser.fromStoredJson(node.toStoredJson()).normalizedKey);
+        assertEquals(1, SubscriptionParser.parseDetailed(text).nodes.size());
+        assertTrue(SubscriptionParser.parseDetailed(text.replace("Jc = 3", "PostUp = forbidden")).nodes.isEmpty());
+    }
+
     @Test public void ownedPortIsRememberedAndForeignOrBusyPortsAreSkipped() throws Exception {
         File root = Files.createTempDirectory("exitfy-port-ownership").toFile();
         try {

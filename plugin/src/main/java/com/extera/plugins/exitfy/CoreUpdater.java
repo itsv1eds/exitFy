@@ -42,7 +42,7 @@ class CoreUpdater {
     private static final int CORE_API = 2;
     private static final int CONFIG_CONTRACT = 1;
     private static final int MANIFEST_SCHEMA = 3;
-    private static final int AWG_WRAPPER_REVISION_FLOOR = 1_000_000;
+    private static final int AWG_WRAPPER_REVISION_FLOOR = 1_010_000;
     private static final int MIN_ANDROID_API = 29;
     private static final String ANDROID_ABI = "arm64-v8a";
     private static final String CORE_ORIGIN = "itsv1eds/exitFy";
@@ -1930,7 +1930,7 @@ class CoreUpdater {
 
     private void refreshReadinessSnapshot() {
         java.util.Set<String> capable = new java.util.HashSet<>();
-        JSONArray knownAwg = metadata.optJSONArray("awgDigests");
+        JSONArray knownAwg = metadata.optJSONArray("awgExtendedDigests");
         for (int i = 0; knownAwg != null && i < Math.min(knownAwg.length(), 8); i++) {
             String digest = knownAwg.optString(i, "");
             if (isDigest(digest)) capable.add(digest);
@@ -1965,7 +1965,7 @@ class CoreUpdater {
             String previous = metadata.optString(prefix + "Digest", "");
             if (supportsAwgDigest(previous) && seen.add(previous)) next.put(previous);
         }
-        metadata.put("awgDigests", next);
+        metadata.put("awgExtendedDigests", next);
     }
 
     private boolean metadataContract(String prefix) {

@@ -16,6 +16,41 @@ import static org.junit.Assert.fail;
 import static org.junit.Assert.assertTrue;
 
 public class ProtocolParserTest {
+    @Test public void acceptsThreeXUiRealityCapabilityAndXhttpPaddingAliases() throws Exception {
+        String key = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[32]);
+        String base = "vless://11111111-1111-1111-1111-111111111111@example.org:443"
+                + "?encryption=none&type=xhttp&security=reality&pbk=" + key
+                + "&sni=www.example.org&fp=chrome&sid=&path=%2F&mode=auto";
+        ProtocolParser.Node plain = ProtocolParser.parse(base);
+        ProtocolParser.Node advertised = ProtocolParser.parse(base + "&support-x25519mlkem768=true");
+        assertEquals(plain.normalizedKey, advertised.normalizedKey);
+        ProtocolParser.Node padded = ProtocolParser.parse(base + "&support-x25519mlkem768=true&x_padding_bytes=100-1000");
+        assertEquals("100-1000", padded.outbound.getJSONObject("transport").getJSONObject("extra").getString("xPaddingBytes"));
+        String extra = java.net.URLEncoder.encode("{\"xPaddingBytes\":\"20-40\"}", "UTF-8");
+        ProtocolParser.Node priority = ProtocolParser.parse(base + "&x_padding_bytes=100-1000&extra=" + extra + "&xPaddingBytes=30-50");
+        assertEquals("30-50", priority.outbound.getJSONObject("transport").getJSONObject("extra").getString("xPaddingBytes"));
+        assertEquals(priority.normalizedKey, ProtocolParser.fromStoredJson(priority.toStoredJson()).normalizedKey);
+        for (String suffix : new String[]{"&unknownFunction=1", "&support-x25519mlkem768=invalid"}) {
+            try { ProtocolParser.parse(base + suffix); fail("unknown or malformed parameter accepted"); }
+            catch (IllegalArgumentException expected) { }
+        }
+    }
+
+    @Test public void realityPostQuantumVerificationIsPreservedForXray() throws Exception {
+        String publicKey = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[32]);
+        String verify = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[1952]);
+        String base = "vless://11111111-1111-1111-1111-111111111111@example.org:443?security=reality&pbk=" + publicKey + "&pqv=";
+        ProtocolParser.Node node = ProtocolParser.parse(base + verify);
+        assertTrue(node.supports(CoreFamily.XRAY));
+        assertFalse(node.supports(CoreFamily.SING_BOX));
+        assertEquals(verify, XrayConfigRenderer.build(node, 23456, "u", "p")
+                .getJSONArray("outbounds").getJSONObject(0).getJSONObject("streamSettings")
+                .getJSONObject("realitySettings").getString("mldsa65Verify"));
+        assertEquals(node.normalizedKey, ProtocolParser.fromStoredJson(node.toStoredJson()).normalizedKey);
+        try { ProtocolParser.parse(base + publicKey); fail("invalid ML-DSA-65 key accepted"); }
+        catch (IllegalArgumentException expected) { }
+    }
+
     @Test
     public void nodeNameLimitNeverSplitsSupplementaryCharacters() throws Exception {
         String name = "a".repeat(119) + "🚀" + "tail";

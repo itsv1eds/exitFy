@@ -41,7 +41,7 @@ public class CoreUpdaterTest {
         generator.initialize(new java.security.spec.ECGenParameterSpec("secp256r1"));
         java.security.KeyPair pair = generator.generateKeyPair();
         String publicKey = java.util.Base64.getEncoder().encodeToString(pair.getPublic().getEncoded());
-        for (int revision : new int[]{999999, 1000001}) {
+        for (int revision : new int[]{999999, 1000001, 1010001}) {
             File root = Files.createTempDirectory("exitfy-awg-signed-revision").toFile();
             byte[] core = fakeCore((byte) 74);
             try (LimitedHttpClient http = new LimitedHttpClient();
@@ -57,8 +57,8 @@ public class CoreUpdaterTest {
                 updater.useManifestPublicKey(publicKey);
                 updater.requireAwgSupport(true);
                 assertTrue(updater.checkForUpdate(true));
-                assertEquals(revision >= 1000000, updater.hasUsableCore());
-                assertEquals(revision >= 1000000, updater.supportsAwgDigest(sha256(core)));
+                assertEquals(revision >= 1010000, updater.hasUsableCore());
+                assertEquals(revision >= 1010000, updater.supportsAwgDigest(sha256(core)));
                 updater.requireAwgSupport(false);
                 assertTrue(updater.hasUsableCore());
                 assertArrayEquals(core, Files.readAllBytes(updater.prepareForFirstLoad().toPath()));
@@ -85,6 +85,11 @@ public class CoreUpdaterTest {
             assertFalse(legacy.hasUsableCore()); assertTrue(legacy.requiresNewCore());
             legacy.requireAwgSupport(false); assertTrue(legacy.hasUsableCore());
             metadata.put("awgDigests", new JSONArray().put(sha256(core)));
+            store.writeJson("core/sing_box/core.json", metadata);
+            CoreUpdater limited = new CoreUpdater(store, http, "arm64-v8a", CoreFamily.SING_BOX);
+            limited.requireAwgSupport(true);
+            assertFalse(limited.hasUsableCore());
+            metadata.put("awgExtendedDigests", new JSONArray().put(sha256(core)));
             store.writeJson("core/sing_box/core.json", metadata);
             CoreUpdater updated = new CoreUpdater(store, http, "arm64-v8a", CoreFamily.SING_BOX);
             updated.requireAwgSupport(true);

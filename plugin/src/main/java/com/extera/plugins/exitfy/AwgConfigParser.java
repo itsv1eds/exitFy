@@ -86,7 +86,9 @@ final class AwgConfigParser {
             String value = line.substring(separator + 1).trim();
             int comment = value.indexOf(" #");
             if (comment >= 0) value = value.substring(0, comment).trim();
-            if (value.length() > 2048) throw invalid("длина параметра", "parameter length");
+            int valueLimit = key.equals("allowedips") || key.equals("address") || key.equals("dns")
+                    || key.matches("i[1-5]") ? MAX_CONFIG_CHARS : 2048;
+            if (value.length() > valueLimit) throw invalid("длина параметра", "parameter length");
             // Official exporters may leave optional entries blank. Keep required
             // keys strict and validate unknown directives below even when blank.
             boolean optional = section == iface
@@ -102,7 +104,7 @@ final class AwgConfigParser {
                         : key.equals("allowedips");
                 if (list) {
                     value = previous + ", " + value;
-                    if (value.length() > 2048) throw invalid("длина параметра", "parameter length");
+                    if (value.length() > valueLimit) throw invalid("длина параметра", "parameter length");
                 } else if (!previous.equals(value)) {
                     throw invalid("конфликт повторных параметров", "conflicting duplicate parameters");
                 }
@@ -185,7 +187,8 @@ final class AwgConfigParser {
             JSONObject awg = value.optJSONObject("awg");
             if (awg != null) for (Iterator<String> it=awg.keys(); it.hasNext();) {
                 String name = it.next(), parameter = awg.getString(name);
-                if (!isParameter(name) || parameter.isEmpty() || parameter.length()>2048
+                if (!isParameter(name) || parameter.isEmpty()
+                        || parameter.length() > (name.matches("i[1-5]") ? MAX_CONFIG_CHARS : 2048)
                         || parameter.indexOf('\n')>=0 || parameter.indexOf('\r')>=0
                         || parameter.indexOf('\0')>=0) throw new IllegalArgumentException();
                 if (name.equals("header_protection_key")) key(parameter);
